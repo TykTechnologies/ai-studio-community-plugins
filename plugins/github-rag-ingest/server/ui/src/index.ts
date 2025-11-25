@@ -1,4 +1,4 @@
-// Export all components
-export { GitHubRAGDashboard } from './components/dashboard';
-export { GitHubRAGRepositoryList } from './components/repository-list';
-export { GitHubRAGJobList } from './components/job-list';
+// Import and register all components
+import './components/dashboard';
+import './components/repository-list';
+import './components/job-list';

@@ -13,7 +13,7 @@ const buildOptions = {
   entryPoints: ['src/index.ts'],
   bundle: true,
   outfile: 'dist/bundle.js',
-  format: 'esm',
+  format: 'iife',  // Changed from 'esm' to 'iife' for inline script execution
   target: 'es2020',
   minify: !isWatch,
   sourcemap: isWatch,
