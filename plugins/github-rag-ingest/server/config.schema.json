@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "GitHub RAG Ingestion Plugin Configuration",
+  "description": "Configuration for secrets backend and cache management",
+  "properties": {
+    "secrets_backend": {
+      "type": "string",
+      "title": "Secrets Backend",
+      "description": "Where to store repository authentication secrets",
+      "enum": ["kv", "vault"],
+      "default": "kv"
+    },
+    "vault_address": {
+      "type": "string",
+      "title": "Vault Address",
+      "description": "HashiCorp Vault server address (e.g., https://vault.example.com:8200)",
+      "format": "uri"
+    },
+    "vault_token": {
+      "type": "string",
+      "title": "Vault Token",
+      "description": "Authentication token for Vault access"
+    },
+    "vault_mount_path": {
+      "type": "string",
+      "title": "Vault Mount Path",
+      "description": "Mount path for secrets in Vault",
+      "default": "secret"
+    },
+    "vault_secret_path": {
+      "type": "string",
+      "title": "Vault Secret Path",
+      "description": "Base path for plugin secrets in Vault",
+      "default": "github-rag"
+    },
+    "cache_path": {
+      "type": "string",
+      "title": "Git Cache Path",
+      "description": "Directory for storing cloned repositories (uses temp dir if not specified)"
+    },
+    "cache_max_age_hours": {
+      "type": "integer",
+      "title": "Cache Max Age (hours)",
+      "description": "Maximum age of cached repositories before cleanup",
+      "default": 168,
+      "minimum": 1
+    }
+  },
+  "required": ["secrets_backend"],
+  "dependencies": {
+    "secrets_backend": {
+      "oneOf": [
+        {
+          "properties": {
+            "secrets_backend": {
+              "enum": ["kv"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "secrets_backend": {
+              "enum": ["vault"]
+            }
+          },
+          "required": ["vault_address", "vault_token"]
+        }
+      ]
+    }
+  }
+}

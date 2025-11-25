@@ -1,0 +1,80 @@
+{
+  "id": "com.tyk.github-rag-ingest",
+  "version": "1.0.0",
+  "name": "GitHub RAG Ingestion",
+  "description": "Ingest content from GitHub repositories into RAG datasources with support for incremental sync, multiple chunking strategies, and scheduled updates",
+  "capabilities": {
+    "hooks": ["studio_ui"],
+    "primary_hook": "studio_ui"
+  },
+  "permissions": {
+    "services": [
+      "kv.readwrite",
+      "datasources.read",
+      "datasources.write",
+      "datasources.embeddings",
+      "datasources.query",
+      "scheduler.manage"
+    ],
+    "ui": ["sidebar.register", "route.register"],
+    "rpc": ["call"]
+  },
+  "ui": {
+    "slots": [
+      {
+        "slot": "sidebar.section",
+        "label": "GitHub RAG",
+        "icon": "/assets/github-icon.svg",
+        "items": [
+          {
+            "type": "route",
+            "path": "/admin/github-rag",
+            "title": "Dashboard",
+            "mount": {
+              "kind": "webc",
+              "tag": "github-rag-dashboard",
+              "entry": "/ui/dist/bundle.js",
+              "props": {
+                "rpcBase": "/plugin/com.tyk.github-rag-ingest/rpc"
+              }
+            }
+          },
+          {
+            "type": "route",
+            "path": "/admin/github-rag/repositories",
+            "title": "Repositories",
+            "mount": {
+              "kind": "webc",
+              "tag": "github-rag-repository-list",
+              "entry": "/ui/dist/bundle.js",
+              "props": {
+                "rpcBase": "/plugin/com.tyk.github-rag-ingest/rpc"
+              }
+            }
+          },
+          {
+            "type": "route",
+            "path": "/admin/github-rag/jobs",
+            "title": "Jobs",
+            "mount": {
+              "kind": "webc",
+              "tag": "github-rag-job-list",
+              "entry": "/ui/dist/bundle.js",
+              "props": {
+                "rpcBase": "/plugin/com.tyk.github-rag-ingest/rpc"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "compat": {
+    "app": ">=2.6 <3.0",
+    "api": ["ui-v1", "rpc-v1", "kv-v1", "scheduler-v1"]
+  },
+  "security": {
+    "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  },
+  "assets": ["/ui/dist/bundle.js", "/assets/github-icon.svg"]
+}
