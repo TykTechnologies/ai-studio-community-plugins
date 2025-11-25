@@ -27,3 +27,4 @@ Thumbs.db
 
 
 plugins/github-rag-ingest/server/github-rag-ingest
+plugins/llm-firewall/llm-firewall

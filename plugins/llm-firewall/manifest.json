@@ -1,0 +1,14 @@
+{
+  "id": "com.tyk.llm-firewall",
+  "version": "1.0.0",
+  "name": "LLM Firewall",
+  "description": "Phrase-based prompt filtering for LLM requests with regex and model pattern support",
+  "capabilities": {
+    "hooks": ["pre_auth", "post_auth"],
+    "primary_hook": "pre_auth"
+  },
+  "permissions": {},
+  "compat": {
+    "min_gateway_version": "1.0.0"
+  }
+}

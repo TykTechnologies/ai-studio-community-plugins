@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "LLM Firewall Plugin Configuration",
+  "description": "Phrase-based prompt filtering for LLM requests with regex and model pattern support. Note: The hook phase (pre_auth or post_auth) is determined when registering the plugin with the microgateway, not in this configuration.",
+  "properties": {
+    "block_message": {
+      "type": "string",
+      "default": "Request blocked by content policy",
+      "title": "Block Message",
+      "description": "Error message returned to the client when a request is blocked"
+    },
+    "case_sensitive": {
+      "type": "boolean",
+      "default": false,
+      "title": "Case Sensitive",
+      "description": "Whether phrase matching is case-sensitive (applies to non-regex patterns)"
+    },
+    "rules": {
+      "type": "array",
+      "title": "Firewall Rules",
+      "description": "List of model-grouped firewall rules. Each rule applies to models matching the pattern.",
+      "items": {
+        "type": "object",
+        "required": ["model_pattern", "phrases"],
+        "properties": {
+          "model_pattern": {
+            "type": "string",
+            "title": "Model Pattern",
+            "description": "Glob pattern to match model names (e.g., 'claude-*', 'gpt-4*', '*' for all models)",
+            "examples": ["*", "claude-*", "gpt-4*", "gpt-4o-*"]
+          },
+          "phrases": {
+            "type": "array",
+            "title": "Blocked Phrases",
+            "description": "List of phrases or patterns to block",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["pattern"],
+              "properties": {
+                "pattern": {
+                  "type": "string",
+                  "title": "Pattern",
+                  "description": "Phrase or regex pattern to block",
+                  "minLength": 1
+                },
+                "is_regex": {
+                  "type": "boolean",
+                  "default": false,
+                  "title": "Is Regex",
+                  "description": "Whether the pattern is a regular expression"
+                },
+                "description": {
+                  "type": "string",
+                  "title": "Description",
+                  "description": "Optional description of why this phrase is blocked (for documentation/logging)"
+                }
+              }
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "title": "Enabled",
+            "description": "Whether this rule group is active"
+          }
+        }
+      }
+    }
+  }
+}
