@@ -1,5 +1,6 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import './repository-form';
 
 interface Repository {
   id: string;
@@ -20,6 +21,8 @@ export class GitHubRAGRepositoryList extends LitElement {
   @state() private repositories: Repository[] = [];
   @state() private loading = false;
   @state() private error = '';
+  @state() private showForm = false;
+  @state() private editingRepo: Repository | null = null;
 
   static styles = css`
     :host {
@@ -168,12 +171,63 @@ export class GitHubRAGRepositoryList extends LitElement {
   }
 
   private handleAddRepository() {
-    // TODO: Open form modal
-    alert('Add repository form will be implemented');
+    this.showForm = true;
+    this.editingRepo = null;
   }
 
-  private handleRunIngestion(repoId: string) {
-    alert(`Trigger ingestion for ${repoId}`);
+  private handleEditRepository(repo: Repository) {
+    this.showForm = true;
+    this.editingRepo = repo;
+  }
+
+  private async handleRunIngestion(repoId: string, type: string = 'incremental') {
+    try {
+      const result = await this.pluginAPI!.call('trigger_ingestion', {
+        repo_id: repoId,
+        type: type,
+        dry_run: false,
+      });
+
+      if (result.success) {
+        alert(`${type === 'full' ? 'Full' : 'Incremental'} ingestion started! Job ID: ${result.data.job_id}`);
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
+  private async handleDeleteRepository(repo: Repository) {
+    if (!confirm(`Delete repository "${repo.owner}/${repo.name}"? This will also delete all ingested chunks.`)) {
+      return;
+    }
+
+    try {
+      const result = await this.pluginAPI!.call('delete_repository', {
+        id: repo.id,
+        delete_chunks: true,
+      });
+
+      if (result.success) {
+        this.loadRepositories();
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
+  private handleFormSave(repo: any) {
+    this.showForm = false;
+    this.editingRepo = null;
+    this.loadRepositories();
+  }
+
+  private handleFormCancel() {
+    this.showForm = false;
+    this.editingRepo = null;
   }
 
   private formatDate(dateStr: string) {
@@ -182,6 +236,17 @@ export class GitHubRAGRepositoryList extends LitElement {
   }
 
   render() {
+    if (this.showForm) {
+      return html`
+        <github-rag-repository-form
+          .repository=${this.editingRepo}
+          .api=${this.pluginAPI}
+          .onSave=${this.handleFormSave.bind(this)}
+          .onCancel=${this.handleFormCancel.bind(this)}
+        ></github-rag-repository-form>
+      `;
+    }
+
     return html`
       <div class="header">
         <h2>Repositories</h2>
@@ -226,8 +291,17 @@ export class GitHubRAGRepositoryList extends LitElement {
                     <td>${this.formatDate(repo.last_sync_at)}</td>
                     <td>
                       <div class="actions">
-                        <button class="btn btn-sm btn-primary" @click=${() => this.handleRunIngestion(repo.id)}>
-                          Run Sync
+                        <button class="btn btn-sm btn-primary" @click=${() => this.handleRunIngestion(repo.id, 'incremental')} title="Sync only changed files">
+                          Sync
+                        </button>
+                        <button class="btn btn-sm btn-primary" @click=${() => this.handleRunIngestion(repo.id, 'full')} title="Re-process all files">
+                          Full Sync
+                        </button>
+                        <button class="btn btn-sm" @click=${() => this.handleEditRepository(repo)}>
+                          Edit
+                        </button>
+                        <button class="btn btn-sm" @click=${() => this.handleDeleteRepository(repo)}>
+                          Delete
                         </button>
                       </div>
                     </td>

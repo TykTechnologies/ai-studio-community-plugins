@@ -12,7 +12,6 @@ A comprehensive plugin for Tyk AI Studio that ingests content from GitHub reposi
   - Code-aware chunking using regex patterns (Go, Python, JS/TS)
   - Hybrid strategy that selects appropriate chunking based on file type
   - Markdown heading-aware chunking for documentation
-  - Note: Tree-sitter integration can be added for enhanced AST-based parsing
 - **Scheduled Ingestion**: Cron-based automatic sync with configurable schedules
 - **Job Tracking**: Detailed job history with statistics and logs
 - **Secrets Management**: Dual-mode (KV storage or HashiCorp Vault)
@@ -35,24 +34,6 @@ go build -o github-rag-ingest
    # Using file:// protocol for local development
    file:///path/to/github-rag-ingest
    ```
-
-## Development Status
-
-### ✅ All Features Complete
-- [x] Directory structure and Go module setup
-- [x] UIProvider, SchedulerPlugin, ConfigProvider capabilities
-- [x] Plugin manifest with UI slots (Dashboard, Repositories, Jobs)
-- [x] Complete RPC handler implementation (13 methods)
-- [x] Lit-based UI components with TypeScript
-- [x] Types package (Repository, Job, Chunk models)
-- [x] Storage layer (KV wrapper, repository/job/secret stores)
-- [x] Secrets backend (KV + HashiCorp Vault integration)
-- [x] Git integration (clone, fetch, diff, PAT/SSH auth)
-- [x] .gitignore/.ragignore parsing and matching
-- [x] Chunking engine with regex-based code awareness
-- [x] Ingestion pipeline with filtering and metadata
-- [x] Global and per-repository job listing
-- [x] Dashboard with real statistics loading
 
 ## Architecture
 

@@ -15,6 +15,13 @@ type Chunk struct {
 
 // ChunkMetadata builds metadata for a chunk
 type ChunkMetadata struct {
+	// AI Studio standard fields
+	Content            string    // Full chunk content (for "text" field)
+	Title              string    // Chunk title (extracted or filename)
+	CharStart          int       // Character offset start
+	CharEnd            int       // Character offset end
+
+	// GitHub-specific fields
 	Source             string
 	RepoID             string
 	RepoName           string
@@ -37,6 +44,15 @@ type ChunkMetadata struct {
 // ToMap converts ChunkMetadata to a map for storage
 func (cm *ChunkMetadata) ToMap() map[string]string {
 	return map[string]string{
+		// AI Studio chat-compatible fields
+		"filename":             cm.FileName,                              // Chat compatibility alias
+		"file_name":            cm.FileName,                              // Keep for compatibility
+		"title":                cm.Title,                                 // Chunk/file title
+		"text":                 cm.Content,                               // Full chunk text
+		"start":                fmt.Sprintf("%d", cm.CharStart),          // Character offset
+		"end":                  fmt.Sprintf("%d", cm.CharEnd),            // Character offset
+
+		// GitHub-specific fields
 		"source":               cm.Source,
 		"repo_id":              cm.RepoID,
 		"repo_name":            cm.RepoName,
@@ -45,12 +61,11 @@ func (cm *ChunkMetadata) ToMap() map[string]string {
 		"branch":               cm.Branch,
 		"commit_sha":           cm.CommitSHA,
 		"file_path":            cm.FilePath,
-		"file_name":            cm.FileName,
 		"file_type":            cm.FileType,
-		"chunk_index":          string(rune(cm.ChunkIndex)),
-		"total_chunks":         string(rune(cm.TotalChunks)),
-		"line_start":           string(rune(cm.LineStart)),
-		"line_end":             string(rune(cm.LineEnd)),
+		"chunk_index":          fmt.Sprintf("%d", cm.ChunkIndex),
+		"total_chunks":         fmt.Sprintf("%d", cm.TotalChunks),
+		"line_start":           fmt.Sprintf("%d", cm.LineStart),
+		"line_end":             fmt.Sprintf("%d", cm.LineEnd),
 		"github_url":           cm.GitHubURL,
 		"ingestion_timestamp": cm.IngestionTimestamp.Format(time.RFC3339),
 		"namespace":            cm.Namespace,

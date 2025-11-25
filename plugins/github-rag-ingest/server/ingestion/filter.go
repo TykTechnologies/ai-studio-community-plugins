@@ -79,7 +79,13 @@ func (f *FileFilter) ShouldInclude(filePath string, content []byte) (bool, strin
 	if len(f.repo.FileMasks) > 0 {
 		matched := false
 		for _, mask := range f.repo.FileMasks {
-			if ok, _ := doublestar.Match(mask, filePath); ok {
+			// Auto-expand simple extension patterns (*.ext -> **/*.ext)
+			expandedMask := mask
+			if strings.HasPrefix(mask, "*.") && !strings.Contains(mask, "/") {
+				expandedMask = "**/" + mask
+			}
+
+			if ok, _ := doublestar.Match(expandedMask, filePath); ok {
 				matched = true
 				break
 			}

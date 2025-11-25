@@ -79,6 +79,24 @@ export class GitHubRAGJobList extends LitElement {
       padding: 64px 24px;
       color: #666;
     }
+
+    .btn {
+      padding: 4px 12px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      background: white;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .btn:hover {
+      background: #f5f5f5;
+    }
+
+    .btn-sm {
+      padding: 4px 12px;
+      font-size: 12px;
+    }
   `;
 
   connectedCallback() {
@@ -117,7 +135,29 @@ export class GitHubRAGJobList extends LitElement {
     return new Date(dateStr).toLocaleString();
   }
 
+  private handleViewJob(jobId: string) {
+    console.log('View job clicked:', jobId);
+    this.selectedJobId = jobId;
+    this.requestUpdate(); // Force re-render
+  }
+
+  private handleBackToList() {
+    console.log('Back to list clicked');
+    this.selectedJobId = null;
+    this.loadJobs();
+  }
+
   render() {
+    if (this.selectedJobId) {
+      return html`
+        <github-rag-job-detail
+          .jobId=${this.selectedJobId}
+          .api=${this.pluginAPI}
+          .onBack=${this.handleBackToList.bind(this)}
+        ></github-rag-job-detail>
+      `;
+    }
+
     return html`
       <h2>Ingestion Jobs</h2>
 
@@ -137,6 +177,7 @@ export class GitHubRAGJobList extends LitElement {
                   <th>Files</th>
                   <th>Chunks</th>
                   <th>Started</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,6 +189,11 @@ export class GitHubRAGJobList extends LitElement {
                     <td>${job.stats.files_scanned}</td>
                     <td>${job.stats.chunks_written}</td>
                     <td>${this.formatDate(job.started_at)}</td>
+                    <td>
+                      <button class="btn btn-sm" @click=${() => this.handleViewJob(job.id)}>
+                        View Logs
+                      </button>
+                    </td>
                   </tr>
                 `)}
               </tbody>

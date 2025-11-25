@@ -55,10 +55,11 @@ func (fp *FileProcessor) ProcessFile(ctx context.Context, gitRepo *gogit.Reposit
 		return nil, fmt.Errorf("failed to chunk file: %w", err)
 	}
 
-	// Build metadata for each chunk
+	// Build metadata for each chunk (pass file content for char offset calculation)
+	fileContentStr := string(content)
 	processedChunks := make([]*ProcessedChunk, len(chunks))
 	for i, chunk := range chunks {
-		metadata := fp.metadataBuilder.BuildForChunk(filePath, &chunk, i, len(chunks))
+		metadata := fp.metadataBuilder.BuildForChunk(filePath, &chunk, i, len(chunks), fileContentStr)
 		processedChunks[i] = &ProcessedChunk{
 			Content:  chunk.Content,
 			Metadata: metadata,

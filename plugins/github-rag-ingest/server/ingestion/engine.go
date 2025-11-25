@@ -157,6 +157,9 @@ func (e *Engine) processFiles(ctx context.Context, job *types.Job, repo *types.R
 			continue
 		}
 
+		// Log if file produced chunks
+		e.logJob(ctx, job, types.LogLevelDebug, "Processing file", fmt.Sprintf("%s: %d chunks", filePath, len(chunks)))
+
 		// Convert to proto format
 		for _, chunk := range chunks {
 			allDocuments = append(allDocuments, &mgmtpb.DocumentChunk{
@@ -170,10 +173,13 @@ func (e *Engine) processFiles(ctx context.Context, job *types.Job, repo *types.R
 		// Process batch if we've accumulated enough
 		if len(allDocuments) >= batchSize || i == len(files)-1 {
 			if len(allDocuments) > 0 {
+				e.logJob(ctx, job, types.LogLevelInfo, "Storing batch", fmt.Sprintf("%d chunks to datasource %d", len(allDocuments), repo.DatasourceID))
 				err := e.storeBatch(ctx, job, repo, allDocuments)
 				if err != nil {
+					e.logJob(ctx, job, types.LogLevelError, "Batch storage failed", fmt.Sprintf("%v", err))
 					return fmt.Errorf("failed to store batch: %w", err)
 				}
+				e.logJob(ctx, job, types.LogLevelInfo, "Batch stored", fmt.Sprintf("%d chunks written successfully", len(allDocuments)))
 				job.Stats.ChunksWritten += len(allDocuments)
 				allDocuments = allDocuments[:0] // Clear batch
 			}
@@ -181,7 +187,7 @@ func (e *Engine) processFiles(ctx context.Context, job *types.Job, repo *types.R
 
 		// Log progress every 10 files
 		if (i+1)%10 == 0 {
-			e.logJob(ctx, job, types.LogLevelInfo, "Progress", fmt.Sprintf("Processed %d/%d files", i+1, len(files)))
+			e.logJob(ctx, job, types.LogLevelInfo, "Progress", fmt.Sprintf("Processed %d/%d files, %d chunks accumulated", i+1, len(files), job.Stats.ChunksWritten))
 		}
 	}
 
@@ -190,16 +196,33 @@ func (e *Engine) processFiles(ctx context.Context, job *types.Job, repo *types.R
 
 // storeBatch stores a batch of document chunks
 func (e *Engine) storeBatch(ctx context.Context, job *types.Job, repo *types.Repository, documents []*mgmtpb.DocumentChunk) error {
+	e.logJob(ctx, job, types.LogLevelInfo, "Calling ProcessAndStoreDocuments",
+		fmt.Sprintf("datasource_id=%d, chunks=%d, first_chunk_preview=%s",
+			repo.DatasourceID, len(documents),
+			documents[0].Content[:min(50, len(documents[0].Content))]))
+
 	resp, err := ai_studio_sdk.ProcessAndStoreDocuments(ctx, repo.DatasourceID, documents)
 	if err != nil {
+		e.logJob(ctx, job, types.LogLevelError, "ProcessAndStoreDocuments gRPC error", fmt.Sprintf("%v", err))
 		return fmt.Errorf("failed to call ProcessAndStoreDocuments: %w", err)
 	}
 
 	if !resp.Success {
+		e.logJob(ctx, job, types.LogLevelError, "ProcessAndStoreDocuments returned failure", resp.ErrorMessage)
 		return fmt.Errorf("ProcessAndStoreDocuments failed: %s", resp.ErrorMessage)
 	}
 
+	e.logJob(ctx, job, types.LogLevelInfo, "ProcessAndStoreDocuments succeeded",
+		fmt.Sprintf("processed_count=%d", resp.ProcessedCount))
+
 	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // deleteChunksForFiles deletes chunks for deleted files
