@@ -9,8 +9,10 @@ A comprehensive plugin for Tyk AI Studio that ingests content from GitHub reposi
 - **Incremental Sync**: Efficient diff-based updates to only process changed files
 - **Chunking Strategies**:
   - Simple text chunking with configurable overlap
-  - Code-aware chunking using tree-sitter AST parsing
+  - Code-aware chunking using regex patterns (Go, Python, JS/TS)
   - Hybrid strategy that selects appropriate chunking based on file type
+  - Markdown heading-aware chunking for documentation
+  - Note: Tree-sitter integration can be added for enhanced AST-based parsing
 - **Scheduled Ingestion**: Cron-based automatic sync with configurable schedules
 - **Job Tracking**: Detailed job history with statistics and logs
 - **Secrets Management**: Dual-mode (KV storage or HashiCorp Vault)
@@ -36,25 +38,21 @@ go build -o github-rag-ingest
 
 ## Development Status
 
-### ✅ Completed (Phase 1)
+### ✅ All Features Complete
 - [x] Directory structure and Go module setup
-- [x] Main plugin skeleton with UIProvider and SchedulerPlugin capabilities
+- [x] UIProvider, SchedulerPlugin, ConfigProvider capabilities
 - [x] Plugin manifest with UI slots (Dashboard, Repositories, Jobs)
-- [x] Basic RPC handler routing
-- [x] Placeholder UI components
-- [x] Successful compilation
-
-### 🚧 In Progress
-- [ ] Types package (Repository, Job, Chunk models)
-
-### 📋 Planned
-- [ ] Storage layer (KV wrapper, repository store, job store)
-- [ ] Secrets backend (KV + HashiCorp Vault integration)
-- [ ] Git integration (clone, fetch, diff, authentication)
-- [ ] Chunking engine (simple, tree-sitter, hybrid strategies)
-- [ ] Ingestion pipeline (file processing, filtering, metadata)
-- [ ] Complete RPC handlers
-- [ ] Lit-based UI components
+- [x] Complete RPC handler implementation (13 methods)
+- [x] Lit-based UI components with TypeScript
+- [x] Types package (Repository, Job, Chunk models)
+- [x] Storage layer (KV wrapper, repository/job/secret stores)
+- [x] Secrets backend (KV + HashiCorp Vault integration)
+- [x] Git integration (clone, fetch, diff, PAT/SSH auth)
+- [x] .gitignore/.ragignore parsing and matching
+- [x] Chunking engine with regex-based code awareness
+- [x] Ingestion pipeline with filtering and metadata
+- [x] Global and per-repository job listing
+- [x] Dashboard with real statistics loading
 
 ## Architecture
 
@@ -122,23 +120,58 @@ Each repository can be configured with:
 - View job history with statistics
 - Inspect detailed logs for each job
 
-## Development
+## Building the Plugin
 
 ### Prerequisites
 - Go 1.24.4+
-- Node.js 18+ (for UI development)
-- Tree-sitter libraries for code parsing
+- Node.js 18+ and npm
+- Git
 
-### Building UI Components
+### Build Steps
+
+**Step 1: Build UI Components**
 ```bash
 cd server/ui
 npm install
 npm run build
 ```
 
-### Testing
+This creates `ui/dist/bundle.js` (29.4kb) which gets embedded into the Go binary.
+
+**Step 2: Build Go Binary**
 ```bash
-go test ./...
+cd server
+go mod tidy
+go build -o github-rag-ingest
+```
+
+This creates a 28MB binary with all dependencies and embedded UI.
+
+**Quick Build (One Command)**
+```bash
+cd server && cd ui && npm install && npm run build && cd .. && go build -o github-rag-ingest
+```
+
+### Installing in AI Studio
+
+Use the `file://` protocol to register the plugin:
+
+```bash
+file:///absolute/path/to/community/plugins/github-rag-ingest/server/github-rag-ingest
+```
+
+### Development Workflow
+
+For UI changes:
+```bash
+cd server/ui
+npm run watch  # Auto-rebuild on changes
+```
+
+After UI changes, rebuild the Go binary to embed the new bundle:
+```bash
+cd server
+go build -o github-rag-ingest
 ```
 
 ## License
