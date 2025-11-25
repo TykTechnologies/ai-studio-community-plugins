@@ -1,8 +1,8 @@
 {
   "id": "com.tyk.github-rag-ingest",
   "version": "1.0.0",
-  "name": "GitHub RAG Ingestion",
-  "description": "Ingest content from GitHub repositories into RAG datasources with support for incremental sync, multiple chunking strategies, and scheduled updates",
+  "name": "Git Connector",
+  "description": "Ingest content from Git repositories into RAG datasources with support for incremental sync, multiple chunking strategies, and scheduled updates",
   "capabilities": {
     "hooks": ["studio_ui"],
     "primary_hook": "studio_ui"
@@ -23,12 +23,12 @@
     "slots": [
       {
         "slot": "sidebar.section",
-        "label": "GitHub RAG",
+        "label": "Git Connector",
         "icon": "/assets/github-icon.svg",
         "items": [
           {
             "type": "route",
-            "path": "/admin/github-rag",
+            "path": "/admin/git-connector",
             "title": "Dashboard",
             "mount": {
               "kind": "webc",
@@ -41,7 +41,7 @@
           },
           {
             "type": "route",
-            "path": "/admin/github-rag/repositories",
+            "path": "/admin/git-connector/repositories",
             "title": "Repositories",
             "mount": {
               "kind": "webc",
@@ -54,7 +54,7 @@
           },
           {
             "type": "route",
-            "path": "/admin/github-rag/jobs",
+            "path": "/admin/git-connector/jobs",
             "title": "Jobs",
             "mount": {
               "kind": "webc",

@@ -196,6 +196,10 @@ func (p *GitHubRAGPlugin) HandleRPC(method string, payload []byte) ([]byte, erro
 		return p.rpcHandler.CancelJob(payload)
 	case "list_datasources":
 		return p.rpcHandler.ListDatasources(payload)
+	case "clone_datasource":
+		return p.rpcHandler.CloneDatasource(payload)
+	case "update_datasource_fields":
+		return p.rpcHandler.UpdateDatasourceFields(payload)
 	case "get_statistics":
 		return p.rpcHandler.GetStatistics(payload)
 	default:

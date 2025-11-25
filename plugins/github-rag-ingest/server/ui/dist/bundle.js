@@ -1,6 +1,6 @@
-"use strict";(()=>{var St=Object.defineProperty;var At=Object.getOwnPropertyDescriptor;var n=(r,e,t,s)=>{for(var i=s>1?void 0:s?At(e,t):e,o=r.length-1,a;o>=0;o--)(a=r[o])&&(i=(s?a(e,t,i):a(i))||i);return s&&i&&St(e,t,i),i};var K=globalThis,Z=K.ShadowRoot&&(K.ShadyCSS===void 0||K.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,H=Symbol(),lt=new WeakMap,z=class{constructor(e,t,s){if(this._$cssResult$=!0,s!==H)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=t}get styleSheet(){let e=this.o,t=this.t;if(Z&&e===void 0){let s=t!==void 0&&t.length===1;s&&(e=lt.get(t)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),s&&lt.set(t,e))}return e}toString(){return this.cssText}},dt=r=>new z(typeof r=="string"?r:r+"",void 0,H),$=(r,...e)=>{let t=r.length===1?r[0]:e.reduce((s,i,o)=>s+(a=>{if(a._$cssResult$===!0)return a.cssText;if(typeof a=="number")return a;throw Error("Value passed to 'css' function must be a 'css' function result: "+a+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+r[o+1],r[0]);return new z(t,r,H)},ct=(r,e)=>{if(Z)r.adoptedStyleSheets=e.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(let t of e){let s=document.createElement("style"),i=K.litNonce;i!==void 0&&s.setAttribute("nonce",i),s.textContent=t.cssText,r.appendChild(s)}},G=Z?r=>r:r=>r instanceof CSSStyleSheet?(e=>{let t="";for(let s of e.cssRules)t+=s.cssText;return dt(t)})(r):r;var{is:kt,defineProperty:Et,getOwnPropertyDescriptor:Pt,getOwnPropertyNames:Ct,getOwnPropertySymbols:It,getPrototypeOf:jt}=Object,E=globalThis,pt=E.trustedTypes,Tt=pt?pt.emptyScript:"",Dt=E.reactiveElementPolyfillSupport,M=(r,e)=>r,F={toAttribute(r,e){switch(e){case Boolean:r=r?Tt:null;break;case Object:case Array:r=r==null?r:JSON.stringify(r)}return r},fromAttribute(r,e){let t=r;switch(e){case Boolean:t=r!==null;break;case Number:t=r===null?null:Number(r);break;case Object:case Array:try{t=JSON.parse(r)}catch{t=null}}return t}},Y=(r,e)=>!kt(r,e),ht={attribute:!0,type:String,converter:F,reflect:!1,useDefault:!1,hasChanged:Y};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),E.litPropertyMetadata??(E.litPropertyMetadata=new WeakMap);var S=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??(this.l=[])).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,t=ht){if(t.state&&(t.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((t=Object.create(t)).wrapped=!0),this.elementProperties.set(e,t),!t.noAccessor){let s=Symbol(),i=this.getPropertyDescriptor(e,s,t);i!==void 0&&Et(this.prototype,e,i)}}static getPropertyDescriptor(e,t,s){let{get:i,set:o}=Pt(this.prototype,e)??{get(){return this[t]},set(a){this[t]=a}};return{get:i,set(a){let c=i?.call(this);o?.call(this,a),this.requestUpdate(e,c,s)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??ht}static _$Ei(){if(this.hasOwnProperty(M("elementProperties")))return;let e=jt(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(M("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(M("properties"))){let t=this.properties,s=[...Ct(t),...It(t)];for(let i of s)this.createProperty(i,t[i])}let e=this[Symbol.metadata];if(e!==null){let t=litPropertyMetadata.get(e);if(t!==void 0)for(let[s,i]of t)this.elementProperties.set(s,i)}this._$Eh=new Map;for(let[t,s]of this.elementProperties){let i=this._$Eu(t,s);i!==void 0&&this._$Eh.set(i,t)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let t=[];if(Array.isArray(e)){let s=new Set(e.flat(1/0).reverse());for(let i of s)t.unshift(G(i))}else e!==void 0&&t.push(G(e));return t}static _$Eu(e,t){let s=t.attribute;return s===!1?void 0:typeof s=="string"?s:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??(this._$EO=new Set)).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,t=this.constructor.elementProperties;for(let s of t.keys())this.hasOwnProperty(s)&&(e.set(s,this[s]),delete this[s]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return ct(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,t,s){this._$AK(e,s)}_$ET(e,t){let s=this.constructor.elementProperties.get(e),i=this.constructor._$Eu(e,s);if(i!==void 0&&s.reflect===!0){let o=(s.converter?.toAttribute!==void 0?s.converter:F).toAttribute(t,s.type);this._$Em=e,o==null?this.removeAttribute(i):this.setAttribute(i,o),this._$Em=null}}_$AK(e,t){let s=this.constructor,i=s._$Eh.get(e);if(i!==void 0&&this._$Em!==i){let o=s.getPropertyOptions(i),a=typeof o.converter=="function"?{fromAttribute:o.converter}:o.converter?.fromAttribute!==void 0?o.converter:F;this._$Em=i;let c=a.fromAttribute(t,o.type);this[i]=c??this._$Ej?.get(i)??c,this._$Em=null}}requestUpdate(e,t,s){if(e!==void 0){let i=this.constructor,o=this[e];if(s??(s=i.getPropertyOptions(e)),!((s.hasChanged??Y)(o,t)||s.useDefault&&s.reflect&&o===this._$Ej?.get(e)&&!this.hasAttribute(i._$Eu(e,s))))return;this.C(e,t,s)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,t,{useDefault:s,reflect:i,wrapped:o},a){s&&!(this._$Ej??(this._$Ej=new Map)).has(e)&&(this._$Ej.set(e,a??t??this[e]),o!==!0||a!==void 0)||(this._$AL.has(e)||(this.hasUpdated||s||(t=void 0),this._$AL.set(e,t)),i===!0&&this._$Em!==e&&(this._$Eq??(this._$Eq=new Set)).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(t){Promise.reject(t)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[i,o]of this._$Ep)this[i]=o;this._$Ep=void 0}let s=this.constructor.elementProperties;if(s.size>0)for(let[i,o]of s){let{wrapped:a}=o,c=this[i];a!==!0||this._$AL.has(i)||c===void 0||this.C(i,void 0,o,c)}}let e=!1,t=this._$AL;try{e=this.shouldUpdate(t),e?(this.willUpdate(t),this._$EO?.forEach(s=>s.hostUpdate?.()),this.update(t)):this._$EM()}catch(s){throw e=!1,this._$EM(),s}e&&this._$AE(t)}willUpdate(e){}_$AE(e){this._$EO?.forEach(t=>t.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&(this._$Eq=this._$Eq.forEach(t=>this._$ET(t,this[t]))),this._$EM()}updated(e){}firstUpdated(e){}};S.elementStyles=[],S.shadowRootOptions={mode:"open"},S[M("elementProperties")]=new Map,S[M("finalized")]=new Map,Dt?.({ReactiveElement:S}),(E.reactiveElementVersions??(E.reactiveElementVersions=[])).push("2.1.1");var B=globalThis,Q=B.trustedTypes,ut=Q?Q.createPolicy("lit-html",{createHTML:r=>r}):void 0,yt="$lit$",P=`lit$${Math.random().toFixed(9).slice(2)}$`,$t="?"+P,Ut=`<${$t}>`,T=document,L=()=>T.createComment(""),q=r=>r===null||typeof r!="object"&&typeof r!="function",at=Array.isArray,Ot=r=>at(r)||typeof r?.[Symbol.iterator]=="function",tt=`[ 	
-\f\r]`,N=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,gt=/-->/g,ft=/>/g,I=RegExp(`>|${tt}(?:([^\\s"'>=/]+)(${tt}*=${tt}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`,"g"),mt=/'/g,vt=/"/g,_t=/^(?:script|style|textarea|title)$/i,nt=r=>(e,...t)=>({_$litType$:r,strings:e,values:t}),d=nt(1),Wt=nt(2),Kt=nt(3),D=Symbol.for("lit-noChange"),g=Symbol.for("lit-nothing"),bt=new WeakMap,j=T.createTreeWalker(T,129);function xt(r,e){if(!at(r)||!r.hasOwnProperty("raw"))throw Error("invalid template strings array");return ut!==void 0?ut.createHTML(e):e}var zt=(r,e)=>{let t=r.length-1,s=[],i,o=e===2?"<svg>":e===3?"<math>":"",a=N;for(let c=0;c<t;c++){let l=r[c],u,m,p=-1,w=0;for(;w<l.length&&(a.lastIndex=w,m=a.exec(l),m!==null);)w=a.lastIndex,a===N?m[1]==="!--"?a=gt:m[1]!==void 0?a=ft:m[2]!==void 0?(_t.test(m[2])&&(i=RegExp("</"+m[2],"g")),a=I):m[3]!==void 0&&(a=I):a===I?m[0]===">"?(a=i??N,p=-1):m[1]===void 0?p=-2:(p=a.lastIndex-m[2].length,u=m[1],a=m[3]===void 0?I:m[3]==='"'?vt:mt):a===vt||a===mt?a=I:a===gt||a===ft?a=N:(a=I,i=void 0);let k=a===I&&r[c+1].startsWith("/>")?" ":"";o+=a===N?l+Ut:p>=0?(s.push(u),l.slice(0,p)+yt+l.slice(p)+P+k):l+P+(p===-2?c:k)}return[xt(r,o+(r[t]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),s]},R=class r{constructor({strings:e,_$litType$:t},s){let i;this.parts=[];let o=0,a=0,c=e.length-1,l=this.parts,[u,m]=zt(e,t);if(this.el=r.createElement(u,s),j.currentNode=this.el.content,t===2||t===3){let p=this.el.content.firstChild;p.replaceWith(...p.childNodes)}for(;(i=j.nextNode())!==null&&l.length<c;){if(i.nodeType===1){if(i.hasAttributes())for(let p of i.getAttributeNames())if(p.endsWith(yt)){let w=m[a++],k=i.getAttribute(p).split(P),W=/([.?@])?(.*)/.exec(w);l.push({type:1,index:o,name:W[2],strings:k,ctor:W[1]==="."?st:W[1]==="?"?it:W[1]==="@"?rt:O}),i.removeAttribute(p)}else p.startsWith(P)&&(l.push({type:6,index:o}),i.removeAttribute(p));if(_t.test(i.tagName)){let p=i.textContent.split(P),w=p.length-1;if(w>0){i.textContent=Q?Q.emptyScript:"";for(let k=0;k<w;k++)i.append(p[k],L()),j.nextNode(),l.push({type:2,index:++o});i.append(p[w],L())}}}else if(i.nodeType===8)if(i.data===$t)l.push({type:2,index:o});else{let p=-1;for(;(p=i.data.indexOf(P,p+1))!==-1;)l.push({type:7,index:o}),p+=P.length-1}o++}}static createElement(e,t){let s=T.createElement("template");return s.innerHTML=e,s}};function U(r,e,t=r,s){if(e===D)return e;let i=s!==void 0?t._$Co?.[s]:t._$Cl,o=q(e)?void 0:e._$litDirective$;return i?.constructor!==o&&(i?._$AO?.(!1),o===void 0?i=void 0:(i=new o(r),i._$AT(r,t,s)),s!==void 0?(t._$Co??(t._$Co=[]))[s]=i:t._$Cl=i),i!==void 0&&(e=U(r,i._$AS(r,e.values),i,s)),e}var et=class{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:t},parts:s}=this._$AD,i=(e?.creationScope??T).importNode(t,!0);j.currentNode=i;let o=j.nextNode(),a=0,c=0,l=s[0];for(;l!==void 0;){if(a===l.index){let u;l.type===2?u=new V(o,o.nextSibling,this,e):l.type===1?u=new l.ctor(o,l.name,l.strings,this,e):l.type===6&&(u=new ot(o,this,e)),this._$AV.push(u),l=s[++c]}a!==l?.index&&(o=j.nextNode(),a++)}return j.currentNode=T,i}p(e){let t=0;for(let s of this._$AV)s!==void 0&&(s.strings!==void 0?(s._$AI(e,s,t),t+=s.strings.length-2):s._$AI(e[t])),t++}},V=class r{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,t,s,i){this.type=2,this._$AH=g,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=s,this.options=i,this._$Cv=i?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,t=this._$AM;return t!==void 0&&e?.nodeType===11&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=U(this,e,t),q(e)?e===g||e==null||e===""?(this._$AH!==g&&this._$AR(),this._$AH=g):e!==this._$AH&&e!==D&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):Ot(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==g&&q(this._$AH)?this._$AA.nextSibling.data=e:this.T(T.createTextNode(e)),this._$AH=e}$(e){let{values:t,_$litType$:s}=e,i=typeof s=="number"?this._$AC(e):(s.el===void 0&&(s.el=R.createElement(xt(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===i)this._$AH.p(t);else{let o=new et(i,this),a=o.u(this.options);o.p(t),this.T(a),this._$AH=o}}_$AC(e){let t=bt.get(e.strings);return t===void 0&&bt.set(e.strings,t=new R(e)),t}k(e){at(this._$AH)||(this._$AH=[],this._$AR());let t=this._$AH,s,i=0;for(let o of e)i===t.length?t.push(s=new r(this.O(L()),this.O(L()),this,this.options)):s=t[i],s._$AI(o),i++;i<t.length&&(this._$AR(s&&s._$AB.nextSibling,i),t.length=i)}_$AR(e=this._$AA.nextSibling,t){for(this._$AP?.(!1,!0,t);e!==this._$AB;){let s=e.nextSibling;e.remove(),e=s}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},O=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,s,i,o){this.type=1,this._$AH=g,this._$AN=void 0,this.element=e,this.name=t,this._$AM=i,this.options=o,s.length>2||s[0]!==""||s[1]!==""?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=g}_$AI(e,t=this,s,i){let o=this.strings,a=!1;if(o===void 0)e=U(this,e,t,0),a=!q(e)||e!==this._$AH&&e!==D,a&&(this._$AH=e);else{let c=e,l,u;for(e=o[0],l=0;l<o.length-1;l++)u=U(this,c[s+l],t,l),u===D&&(u=this._$AH[l]),a||(a=!q(u)||u!==this._$AH[l]),u===g?e=g:e!==g&&(e+=(u??"")+o[l+1]),this._$AH[l]=u}a&&!i&&this.j(e)}j(e){e===g?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},st=class extends O{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===g?void 0:e}},it=class extends O{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==g)}},rt=class extends O{constructor(e,t,s,i,o){super(e,t,s,i,o),this.type=5}_$AI(e,t=this){if((e=U(this,e,t,0)??g)===D)return;let s=this._$AH,i=e===g&&s!==g||e.capture!==s.capture||e.once!==s.once||e.passive!==s.passive,o=e!==g&&(s===g||i);i&&this.element.removeEventListener(this.name,this,s),o&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},ot=class{constructor(e,t,s){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=s}get _$AU(){return this._$AM._$AU}_$AI(e){U(this,e)}};var Mt=B.litHtmlPolyfillSupport;Mt?.(R,V),(B.litHtmlVersions??(B.litHtmlVersions=[])).push("3.3.1");var wt=(r,e,t)=>{let s=t?.renderBefore??e,i=s._$litPart$;if(i===void 0){let o=t?.renderBefore??null;s._$litPart$=i=new V(e.insertBefore(L(),o),o,void 0,t??{})}return i._$AI(r),i};var J=globalThis,v=class extends S{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var t;let e=super.createRenderRoot();return(t=this.renderOptions).renderBefore??(t.renderBefore=e.firstChild),e}update(e){let t=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=wt(t,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return D}};v._$litElement$=!0,v.finalized=!0,J.litElementHydrateSupport?.({LitElement:v});var Ft=J.litElementPolyfillSupport;Ft?.({LitElement:v});(J.litElementVersions??(J.litElementVersions=[])).push("4.2.1");var x=r=>(e,t)=>{t!==void 0?t.addInitializer(()=>{customElements.define(r,e)}):customElements.define(r,e)};var Nt={attribute:!0,type:String,converter:F,reflect:!1,hasChanged:Y},Bt=(r=Nt,e,t)=>{let{kind:s,metadata:i}=t,o=globalThis.litPropertyMetadata.get(i);if(o===void 0&&globalThis.litPropertyMetadata.set(i,o=new Map),s==="setter"&&((r=Object.create(r)).wrapped=!0),o.set(t.name,r),s==="accessor"){let{name:a}=t;return{set(c){let l=e.get.call(this);e.set.call(this,c),this.requestUpdate(a,l,r)},init(c){return c!==void 0&&this.C(a,void 0,r,c),c}}}if(s==="setter"){let{name:a}=t;return function(c){let l=this[a];e.call(this,c),this.requestUpdate(a,l,r)}}throw Error("Unsupported decorator location: "+s)};function f(r){return(e,t)=>typeof t=="object"?Bt(r,e,t):((s,i,o)=>{let a=i.hasOwnProperty(o);return i.constructor.createProperty(o,s),a?Object.getOwnPropertyDescriptor(i,o):void 0})(r,e,t)}function h(r){return f({...r,state:!0,attribute:!1})}var C=class extends v{constructor(){super(...arguments);this.rpcBase="";this.stats=null;this.loading=!1}connectedCallback(){super.connectedCallback(),this.loadStats()}async loadStats(){try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("get_statistics",{});t.success&&(this.stats={totalRepos:t.data.total_repos||0,activeRepos:t.data.active_repos||0,totalJobs:t.data.total_jobs||0,chunksIngested:t.data.chunks_ingested||0})}catch(t){console.error("Failed to load stats:",t),this.stats={totalRepos:0,activeRepos:0,totalJobs:0,chunksIngested:0}}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}render(){return d`
+"use strict";(()=>{var kt=Object.defineProperty;var At=Object.getOwnPropertyDescriptor;var n=(r,e,t,s)=>{for(var i=s>1?void 0:s?At(e,t):e,o=r.length-1,a;o>=0;o--)(a=r[o])&&(i=(s?a(e,t,i):a(i))||i);return s&&i&&kt(e,t,i),i};var Z=globalThis,Y=Z.ShadowRoot&&(Z.ShadyCSS===void 0||Z.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,G=Symbol(),dt=new WeakMap,O=class{constructor(e,t,s){if(this._$cssResult$=!0,s!==G)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=t}get styleSheet(){let e=this.o,t=this.t;if(Y&&e===void 0){let s=t!==void 0&&t.length===1;s&&(e=dt.get(t)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),s&&dt.set(t,e))}return e}toString(){return this.cssText}},ct=r=>new O(typeof r=="string"?r:r+"",void 0,G),y=(r,...e)=>{let t=r.length===1?r[0]:e.reduce((s,i,o)=>s+(a=>{if(a._$cssResult$===!0)return a.cssText;if(typeof a=="number")return a;throw Error("Value passed to 'css' function must be a 'css' function result: "+a+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+r[o+1],r[0]);return new O(t,r,G)},pt=(r,e)=>{if(Y)r.adoptedStyleSheets=e.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(let t of e){let s=document.createElement("style"),i=Z.litNonce;i!==void 0&&s.setAttribute("nonce",i),s.textContent=t.cssText,r.appendChild(s)}},tt=Y?r=>r:r=>r instanceof CSSStyleSheet?(e=>{let t="";for(let s of e.cssRules)t+=s.cssText;return ct(t)})(r):r;var{is:Et,defineProperty:Ct,getOwnPropertyDescriptor:Pt,getOwnPropertyNames:It,getOwnPropertySymbols:jt,getPrototypeOf:Dt}=Object,C=globalThis,ht=C.trustedTypes,zt=ht?ht.emptyScript:"",Tt=C.reactiveElementPolyfillSupport,N=(r,e)=>r,M={toAttribute(r,e){switch(e){case Boolean:r=r?zt:null;break;case Object:case Array:r=r==null?r:JSON.stringify(r)}return r},fromAttribute(r,e){let t=r;switch(e){case Boolean:t=r!==null;break;case Number:t=r===null?null:Number(r);break;case Object:case Array:try{t=JSON.parse(r)}catch{t=null}}return t}},Q=(r,e)=>!Et(r,e),ut={attribute:!0,type:String,converter:M,reflect:!1,useDefault:!1,hasChanged:Q};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),C.litPropertyMetadata??(C.litPropertyMetadata=new WeakMap);var k=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??(this.l=[])).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,t=ut){if(t.state&&(t.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((t=Object.create(t)).wrapped=!0),this.elementProperties.set(e,t),!t.noAccessor){let s=Symbol(),i=this.getPropertyDescriptor(e,s,t);i!==void 0&&Ct(this.prototype,e,i)}}static getPropertyDescriptor(e,t,s){let{get:i,set:o}=Pt(this.prototype,e)??{get(){return this[t]},set(a){this[t]=a}};return{get:i,set(a){let p=i?.call(this);o?.call(this,a),this.requestUpdate(e,p,s)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??ut}static _$Ei(){if(this.hasOwnProperty(N("elementProperties")))return;let e=Dt(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(N("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(N("properties"))){let t=this.properties,s=[...It(t),...jt(t)];for(let i of s)this.createProperty(i,t[i])}let e=this[Symbol.metadata];if(e!==null){let t=litPropertyMetadata.get(e);if(t!==void 0)for(let[s,i]of t)this.elementProperties.set(s,i)}this._$Eh=new Map;for(let[t,s]of this.elementProperties){let i=this._$Eu(t,s);i!==void 0&&this._$Eh.set(i,t)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let t=[];if(Array.isArray(e)){let s=new Set(e.flat(1/0).reverse());for(let i of s)t.unshift(tt(i))}else e!==void 0&&t.push(tt(e));return t}static _$Eu(e,t){let s=t.attribute;return s===!1?void 0:typeof s=="string"?s:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??(this._$EO=new Set)).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,t=this.constructor.elementProperties;for(let s of t.keys())this.hasOwnProperty(s)&&(e.set(s,this[s]),delete this[s]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return pt(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,t,s){this._$AK(e,s)}_$ET(e,t){let s=this.constructor.elementProperties.get(e),i=this.constructor._$Eu(e,s);if(i!==void 0&&s.reflect===!0){let o=(s.converter?.toAttribute!==void 0?s.converter:M).toAttribute(t,s.type);this._$Em=e,o==null?this.removeAttribute(i):this.setAttribute(i,o),this._$Em=null}}_$AK(e,t){let s=this.constructor,i=s._$Eh.get(e);if(i!==void 0&&this._$Em!==i){let o=s.getPropertyOptions(i),a=typeof o.converter=="function"?{fromAttribute:o.converter}:o.converter?.fromAttribute!==void 0?o.converter:M;this._$Em=i;let p=a.fromAttribute(t,o.type);this[i]=p??this._$Ej?.get(i)??p,this._$Em=null}}requestUpdate(e,t,s){if(e!==void 0){let i=this.constructor,o=this[e];if(s??(s=i.getPropertyOptions(e)),!((s.hasChanged??Q)(o,t)||s.useDefault&&s.reflect&&o===this._$Ej?.get(e)&&!this.hasAttribute(i._$Eu(e,s))))return;this.C(e,t,s)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,t,{useDefault:s,reflect:i,wrapped:o},a){s&&!(this._$Ej??(this._$Ej=new Map)).has(e)&&(this._$Ej.set(e,a??t??this[e]),o!==!0||a!==void 0)||(this._$AL.has(e)||(this.hasUpdated||s||(t=void 0),this._$AL.set(e,t)),i===!0&&this._$Em!==e&&(this._$Eq??(this._$Eq=new Set)).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(t){Promise.reject(t)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[i,o]of this._$Ep)this[i]=o;this._$Ep=void 0}let s=this.constructor.elementProperties;if(s.size>0)for(let[i,o]of s){let{wrapped:a}=o,p=this[i];a!==!0||this._$AL.has(i)||p===void 0||this.C(i,void 0,o,p)}}let e=!1,t=this._$AL;try{e=this.shouldUpdate(t),e?(this.willUpdate(t),this._$EO?.forEach(s=>s.hostUpdate?.()),this.update(t)):this._$EM()}catch(s){throw e=!1,this._$EM(),s}e&&this._$AE(t)}willUpdate(e){}_$AE(e){this._$EO?.forEach(t=>t.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&(this._$Eq=this._$Eq.forEach(t=>this._$ET(t,this[t]))),this._$EM()}updated(e){}firstUpdated(e){}};k.elementStyles=[],k.shadowRootOptions={mode:"open"},k[N("elementProperties")]=new Map,k[N("finalized")]=new Map,Tt?.({ReactiveElement:k}),(C.reactiveElementVersions??(C.reactiveElementVersions=[])).push("2.1.1");var L=globalThis,X=L.trustedTypes,gt=X?X.createPolicy("lit-html",{createHTML:r=>r}):void 0,$t="$lit$",P=`lit$${Math.random().toFixed(9).slice(2)}$`,xt="?"+P,Ut=`<${xt}>`,z=document,B=()=>z.createComment(""),R=r=>r===null||typeof r!="object"&&typeof r!="function",nt=Array.isArray,Ft=r=>nt(r)||typeof r?.[Symbol.iterator]=="function",et=`[ 	
+\f\r]`,q=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,ft=/-->/g,mt=/>/g,j=RegExp(`>|${et}(?:([^\\s"'>=/]+)(${et}*=${et}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),bt=/'/g,vt=/"/g,_t=/^(?:script|style|textarea|title)$/i,lt=r=>(e,...t)=>({_$litType$:r,strings:e,values:t}),d=lt(1),Kt=lt(2),Zt=lt(3),T=Symbol.for("lit-noChange"),f=Symbol.for("lit-nothing"),yt=new WeakMap,D=z.createTreeWalker(z,129);function wt(r,e){if(!nt(r)||!r.hasOwnProperty("raw"))throw Error("invalid template strings array");return gt!==void 0?gt.createHTML(e):e}var Ot=(r,e)=>{let t=r.length-1,s=[],i,o=e===2?"<svg>":e===3?"<math>":"",a=q;for(let p=0;p<t;p++){let l=r[p],g,b,h=-1,S=0;for(;S<l.length&&(a.lastIndex=S,b=a.exec(l),b!==null);)S=a.lastIndex,a===q?b[1]==="!--"?a=ft:b[1]!==void 0?a=mt:b[2]!==void 0?(_t.test(b[2])&&(i=RegExp("</"+b[2],"g")),a=j):b[3]!==void 0&&(a=j):a===j?b[0]===">"?(a=i??q,h=-1):b[1]===void 0?h=-2:(h=a.lastIndex-b[2].length,g=b[1],a=b[3]===void 0?j:b[3]==='"'?vt:bt):a===vt||a===bt?a=j:a===ft||a===mt?a=q:(a=j,i=void 0);let E=a===j&&r[p+1].startsWith("/>")?" ":"";o+=a===q?l+Ut:h>=0?(s.push(g),l.slice(0,h)+$t+l.slice(h)+P+E):l+P+(h===-2?p:E)}return[wt(r,o+(r[t]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),s]},V=class r{constructor({strings:e,_$litType$:t},s){let i;this.parts=[];let o=0,a=0,p=e.length-1,l=this.parts,[g,b]=Ot(e,t);if(this.el=r.createElement(g,s),D.currentNode=this.el.content,t===2||t===3){let h=this.el.content.firstChild;h.replaceWith(...h.childNodes)}for(;(i=D.nextNode())!==null&&l.length<p;){if(i.nodeType===1){if(i.hasAttributes())for(let h of i.getAttributeNames())if(h.endsWith($t)){let S=b[a++],E=i.getAttribute(h).split(P),K=/([.?@])?(.*)/.exec(S);l.push({type:1,index:o,name:K[2],strings:E,ctor:K[1]==="."?it:K[1]==="?"?rt:K[1]==="@"?ot:F}),i.removeAttribute(h)}else h.startsWith(P)&&(l.push({type:6,index:o}),i.removeAttribute(h));if(_t.test(i.tagName)){let h=i.textContent.split(P),S=h.length-1;if(S>0){i.textContent=X?X.emptyScript:"";for(let E=0;E<S;E++)i.append(h[E],B()),D.nextNode(),l.push({type:2,index:++o});i.append(h[S],B())}}}else if(i.nodeType===8)if(i.data===xt)l.push({type:2,index:o});else{let h=-1;for(;(h=i.data.indexOf(P,h+1))!==-1;)l.push({type:7,index:o}),h+=P.length-1}o++}}static createElement(e,t){let s=z.createElement("template");return s.innerHTML=e,s}};function U(r,e,t=r,s){if(e===T)return e;let i=s!==void 0?t._$Co?.[s]:t._$Cl,o=R(e)?void 0:e._$litDirective$;return i?.constructor!==o&&(i?._$AO?.(!1),o===void 0?i=void 0:(i=new o(r),i._$AT(r,t,s)),s!==void 0?(t._$Co??(t._$Co=[]))[s]=i:t._$Cl=i),i!==void 0&&(e=U(r,i._$AS(r,e.values),i,s)),e}var st=class{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:t},parts:s}=this._$AD,i=(e?.creationScope??z).importNode(t,!0);D.currentNode=i;let o=D.nextNode(),a=0,p=0,l=s[0];for(;l!==void 0;){if(a===l.index){let g;l.type===2?g=new W(o,o.nextSibling,this,e):l.type===1?g=new l.ctor(o,l.name,l.strings,this,e):l.type===6&&(g=new at(o,this,e)),this._$AV.push(g),l=s[++p]}a!==l?.index&&(o=D.nextNode(),a++)}return D.currentNode=z,i}p(e){let t=0;for(let s of this._$AV)s!==void 0&&(s.strings!==void 0?(s._$AI(e,s,t),t+=s.strings.length-2):s._$AI(e[t])),t++}},W=class r{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,t,s,i){this.type=2,this._$AH=f,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=s,this.options=i,this._$Cv=i?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,t=this._$AM;return t!==void 0&&e?.nodeType===11&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=U(this,e,t),R(e)?e===f||e==null||e===""?(this._$AH!==f&&this._$AR(),this._$AH=f):e!==this._$AH&&e!==T&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):Ft(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==f&&R(this._$AH)?this._$AA.nextSibling.data=e:this.T(z.createTextNode(e)),this._$AH=e}$(e){let{values:t,_$litType$:s}=e,i=typeof s=="number"?this._$AC(e):(s.el===void 0&&(s.el=V.createElement(wt(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===i)this._$AH.p(t);else{let o=new st(i,this),a=o.u(this.options);o.p(t),this.T(a),this._$AH=o}}_$AC(e){let t=yt.get(e.strings);return t===void 0&&yt.set(e.strings,t=new V(e)),t}k(e){nt(this._$AH)||(this._$AH=[],this._$AR());let t=this._$AH,s,i=0;for(let o of e)i===t.length?t.push(s=new r(this.O(B()),this.O(B()),this,this.options)):s=t[i],s._$AI(o),i++;i<t.length&&(this._$AR(s&&s._$AB.nextSibling,i),t.length=i)}_$AR(e=this._$AA.nextSibling,t){for(this._$AP?.(!1,!0,t);e!==this._$AB;){let s=e.nextSibling;e.remove(),e=s}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},F=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,s,i,o){this.type=1,this._$AH=f,this._$AN=void 0,this.element=e,this.name=t,this._$AM=i,this.options=o,s.length>2||s[0]!==""||s[1]!==""?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=f}_$AI(e,t=this,s,i){let o=this.strings,a=!1;if(o===void 0)e=U(this,e,t,0),a=!R(e)||e!==this._$AH&&e!==T,a&&(this._$AH=e);else{let p=e,l,g;for(e=o[0],l=0;l<o.length-1;l++)g=U(this,p[s+l],t,l),g===T&&(g=this._$AH[l]),a||(a=!R(g)||g!==this._$AH[l]),g===f?e=f:e!==f&&(e+=(g??"")+o[l+1]),this._$AH[l]=g}a&&!i&&this.j(e)}j(e){e===f?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},it=class extends F{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===f?void 0:e}},rt=class extends F{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==f)}},ot=class extends F{constructor(e,t,s,i,o){super(e,t,s,i,o),this.type=5}_$AI(e,t=this){if((e=U(this,e,t,0)??f)===T)return;let s=this._$AH,i=e===f&&s!==f||e.capture!==s.capture||e.once!==s.once||e.passive!==s.passive,o=e!==f&&(s===f||i);i&&this.element.removeEventListener(this.name,this,s),o&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},at=class{constructor(e,t,s){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=s}get _$AU(){return this._$AM._$AU}_$AI(e){U(this,e)}};var Nt=L.litHtmlPolyfillSupport;Nt?.(V,W),(L.litHtmlVersions??(L.litHtmlVersions=[])).push("3.3.1");var St=(r,e,t)=>{let s=t?.renderBefore??e,i=s._$litPart$;if(i===void 0){let o=t?.renderBefore??null;s._$litPart$=i=new W(e.insertBefore(B(),o),o,void 0,t??{})}return i._$AI(r),i};var J=globalThis,m=class extends k{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var t;let e=super.createRenderRoot();return(t=this.renderOptions).renderBefore??(t.renderBefore=e.firstChild),e}update(e){let t=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=St(t,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return T}};m._$litElement$=!0,m.finalized=!0,J.litElementHydrateSupport?.({LitElement:m});var Mt=J.litElementPolyfillSupport;Mt?.({LitElement:m});(J.litElementVersions??(J.litElementVersions=[])).push("4.2.1");var _=r=>(e,t)=>{t!==void 0?t.addInitializer(()=>{customElements.define(r,e)}):customElements.define(r,e)};var qt={attribute:!0,type:String,converter:M,reflect:!1,hasChanged:Q},Lt=(r=qt,e,t)=>{let{kind:s,metadata:i}=t,o=globalThis.litPropertyMetadata.get(i);if(o===void 0&&globalThis.litPropertyMetadata.set(i,o=new Map),s==="setter"&&((r=Object.create(r)).wrapped=!0),o.set(t.name,r),s==="accessor"){let{name:a}=t;return{set(p){let l=e.get.call(this);e.set.call(this,p),this.requestUpdate(a,l,r)},init(p){return p!==void 0&&this.C(a,void 0,r,p),p}}}if(s==="setter"){let{name:a}=t;return function(p){let l=this[a];e.call(this,p),this.requestUpdate(a,l,r)}}throw Error("Unsupported decorator location: "+s)};function u(r){return(e,t)=>typeof t=="object"?Lt(r,e,t):((s,i,o)=>{let a=i.hasOwnProperty(o);return i.constructor.createProperty(o,s),a?Object.getOwnPropertyDescriptor(i,o):void 0})(r,e,t)}function c(r){return u({...r,state:!0,attribute:!1})}var I=class extends m{constructor(){super(...arguments);this.rpcBase="";this.stats=null;this.loading=!1}connectedCallback(){super.connectedCallback(),this.loadStats()}async loadStats(){try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("get_statistics",{});t.success&&(this.stats={totalRepos:t.data.total_repos||0,activeRepos:t.data.active_repos||0,totalJobs:t.data.total_jobs||0,chunksIngested:t.data.chunks_ingested||0})}catch(t){console.error("Failed to load stats:",t),this.stats={totalRepos:0,activeRepos:0,totalJobs:0,chunksIngested:0}}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}render(){return d`
       <div class="header">
         <h2>GitHub RAG Ingestion</h2>
         <p class="subtitle">Manage GitHub repositories and RAG datasource ingestion</p>
@@ -34,7 +34,7 @@
           <div class="stat-value">${this.stats?.chunksIngested||0}</div>
         </div>
       </div>
-    `}};C.styles=$`
+    `}};I.styles=y`
     :host {
       display: block;
       padding: 24px;
@@ -107,7 +107,7 @@
       margin-bottom: 8px;
       color: #1565c0;
     }
-  `,n([f({type:String})],C.prototype,"rpcBase",2),n([h()],C.prototype,"stats",2),n([h()],C.prototype,"loading",2),C=n([x("github-rag-dashboard")],C);var b=class extends v{constructor(){super(...arguments);this.repository=null;this.api=null;this.onSave=null;this.onCancel=null;this.datasources=[];this.formData={name:"",owner:"",url:"",branch:"main",auth_type:"public",pat_token:"",ssh_private_key:"",ssh_passphrase:"",datasource_id:0,target_paths:[],file_masks:["*"],ignore_patterns:[],chunking_strategy:"hybrid",chunk_size:1e3,chunk_overlap:200,sync_schedule:"",sync_enabled:!1};this.loading=!1;this.error=""}connectedCallback(){super.connectedCallback(),this.loadDatasources(),this.repository&&(this.formData={...this.repository})}async loadDatasources(){if(!this.api){console.error("No API available to load datasources");return}try{let t=await this.api.call("list_datasources",{});t.success?(this.datasources=t.data.datasources||[],console.log("Loaded datasources:",this.datasources)):console.error("Failed to load datasources:",t.error)}catch(t){console.error("Failed to load datasources:",t)}}handleSubmit(t){t.preventDefault(),this.saveRepository()}async saveRepository(){if(!this.api){this.error="No API available";return}this.loading=!0,this.error="";try{let t=this.repository?"update_repository":"create_repository",s=this.repository?{...this.formData,id:this.repository.id}:this.formData,i=await this.api.call(t,s);i.success?this.onSave&&this.onSave(i.data):this.error=i.error||"Failed to save repository"}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}handleCancel(){this.onCancel&&this.onCancel()}updateField(t,s){this.formData={...this.formData,[t]:s}}updateArrayField(t,s){let i=s.split(",").map(o=>o.trim()).filter(o=>o);this.formData={...this.formData,[t]:i}}render(){return d`
+  `,n([u({type:String})],I.prototype,"rpcBase",2),n([c()],I.prototype,"stats",2),n([c()],I.prototype,"loading",2),I=n([_("github-rag-dashboard")],I);var v=class extends m{constructor(){super(...arguments);this.repository=null;this.api=null;this.onSave=null;this.onCancel=null;this.datasources=[];this.showCloneModal=!1;this.selectedDatasourceForClone=null;this.formData={name:"",owner:"",url:"",branch:"main",auth_type:"public",pat_token:"",ssh_private_key:"",ssh_passphrase:"",datasource_id:0,target_paths:[],file_masks:["*"],ignore_patterns:[],chunking_strategy:"hybrid",chunk_size:1e3,chunk_overlap:200,sync_schedule:"",sync_enabled:!1};this.loading=!1;this.error=""}async connectedCallback(){super.connectedCallback(),await this.loadDatasources(),this.repository&&(this.formData={...this.repository},this.requestUpdate())}async loadDatasources(){if(!this.api){console.error("No API available to load datasources");return}try{let t=await this.api.call("list_datasources",{});t.success?(this.datasources=t.data.datasources||[],console.log("Loaded datasources:",this.datasources)):console.error("Failed to load datasources:",t.error)}catch(t){console.error("Failed to load datasources:",t)}}handleCloneClick(){let t=this.formData.datasource_id;if(!t||t===0){alert("Please select a datasource first");return}let s=this.datasources.find(i=>i.id===t);s&&(this.selectedDatasourceForClone=s,this.showCloneModal=!0)}handleCloneSuccess(t){this.loadDatasources().then(()=>{this.updateField("datasource_id",t)})}handleCloseModal(){this.showCloneModal=!1,this.selectedDatasourceForClone=null}handleSubmit(t){t.preventDefault(),this.saveRepository()}async saveRepository(){if(!this.api){this.error="No API available";return}this.loading=!0,this.error="";try{let t=this.repository?"update_repository":"create_repository",s=this.repository?{...this.formData,id:this.repository.id,sync_enabled:!!this.formData.sync_schedule}:{...this.formData,sync_enabled:!!this.formData.sync_schedule},i=await this.api.call(t,s);i.success?this.onSave&&this.onSave(i.data):this.error=i.error||"Failed to save repository"}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}handleCancel(){this.onCancel&&this.onCancel()}updateField(t,s){this.formData={...this.formData,[t]:s}}updateArrayField(t,s){let i=s.split(",").map(o=>o.trim()).filter(o=>o);this.formData={...this.formData,[t]:i}}render(){return d`
       <div class="form-container">
         <h3>${this.repository?"Edit Repository":"Add Repository"}</h3>
 
@@ -212,16 +212,27 @@
 
             <div class="form-group">
               <label>Datasource *</label>
-              <select
-                required
-                .value=${String(this.formData.datasource_id)}
-                @change=${t=>this.updateField("datasource_id",parseInt(t.target.value))}
-              >
-                <option value="0">Select datasource...</option>
-                ${this.datasources.map(t=>d`
-                  <option value="${t.id}">${t.name} - ${t.short_description}</option>
-                `)}
-              </select>
+              <div style="display: flex; gap: 8px; align-items: start;">
+                <select
+                  required
+                  style="flex: 1;"
+                  .value=${String(this.formData.datasource_id)}
+                  @change=${t=>this.updateField("datasource_id",parseInt(t.target.value))}
+                >
+                  <option value="0">Select datasource...</option>
+                  ${this.datasources.map(t=>d`
+                    <option value="${t.id}">${t.name} - ${t.db_source_type||"Unknown"}</option>
+                  `)}
+                </select>
+                <button
+                  type="button"
+                  class="btn-clone"
+                  @click=${this.handleCloneClick}
+                  title="Clone selected datasource with different namespace"
+                >
+                  Clone
+                </button>
+              </div>
               <div class="hint">The datasource must have an embedder configured</div>
             </div>
 
@@ -279,17 +290,7 @@
                 @input=${t=>this.updateField("sync_schedule",t.target.value)}
                 placeholder="0 2 * * * (2 AM daily)"
               />
-              <div class="hint">Leave empty for manual sync only</div>
-            </div>
-
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="sync-enabled"
-                .checked=${this.formData.sync_enabled}
-                @change=${t=>this.updateField("sync_enabled",t.target.checked)}
-              />
-              <label for="sync-enabled">Enable automatic sync</label>
+              <div class="hint">Leave empty for manual sync only. When a schedule is provided, automatic sync is enabled automatically.</div>
             </div>
           </div>
 
@@ -303,7 +304,16 @@
           </div>
         </form>
       </div>
-    `}};b.styles=$`
+
+      ${this.showCloneModal&&this.selectedDatasourceForClone?d`
+        <datasource-clone-modal
+          .sourceDatasource=${this.selectedDatasourceForClone}
+          .api=${this.api}
+          .onClose=${this.handleCloseModal.bind(this)}
+          .onSuccess=${this.handleCloneSuccess.bind(this)}
+        ></datasource-clone-modal>
+      `:""}
+    `}};v.styles=y`
     :host {
       display: block;
     }
@@ -407,6 +417,27 @@
       margin-top: 4px;
     }
 
+    .btn-clone {
+      padding: 8px 16px;
+      background: #f5f5f5;
+      color: #333;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+
+    .btn-clone:hover {
+      background: #e0e0e0;
+    }
+
+    .btn-clone:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .checkbox-group {
       display: flex;
       align-items: center;
@@ -421,7 +452,7 @@
       min-height: 80px;
       resize: vertical;
     }
-  `,n([f({type:Object})],b.prototype,"repository",2),n([f({type:Object})],b.prototype,"api",2),n([f({type:Function})],b.prototype,"onSave",2),n([f({type:Function})],b.prototype,"onCancel",2),n([h()],b.prototype,"datasources",2),n([h()],b.prototype,"formData",2),n([h()],b.prototype,"loading",2),n([h()],b.prototype,"error",2),b=n([x("github-rag-repository-form")],b);var _=class extends v{constructor(){super(...arguments);this.rpcBase="";this.repositories=[];this.loading=!1;this.error="";this.showForm=!1;this.editingRepo=null}connectedCallback(){super.connectedCallback(),this.loadRepositories()}async loadRepositories(){this.loading=!0,this.error="";try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("list_repositories",{});t.success?this.repositories=t.data.repositories||[]:this.error=t.error||"Failed to load repositories"}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}handleAddRepository(){this.showForm=!0,this.editingRepo=null}handleEditRepository(t){this.showForm=!0,this.editingRepo=t}async handleRunIngestion(t,s="incremental"){try{let i=await this.pluginAPI.call("trigger_ingestion",{repo_id:t,type:s,dry_run:!1});i.success?alert(`${s==="full"?"Full":"Incremental"} ingestion started! Job ID: ${i.data.job_id}`):alert(`Error: ${i.error}`)}catch(i){alert(`Error: ${i.message}`)}}async handleDeleteRepository(t){if(confirm(`Delete repository "${t.owner}/${t.name}"? This will also delete all ingested chunks.`))try{let s=await this.pluginAPI.call("delete_repository",{id:t.id,delete_chunks:!0});s.success?this.loadRepositories():alert(`Error: ${s.error}`)}catch(s){alert(`Error: ${s.message}`)}}handleFormSave(t){this.showForm=!1,this.editingRepo=null,this.loadRepositories()}handleFormCancel(){this.showForm=!1,this.editingRepo=null}formatDate(t){return t?new Date(t).toLocaleString():"Never"}render(){return this.showForm?d`
+  `,n([u({type:Object})],v.prototype,"repository",2),n([u({type:Object})],v.prototype,"api",2),n([u({type:Function})],v.prototype,"onSave",2),n([u({type:Function})],v.prototype,"onCancel",2),n([c()],v.prototype,"datasources",2),n([c()],v.prototype,"showCloneModal",2),n([c()],v.prototype,"selectedDatasourceForClone",2),n([c()],v.prototype,"formData",2),n([c()],v.prototype,"loading",2),n([c()],v.prototype,"error",2),v=n([_("github-rag-repository-form")],v);var w=class extends m{constructor(){super(...arguments);this.rpcBase="";this.repositories=[];this.loading=!1;this.error="";this.showForm=!1;this.editingRepo=null}connectedCallback(){super.connectedCallback(),this.loadRepositories()}async loadRepositories(){this.loading=!0,this.error="";try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("list_repositories",{});t.success?this.repositories=t.data.repositories||[]:this.error=t.error||"Failed to load repositories"}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}handleAddRepository(){this.showForm=!0,this.editingRepo=null}handleEditRepository(t){this.showForm=!0,this.editingRepo=t}async handleRunIngestion(t,s="incremental"){try{let i=await this.pluginAPI.call("trigger_ingestion",{repo_id:t,type:s,dry_run:!1});i.success?alert(`${s==="full"?"Full":"Incremental"} ingestion started! Job ID: ${i.data.job_id}`):alert(`Error: ${i.error}`)}catch(i){alert(`Error: ${i.message}`)}}async handleDeleteRepository(t){if(confirm(`Delete repository "${t.owner}/${t.name}"? This will also delete all ingested chunks.`))try{let s=await this.pluginAPI.call("delete_repository",{id:t.id,delete_chunks:!0});s.success?this.loadRepositories():alert(`Error: ${s.error}`)}catch(s){alert(`Error: ${s.message}`)}}handleFormSave(t){this.showForm=!1,this.editingRepo=null,this.loadRepositories()}handleFormCancel(){this.showForm=!1,this.editingRepo=null}formatDate(t){return t?new Date(t).toLocaleString():"Never"}render(){return this.showForm?d`
         <github-rag-repository-form
           .repository=${this.editingRepo}
           .api=${this.pluginAPI}
@@ -491,7 +522,7 @@
             </table>
           </div>
         `}
-    `}};_.styles=$`
+    `}};w.styles=y`
     :host {
       display: block;
       padding: 24px;
@@ -602,7 +633,7 @@
       color: #c62828;
       margin-bottom: 16px;
     }
-  `,n([f({type:String})],_.prototype,"rpcBase",2),n([h()],_.prototype,"repositories",2),n([h()],_.prototype,"loading",2),n([h()],_.prototype,"error",2),n([h()],_.prototype,"showForm",2),n([h()],_.prototype,"editingRepo",2),_=n([x("github-rag-repository-list")],_);var A=class extends v{constructor(){super(...arguments);this.rpcBase="";this.jobs=[];this.loading=!1;this.error=""}connectedCallback(){super.connectedCallback(),this.loadJobs()}async loadJobs(){this.loading=!0;try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("list_jobs",{limit:50,offset:0});t.success&&(this.jobs=t.data.jobs||[])}catch(t){this.error=String(t)}finally{this.loading=!1}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}getStatusClass(t){return`status-badge status-${t}`}formatDate(t){return new Date(t).toLocaleString()}handleViewJob(t){console.log("View job clicked:",t),this.selectedJobId=t,this.requestUpdate()}handleBackToList(){console.log("Back to list clicked"),this.selectedJobId=null,this.loadJobs()}render(){return this.selectedJobId?d`
+  `,n([u({type:String})],w.prototype,"rpcBase",2),n([c()],w.prototype,"repositories",2),n([c()],w.prototype,"loading",2),n([c()],w.prototype,"error",2),n([c()],w.prototype,"showForm",2),n([c()],w.prototype,"editingRepo",2),w=n([_("github-rag-repository-list")],w);var A=class extends m{constructor(){super(...arguments);this.rpcBase="";this.jobs=[];this.loading=!1;this.error=""}connectedCallback(){super.connectedCallback(),this.loadJobs()}async loadJobs(){this.loading=!0;try{await this.waitForPluginAPI();let t=await this.pluginAPI.call("list_jobs",{limit:50,offset:0});t.success&&(this.jobs=t.data.jobs||[])}catch(t){this.error=String(t)}finally{this.loading=!1}}async waitForPluginAPI(){for(let t=0;t<50;t++){if(this.pluginAPI)return;await new Promise(s=>setTimeout(s,100))}throw new Error("Plugin API timeout")}getStatusClass(t){return`status-badge status-${t}`}formatDate(t){return new Date(t).toLocaleString()}handleViewJob(t){console.log("View job clicked:",t),this.selectedJobId=t,this.requestUpdate()}handleBackToList(){console.log("Back to list clicked"),this.selectedJobId=null,this.loadJobs()}render(){return this.selectedJobId?d`
         <github-rag-job-detail
           .jobId=${this.selectedJobId}
           .api=${this.pluginAPI}
@@ -649,7 +680,7 @@
             </table>
           </div>
         `}
-    `}};A.styles=$`
+    `}};A.styles=y`
     :host {
       display: block;
       padding: 24px;
@@ -724,7 +755,7 @@
       padding: 4px 12px;
       font-size: 12px;
     }
-  `,n([f({type:String})],A.prototype,"rpcBase",2),n([h()],A.prototype,"jobs",2),n([h()],A.prototype,"loading",2),n([h()],A.prototype,"error",2),A=n([x("github-rag-job-list")],A);var y=class extends v{constructor(){super(...arguments);this.jobId="";this.api=null;this.onBack=null;this.job=null;this.logs=[];this.loading=!1;this.error="";this.selectedLevel=""}connectedCallback(){super.connectedCallback(),this.loadJobDetails()}async loadJobDetails(){if(!(!this.api||!this.jobId)){this.loading=!0;try{let t=await this.api.call("get_job",{id:this.jobId});t.success&&(this.job=t.data);let s=await this.api.call("get_job_logs",{job_id:this.jobId,level:this.selectedLevel,limit:1e3,offset:0});s.success&&(this.logs=s.data.logs||[])}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}}handleLevelFilter(t){let s=t.target;this.selectedLevel=s.value,this.loadJobDetails()}formatDate(t){return new Date(t).toLocaleString()}render(){return this.job?d`
+  `,n([u({type:String})],A.prototype,"rpcBase",2),n([c()],A.prototype,"jobs",2),n([c()],A.prototype,"loading",2),n([c()],A.prototype,"error",2),A=n([_("github-rag-job-list")],A);var $=class extends m{constructor(){super(...arguments);this.jobId="";this.api=null;this.onBack=null;this.job=null;this.logs=[];this.loading=!1;this.error="";this.selectedLevel=""}connectedCallback(){super.connectedCallback(),this.loadJobDetails()}async loadJobDetails(){if(!(!this.api||!this.jobId)){this.loading=!0;try{let t=await this.api.call("get_job",{id:this.jobId});t.success&&(this.job=t.data);let s=await this.api.call("get_job_logs",{job_id:this.jobId,level:this.selectedLevel,limit:1e3,offset:0});s.success&&(this.logs=s.data.logs||[])}catch(t){this.error=`Error: ${t.message}`}finally{this.loading=!1}}}handleLevelFilter(t){let s=t.target;this.selectedLevel=s.value,this.loadJobDetails()}formatDate(t){return new Date(t).toLocaleString()}render(){return this.job?d`
       <div class="header">
         <h2>Job ${this.job.id.substring(0,8)}</h2>
         <button class="back-btn" @click=${()=>this.onBack&&this.onBack()}>
@@ -795,7 +826,7 @@
           `}
         </div>
       </div>
-    `:d`<div class="empty">Loading job details...</div>`}};y.styles=$`
+    `:d`<div class="empty">Loading job details...</div>`}};$.styles=y`
     :host {
       display: block;
       padding: 24px;
@@ -938,7 +969,190 @@
       text-align: center;
       color: #666;
     }
-  `,n([f({type:String})],y.prototype,"jobId",2),n([f({type:Object})],y.prototype,"api",2),n([f({type:Function})],y.prototype,"onBack",2),n([h()],y.prototype,"job",2),n([h()],y.prototype,"logs",2),n([h()],y.prototype,"loading",2),n([h()],y.prototype,"error",2),n([h()],y.prototype,"selectedLevel",2),y=n([x("github-rag-job-detail")],y);})();
+  `,n([u({type:String})],$.prototype,"jobId",2),n([u({type:Object})],$.prototype,"api",2),n([u({type:Function})],$.prototype,"onBack",2),n([c()],$.prototype,"job",2),n([c()],$.prototype,"logs",2),n([c()],$.prototype,"loading",2),n([c()],$.prototype,"error",2),n([c()],$.prototype,"selectedLevel",2),$=n([_("github-rag-job-detail")],$);var x=class extends m{constructor(){super(...arguments);this.sourceDatasource=null;this.api=null;this.onClose=null;this.onSuccess=null;this.name="";this.namespace="";this.loading=!1;this.error=""}connectedCallback(){super.connectedCallback(),this.sourceDatasource&&(this.name=`Copy of ${this.sourceDatasource.name}`,this.namespace=this.sourceDatasource.db_name||"")}async handleSubmit(t){if(t.preventDefault(),!this.api||!this.sourceDatasource){this.error="API not available";return}if(!this.name.trim()){this.error="Name is required";return}if(!this.namespace.trim()){this.error="Namespace is required";return}this.loading=!0,this.error="";try{let s=await this.api.call("clone_datasource",{source_datasource_id:this.sourceDatasource.id});if(!s.success){this.error=s.error||"Failed to clone datasource",this.loading=!1;return}let i=s.data.datasource_id,o=await this.api.call("update_datasource_fields",{datasource_id:i,name:this.name.trim(),db_name:this.namespace.trim()});o.success?(this.onSuccess&&this.onSuccess(i),this.onClose&&this.onClose()):this.error=o.error||"Failed to update datasource fields"}catch(s){this.error=`Error: ${s.message}`}finally{this.loading=!1}}handleCancel(){this.onClose&&this.onClose()}render(){return this.sourceDatasource?d`
+      <div class="modal-overlay" @click=${this.handleCancel}>
+        <div class="modal-content" @click=${t=>t.stopPropagation()}>
+          <h2 class="modal-header">Clone Datasource</h2>
+
+          <div class="source-info">
+            <strong>Cloning from:</strong>
+            ${this.sourceDatasource.name}
+            <div class="hint">
+              All configuration including API keys will be copied
+            </div>
+          </div>
+
+          ${this.error?d`<div class="error">${this.error}</div>`:""}
+
+          <form @submit=${this.handleSubmit}>
+            <div class="form-group">
+              <label for="name">Datasource Name *</label>
+              <input
+                type="text"
+                id="name"
+                .value=${this.name}
+                @input=${t=>this.name=t.target.value}
+                required
+                ?disabled=${this.loading}
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="namespace">Namespace / Collection Name *</label>
+              <input
+                type="text"
+                id="namespace"
+                .value=${this.namespace}
+                @input=${t=>this.namespace=t.target.value}
+                required
+                ?disabled=${this.loading}
+              />
+              <div class="hint">
+                Vector store collection/namespace (db_name field)
+              </div>
+            </div>
+
+            <div class="button-group">
+              <button
+                type="button"
+                class="btn-cancel"
+                @click=${this.handleCancel}
+                ?disabled=${this.loading}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn-primary"
+                ?disabled=${this.loading}
+              >
+                ${this.loading?"Creating...":"Create Datasource"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `:d``}};x.styles=y`
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .modal-header {
+      margin: 0 0 20px 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #1976d2;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .error {
+      background: #ffebee;
+      color: #c62828;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 24px;
+    }
+
+    button {
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: background 0.2s;
+    }
+
+    .btn-cancel {
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .btn-cancel:hover {
+      background: #e0e0e0;
+    }
+
+    .btn-primary {
+      background: #1976d2;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1565c0;
+    }
+
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .source-info {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+
+    .source-info strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+  `,n([u({type:Object})],x.prototype,"sourceDatasource",2),n([u({type:Object})],x.prototype,"api",2),n([u({type:Function})],x.prototype,"onClose",2),n([u({type:Function})],x.prototype,"onSuccess",2),n([c()],x.prototype,"name",2),n([c()],x.prototype,"namespace",2),n([c()],x.prototype,"loading",2),n([c()],x.prototype,"error",2),x=n([_("datasource-clone-modal")],x);})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
