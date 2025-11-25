@@ -24,3 +24,6 @@ Thumbs.db
 # Temporary files
 *.log
 *.tmp
+
+
+plugins/github-rag-ingest/server/github-rag-ingest
