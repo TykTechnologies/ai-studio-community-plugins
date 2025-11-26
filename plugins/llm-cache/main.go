@@ -59,6 +59,9 @@ type LLMCachePlugin struct {
 	aggregatedStats  map[string]*EdgeStatsRecord
 	stopStatsReporter chan struct{}
 
+	// Services reference for KV persistence (works in both modes)
+	services plugin_sdk.ServiceBroker
+
 	// Track if reporter has been started (Initialize is called twice in gateway mode)
 	reporterStarted bool
 	reporterMu      sync.Mutex
@@ -134,6 +137,18 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 		}
 	} else {
 		// Studio (control) mode: We receive stats via AcceptEdgePayload
+		// Store services reference for KV persistence
+		p.services = ctx.Services
+
+		// Load persisted stats from KV storage
+		if p.services != nil && p.services.KV() != nil {
+			if err := p.loadStatsFromKV(); err != nil {
+				log.Printf("%s: Failed to load persisted stats: %v (starting fresh)", PluginName, err)
+			} else {
+				log.Printf("%s: Loaded %d edge stats from KV storage", PluginName, len(p.aggregatedStats))
+			}
+		}
+
 		log.Printf("%s: Studio mode - ready to receive stats from edge instances", PluginName)
 	}
 
@@ -657,6 +672,11 @@ func (p *LLMCachePlugin) AcceptEdgePayload(ctx plugin_sdk.Context, payload *plug
 	}
 	p.aggregateMu.Unlock()
 
+	// Persist to KV storage for durability across restarts
+	if err := p.saveStatsToKV(); err != nil {
+		log.Printf("%s: Failed to persist stats to KV: %v", PluginName, err)
+	}
+
 	log.Printf("%s: Received stats from edge %s: hits=%d, misses=%d, hit_rate=%.2f%%",
 		PluginName, payload.EdgeID, stats.HitCount, stats.MissCount, stats.HitRate*100)
 
@@ -719,6 +739,81 @@ func (p *LLMCachePlugin) getAggregatedMetrics() map[string]interface{} {
 		"total_tokens_saved": totalTokensSaved,
 		"edges":              edgeStats,
 	}
+}
+
+// ============================================================================
+// KV Persistence for Aggregated Stats (Studio Mode)
+// ============================================================================
+
+const kvStatsKey = "aggregated_edge_stats"
+
+// persistedStats is the structure saved to KV storage
+type persistedStats struct {
+	Stats     map[string]*EdgeStatsRecord `json:"stats"`
+	UpdatedAt int64                       `json:"updated_at"`
+}
+
+// loadStatsFromKV loads persisted aggregated stats from KV storage
+func (p *LLMCachePlugin) loadStatsFromKV() error {
+	if p.services == nil || p.services.KV() == nil {
+		return fmt.Errorf("KV service not available")
+	}
+
+	ctx := context.Background()
+	data, err := p.services.KV().Read(ctx, kvStatsKey)
+	if err != nil {
+		// Key not found is not an error - just means no persisted data
+		return nil
+	}
+
+	if len(data) == 0 {
+		// No persisted data, start fresh
+		return nil
+	}
+
+	var persisted persistedStats
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		return fmt.Errorf("failed to unmarshal persisted stats: %w", err)
+	}
+
+	p.aggregateMu.Lock()
+	p.aggregatedStats = persisted.Stats
+	if p.aggregatedStats == nil {
+		p.aggregatedStats = make(map[string]*EdgeStatsRecord)
+	}
+	p.aggregateMu.Unlock()
+
+	log.Printf("%s: Restored %d edge stats from KV (persisted at %s)",
+		PluginName, len(persisted.Stats), time.Unix(persisted.UpdatedAt, 0).Format(time.RFC3339))
+
+	return nil
+}
+
+// saveStatsToKV persists current aggregated stats to KV storage
+func (p *LLMCachePlugin) saveStatsToKV() error {
+	if p.services == nil || p.services.KV() == nil {
+		return fmt.Errorf("KV service not available")
+	}
+
+	p.aggregateMu.RLock()
+	persisted := persistedStats{
+		Stats:     p.aggregatedStats,
+		UpdatedAt: time.Now().Unix(),
+	}
+	p.aggregateMu.RUnlock()
+
+	data, err := json.Marshal(persisted)
+	if err != nil {
+		return fmt.Errorf("failed to marshal stats: %w", err)
+	}
+
+	ctx := context.Background()
+	_, err = p.services.KV().Write(ctx, kvStatsKey, data, nil)
+	if err != nil {
+		return fmt.Errorf("failed to write to KV: %w", err)
+	}
+
+	return nil
 }
 
 func main() {
