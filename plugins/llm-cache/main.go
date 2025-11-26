@@ -83,15 +83,13 @@ func NewLLMCachePlugin() *LLMCachePlugin {
 
 // Initialize implements plugin_sdk.Plugin
 func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string]string) error {
-	log.Printf("%s: Initializing in %s runtime", PluginName, ctx.Runtime)
-
 	// Store runtime for mode-specific behavior
 	p.runtime = ctx.Runtime
 
 	// Parse configuration
 	config, err := ParseConfig(configMap)
 	if err != nil {
-		log.Printf("%s: Failed to parse config, using defaults: %v", PluginName, err)
+		log.Printf("%s: Config parse error, using defaults: %v", PluginName, err)
 		config = DefaultConfig()
 	}
 	p.config = config
@@ -109,64 +107,44 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 	// Runtime-specific initialization
 	if p.runtime == plugin_sdk.RuntimeGateway {
 		// Gateway (edge) mode: Store services reference and start stats reporter
-		// Broker ID is now passed in the first (and only) Initialize call
 		p.gatewayServices = ctx.Services.Gateway()
 
 		// Check if we have the broker ID
-		hasBrokerID := false
-		if _, ok := configMap["_service_broker_id"]; ok {
-			hasBrokerID = true
-		}
+		_, hasBrokerID := configMap["_service_broker_id"]
 
 		if p.gatewayServices != nil && hasBrokerID {
 			p.reporterMu.Lock()
 			if !p.reporterStarted {
 				p.reporterStarted = true
 				p.reporterMu.Unlock()
-				log.Printf("%s: Gateway mode - services available, starting stats reporter", PluginName)
 				go p.reportStatsToControl()
-				log.Printf("%s: Gateway mode - stats reporter started (interval: %ds)", PluginName, config.ReportIntervalSeconds)
 			} else {
 				p.reporterMu.Unlock()
-				log.Printf("%s: Gateway mode - reporter already running", PluginName)
 			}
 		} else if !hasBrokerID {
-			log.Printf("%s: Gateway mode - no broker ID available, stats reporting disabled", PluginName)
-		} else {
-			log.Printf("%s: Gateway mode - WARNING: Gateway services not available, stats reporting disabled", PluginName)
+			log.Printf("%s: Stats reporting disabled (no broker ID)", PluginName)
 		}
 	} else {
 		// Studio (control) mode: We receive stats via AcceptEdgePayload
-		// Store services reference for KV persistence
 		p.services = ctx.Services
 
 		// Load persisted stats from KV storage
 		if p.services != nil && p.services.KV() != nil {
 			if err := p.loadStatsFromKV(); err != nil {
-				log.Printf("%s: Failed to load persisted stats: %v (starting fresh)", PluginName, err)
-			} else {
-				log.Printf("%s: Loaded %d edge stats from KV storage", PluginName, len(p.aggregatedStats))
+				log.Printf("%s: Failed to load persisted stats: %v", PluginName, err)
 			}
 		}
-
-		log.Printf("%s: Studio mode - ready to receive stats from edge instances", PluginName)
 	}
-
-	log.Printf("%s: Initialized with TTL=%ds, MaxSize=%dMB, MaxEntry=%dKB, Namespaces=%v",
-		PluginName, config.TTLSeconds, config.MaxCacheSizeMB, config.MaxEntrySizeKB, config.Namespaces)
 
 	return nil
 }
 
 // Shutdown implements plugin_sdk.Plugin
 func (p *LLMCachePlugin) Shutdown(ctx plugin_sdk.Context) error {
-	log.Printf("%s: Shutting down", PluginName)
-
 	// Stop the stats reporter if running (gateway mode)
 	if p.runtime == plugin_sdk.RuntimeGateway {
 		close(p.stopStatsReporter)
 	}
-
 	return nil
 }
 
@@ -174,19 +152,15 @@ func (p *LLMCachePlugin) Shutdown(ctx plugin_sdk.Context) error {
 // This is called before the request is forwarded to the LLM
 func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.EnrichedRequest) (*pb.PluginResponse, error) {
 	// Warm up the broker connection on first request if not already done
-	// This is needed because the broker connection isn't fully established until
-	// an RPC call triggers the dial from within the plugin RPC context
 	p.warmupBrokerOnce.Do(func() {
 		if p.gatewayServices != nil && p.runtime == plugin_sdk.RuntimeGateway {
 			warmupCtx := context.Background()
 			_, err := p.gatewayServices.SendToControlJSON(warmupCtx, map[string]string{
-				"event": "broker_warmup",
+				"event":  "broker_warmup",
 				"plugin": PluginName,
 			}, "broker-warmup", nil)
 			if err != nil {
-				log.Printf("%s: Broker warmup failed: %v (stats reporting may not work)", PluginName, err)
-			} else {
-				log.Printf("%s: Broker connection warmed up successfully", PluginName)
+				log.Printf("%s: Broker warmup failed: %v", PluginName, err)
 			}
 		}
 	})
@@ -202,7 +176,6 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 	// Check for bypass
 	if p.shouldBypass(req) {
 		p.metrics.IncrementBypass()
-		log.Printf("%s: Cache bypass requested for request %s", PluginName, requestID)
 
 		// Store pending op with ShouldCache=false
 		p.pendingMu.Lock()
@@ -221,19 +194,14 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 	// Generate cache key from request
 	cacheKey, model, err := GenerateCacheKey(namespace, pluginReq.Body, p.config.NormalizePrompts)
 	if err != nil {
-		log.Printf("%s: Failed to generate cache key: %v", PluginName, err)
 		return &pb.PluginResponse{Modified: false}, nil
 	}
 
 	// Check cache for HIT
 	entry := p.cache.Get(cacheKey)
 	if entry != nil {
-		// Cache HIT!
 		p.metrics.IncrementHit()
 		p.metrics.AddTokensSaved(int64(entry.TokensSaved))
-
-		log.Printf("%s: Cache HIT for key %s (model=%s, tokens_saved=%d)",
-			PluginName, cacheKey, model, entry.TokensSaved)
 
 		// Build response headers
 		headers := make(map[string]string)
@@ -260,7 +228,6 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 
 	// Cache MISS - store pending operation for response phase
 	p.metrics.IncrementMiss()
-	log.Printf("%s: Cache MISS for key %s (model=%s)", PluginName, cacheKey, model)
 
 	p.pendingMu.Lock()
 	p.pendingCache[requestID] = &PendingCacheOp{
@@ -330,7 +297,6 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 
 	// Check if response indicates an error (don't cache errors)
 	if p.isErrorResponse(req.Body) {
-		log.Printf("%s: Not caching error response for request %s", PluginName, requestID)
 		modifiedHeaders["X-Cache-Status"] = "MISS"
 		return &pb.ResponseWriteResponse{
 			Modified: true,
@@ -343,7 +309,7 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 	tokensSaved := ExtractTokensFromResponse(req.Body)
 
 	// Store in cache
-	stored := p.cache.Set(
+	p.cache.Set(
 		pendingOp.CacheKey,
 		req.Body,
 		req.Headers,
@@ -351,13 +317,6 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 		tokensSaved,
 		nil, // Use default TTL
 	)
-
-	if stored {
-		log.Printf("%s: Cached response for key %s (model=%s, tokens=%d, size=%d)",
-			PluginName, pendingOp.CacheKey, pendingOp.Model, tokensSaved, len(req.Body))
-	} else {
-		log.Printf("%s: Failed to cache response for key %s (entry too large)", PluginName, pendingOp.CacheKey)
-	}
 
 	// Add cache status headers
 	modifiedHeaders["X-Cache-Status"] = "MISS"
@@ -411,10 +370,7 @@ func (p *LLMCachePlugin) GetManifest() ([]byte, error) {
 
 // HandleRPC implements plugin_sdk.UIProvider
 func (p *LLMCachePlugin) HandleRPC(method string, payload []byte) ([]byte, error) {
-	log.Printf("%s: RPC Call - method: %s", PluginName, method)
-
 	var result interface{}
-	var err error
 
 	switch method {
 	case "getMetrics":
@@ -425,10 +381,6 @@ func (p *LLMCachePlugin) HandleRPC(method string, payload []byte) ([]byte, error
 		result = p.rpcGetConfig()
 	default:
 		return nil, fmt.Errorf("unknown RPC method: %s", method)
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	return json.Marshal(result)
@@ -510,13 +462,7 @@ func (p *LLMCachePlugin) periodicCleanup() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Clean up expired cache entries
-		removed := p.cache.CleanupExpired()
-		if removed > 0 {
-			log.Printf("%s: Cleaned up %d expired cache entries", PluginName, removed)
-		}
-
-		// Clean up stale pending operations (older than 5 minutes)
+		p.cache.CleanupExpired()
 		p.cleanupStalePending()
 	}
 }
@@ -528,29 +474,19 @@ func (p *LLMCachePlugin) cleanupStalePending() {
 	p.pendingMu.Lock()
 	defer p.pendingMu.Unlock()
 
-	removed := 0
 	for key, op := range p.pendingCache {
 		if op.Timestamp < threshold {
 			delete(p.pendingCache, key)
-			removed++
 		}
-	}
-
-	if removed > 0 {
-		log.Printf("%s: Cleaned up %d stale pending operations", PluginName, removed)
 	}
 }
 
 // RPC method implementations
 
 func (p *LLMCachePlugin) rpcGetMetrics() interface{} {
-	log.Printf("%s: rpcGetMetrics called, runtime=%s", PluginName, p.runtime)
-
 	// In control plane (studio) mode, return aggregated stats from all edges
 	if p.runtime == plugin_sdk.RuntimeStudio {
-		result := p.getAggregatedMetrics()
-		log.Printf("%s: Returning aggregated metrics: edge_count=%d", PluginName, len(p.aggregatedStats))
-		return result
+		return p.getAggregatedMetrics()
 	}
 
 	// In gateway (edge) mode, return local stats
@@ -573,7 +509,6 @@ func (p *LLMCachePlugin) rpcGetMetrics() interface{} {
 func (p *LLMCachePlugin) rpcClearCache() interface{} {
 	p.cache.Clear()
 	p.metrics.Reset()
-	log.Printf("%s: Cache cleared via RPC", PluginName)
 	return map[string]interface{}{
 		"success": true,
 		"message": "Cache cleared successfully",
@@ -598,7 +533,6 @@ func (p *LLMCachePlugin) reportStatsToControl() {
 	for {
 		select {
 		case <-p.stopStatsReporter:
-			log.Printf("%s: Stats reporter stopped", PluginName)
 			return
 		case <-ticker.C:
 			p.sendStatsToControl()
@@ -608,13 +542,10 @@ func (p *LLMCachePlugin) reportStatsToControl() {
 
 // sendStatsToControl collects current stats and sends them to the control plane
 func (p *LLMCachePlugin) sendStatsToControl() {
-	// Check if gateway services are available
 	if p.gatewayServices == nil {
-		log.Printf("%s: Cannot send stats - gateway services not available", PluginName)
 		return
 	}
 
-	// Collect current stats
 	entries, sizeBytes, evictions := p.cache.Stats()
 
 	stats := EdgeCacheStats{
@@ -630,19 +561,13 @@ func (p *LLMCachePlugin) sendStatsToControl() {
 		Timestamp:        time.Now().Unix(),
 	}
 
-	// Send to control plane using unified SDK's gateway services
 	ctx := context.Background()
-	pendingCount, err := p.gatewayServices.SendToControlJSON(ctx, stats, "", map[string]string{
+	_, err := p.gatewayServices.SendToControlJSON(ctx, stats, "", map[string]string{
 		"metric_type": "llm_cache_stats",
 	})
-
 	if err != nil {
-		log.Printf("%s: Failed to send stats to control plane: %v", PluginName, err)
-		return
+		log.Printf("%s: Failed to send stats: %v", PluginName, err)
 	}
-
-	log.Printf("%s: Stats sent to control plane (hits=%d, misses=%d, pending_queue=%d)",
-		PluginName, stats.HitCount, stats.MissCount, pendingCount)
 }
 
 // AcceptEdgePayload implements plugin_sdk.EdgePayloadReceiver
@@ -651,14 +576,11 @@ func (p *LLMCachePlugin) AcceptEdgePayload(ctx plugin_sdk.Context, payload *plug
 	// Check if this payload is for us
 	metricType, ok := payload.Metadata["metric_type"]
 	if !ok || metricType != "llm_cache_stats" {
-		// Not our payload, return handled=false so other plugins can process it
 		return false, nil
 	}
 
-	// Parse the stats payload
 	var stats EdgeCacheStats
 	if err := json.Unmarshal(payload.Payload, &stats); err != nil {
-		log.Printf("%s: Failed to parse edge stats from %s: %v", PluginName, payload.EdgeID, err)
 		return true, fmt.Errorf("invalid payload format: %w", err)
 	}
 
@@ -674,11 +596,8 @@ func (p *LLMCachePlugin) AcceptEdgePayload(ctx plugin_sdk.Context, payload *plug
 
 	// Persist to KV storage for durability across restarts
 	if err := p.saveStatsToKV(); err != nil {
-		log.Printf("%s: Failed to persist stats to KV: %v", PluginName, err)
+		log.Printf("%s: Failed to persist stats: %v", PluginName, err)
 	}
-
-	log.Printf("%s: Received stats from edge %s: hits=%d, misses=%d, hit_rate=%.2f%%",
-		PluginName, payload.EdgeID, stats.HitCount, stats.MissCount, stats.HitRate*100)
 
 	return true, nil
 }
@@ -782,9 +701,6 @@ func (p *LLMCachePlugin) loadStatsFromKV() error {
 		p.aggregatedStats = make(map[string]*EdgeStatsRecord)
 	}
 	p.aggregateMu.Unlock()
-
-	log.Printf("%s: Restored %d edge stats from KV (persisted at %s)",
-		PluginName, len(persisted.Stats), time.Unix(persisted.UpdatedAt, 0).Format(time.RFC3339))
 
 	return nil
 }
