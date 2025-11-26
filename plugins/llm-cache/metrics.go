@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync/atomic"
+	"time"
 )
 
 // CacheMetrics tracks cache performance metrics
@@ -98,4 +99,26 @@ func (m *CacheMetrics) Snapshot() map[string]interface{} {
 		"total_tokens_saved": tokens,
 		"hit_rate":           hitRate,
 	}
+}
+
+// EdgeCacheStats is the payload sent from edge instances to control plane
+type EdgeCacheStats struct {
+	HitCount         int64   `json:"hit_count"`
+	MissCount        int64   `json:"miss_count"`
+	BypassCount      int64   `json:"bypass_count"`
+	EvictionCount    int64   `json:"eviction_count"`
+	ActiveEntries    int     `json:"active_entries"`
+	CacheSizeBytes   int64   `json:"cache_size_bytes"`
+	MaxSizeBytes     int64   `json:"max_size_bytes"`
+	HitRate          float64 `json:"hit_rate"`
+	TotalTokensSaved int64   `json:"total_tokens_saved"`
+	Timestamp        int64   `json:"timestamp"`
+}
+
+// EdgeStatsRecord stores stats received from an edge instance on the control plane
+type EdgeStatsRecord struct {
+	EdgeID     string
+	Namespace  string
+	Stats      EdgeCacheStats
+	LastUpdate time.Time
 }

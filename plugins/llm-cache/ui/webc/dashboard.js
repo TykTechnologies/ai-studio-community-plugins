@@ -105,6 +105,21 @@ class LLMCacheDashboard extends HTMLElement {
     const m = this.data.metrics;
     if (!m) return;
 
+    // Check if we're in aggregated mode (control plane) or local mode (edge)
+    const isAggregated = m.mode === 'aggregated';
+
+    // Update mode indicator
+    const modeIndicator = this.shadowRoot.querySelector('#mode-indicator');
+    if (modeIndicator) {
+      if (isAggregated) {
+        modeIndicator.innerHTML = `<span class="mode-badge aggregated">Aggregated View</span> <span class="edge-count">${m.edge_count || 0} edge instance(s)</span>`;
+        modeIndicator.style.display = 'block';
+      } else {
+        modeIndicator.innerHTML = `<span class="mode-badge local">Local View</span>`;
+        modeIndicator.style.display = 'block';
+      }
+    }
+
     // Update stat values
     this.updateStat('hit-count', m.hit_count || 0);
     this.updateStat('miss-count', m.miss_count || 0);
@@ -122,7 +137,7 @@ class LLMCacheDashboard extends HTMLElement {
     const maxBytes = m.max_size_bytes || 1;
     const usedMB = (sizeBytes / (1024 * 1024)).toFixed(2);
     const maxMB = (maxBytes / (1024 * 1024)).toFixed(0);
-    const usagePercent = ((sizeBytes / maxBytes) * 100).toFixed(1);
+    const usagePercent = maxBytes > 0 ? ((sizeBytes / maxBytes) * 100).toFixed(1) : '0';
 
     this.updateStat('cache-size', `${usedMB} MB / ${maxMB} MB`);
     this.updateStat('cache-usage', usagePercent + '%');
@@ -133,6 +148,68 @@ class LLMCacheDashboard extends HTMLElement {
       progressBar.style.width = usagePercent + '%';
       progressBar.style.background = usagePercent > 90 ? '#f44336' : usagePercent > 70 ? '#ff9800' : '#4caf50';
     }
+
+    // In aggregated mode, update the storage section to clarify it's a sum across edges
+    const storageSubtitle = this.shadowRoot.querySelector('#storage-subtitle');
+    const storageInfo = this.shadowRoot.querySelector('#storage-info');
+    if (isAggregated) {
+      const edgeCount = m.edge_count || 0;
+      if (storageSubtitle) {
+        storageSubtitle.textContent = `Total across ${edgeCount} edge instance(s)`;
+      }
+      if (storageInfo) {
+        storageInfo.textContent = `Each edge instance has its own independent cache. See the Edge Instances table below for per-edge storage details.`;
+      }
+    } else {
+      if (storageSubtitle) {
+        storageSubtitle.textContent = 'Current Usage';
+      }
+      if (storageInfo) {
+        storageInfo.textContent = 'When the cache reaches maximum size, least recently used entries are evicted to make room for new ones.';
+      }
+    }
+
+    // Update edge instances table (aggregated mode only)
+    this.updateEdgeTable(m);
+  }
+
+  updateEdgeTable(metrics) {
+    const edgeSection = this.shadowRoot.querySelector('#edge-instances-section');
+    if (!edgeSection) return;
+
+    if (metrics.mode !== 'aggregated' || !metrics.edges || metrics.edges.length === 0) {
+      edgeSection.style.display = 'none';
+      return;
+    }
+
+    edgeSection.style.display = 'block';
+
+    const tbody = this.shadowRoot.querySelector('#edge-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = metrics.edges.map(edge => {
+      const lastUpdate = edge.last_update ? new Date(edge.last_update * 1000).toLocaleString() : 'Never';
+      const hitRate = ((edge.hit_rate || 0) * 100).toFixed(1);
+      const cacheSizeBytes = edge.cache_size_bytes || 0;
+      const maxSizeBytes = edge.max_size_bytes || 0;
+      const cacheSize = (cacheSizeBytes / (1024 * 1024)).toFixed(2);
+      const maxSize = maxSizeBytes > 0 ? (maxSizeBytes / (1024 * 1024)).toFixed(0) : '?';
+      const usagePercent = maxSizeBytes > 0 ? ((cacheSizeBytes / maxSizeBytes) * 100).toFixed(0) : '0';
+
+      return `
+        <tr>
+          <td><code>${edge.edge_id || 'Unknown'}</code></td>
+          <td>${edge.namespace || '-'}</td>
+          <td class="stat-success">${edge.hit_count || 0}</td>
+          <td>${edge.miss_count || 0}</td>
+          <td>${hitRate}%</td>
+          <td>${edge.active_entries || 0}</td>
+          <td>${cacheSize} / ${maxSize} MB (${usagePercent}%)</td>
+          <td>${this.formatNumber(edge.tokens_saved || 0)}</td>
+          <td class="last-update">${lastUpdate}</td>
+        </tr>
+      `;
+    }).join('');
   }
 
   updateConfigDisplay() {
@@ -455,6 +532,80 @@ class LLMCacheDashboard extends HTMLElement {
           margin: 0 auto 16px;
           opacity: 0.8;
         }
+
+        .mode-badge {
+          display: inline-block;
+          padding: 4px 12px;
+          border-radius: 16px;
+          font-size: 12px;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+
+        .mode-badge.aggregated {
+          background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+          color: #1565c0;
+        }
+
+        .mode-badge.local {
+          background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+          color: #2e7d32;
+        }
+
+        .edge-count {
+          font-size: 14px;
+          color: #666;
+          margin-left: 8px;
+        }
+
+        #mode-indicator {
+          margin-bottom: 20px;
+          display: none;
+        }
+
+        .edge-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 13px;
+        }
+
+        .edge-table th,
+        .edge-table td {
+          padding: 12px 8px;
+          text-align: left;
+          border-bottom: 1px solid #e0e0e0;
+        }
+
+        .edge-table th {
+          background: #f5f5f5;
+          font-weight: 600;
+          color: #333;
+        }
+
+        .edge-table tr:hover {
+          background: #fafafa;
+        }
+
+        .edge-table code {
+          background: #e3f2fd;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 12px;
+        }
+
+        .edge-table .stat-success {
+          color: #388e3c;
+          font-weight: 600;
+        }
+
+        .edge-table .last-update {
+          color: #666;
+          font-size: 12px;
+        }
+
+        #edge-instances-section {
+          display: none;
+        }
       </style>
 
       <div id="loading-spinner">Loading Cache Dashboard...</div>
@@ -468,6 +619,8 @@ class LLMCacheDashboard extends HTMLElement {
             <button id="clear-cache-btn" class="btn-danger">Clear Cache</button>
           </div>
         </div>
+
+        <div id="mode-indicator"></div>
 
         <div class="stats-grid">
           <div class="stat-card highlight">
@@ -497,12 +650,12 @@ class LLMCacheDashboard extends HTMLElement {
         </div>
 
         <div class="two-columns">
-          <div class="section">
+          <div class="section" id="storage-section">
             <div class="section-header">Cache Storage</div>
             <div class="section-content">
               <div style="text-align: center; margin-bottom: 16px;">
                 <div style="font-size: 24px; font-weight: bold; color: #333;" id="cache-size">0 MB / 256 MB</div>
-                <div style="font-size: 14px; color: #666;">Current Usage</div>
+                <div style="font-size: 14px; color: #666;" id="storage-subtitle">Current Usage</div>
               </div>
 
               <div class="cache-usage-bar">
@@ -522,7 +675,7 @@ class LLMCacheDashboard extends HTMLElement {
                 </div>
               </div>
 
-              <div class="info-text">
+              <div class="info-text" id="storage-info">
                 When the cache reaches maximum size, least recently used entries are evicted to make room for new ones.
               </div>
             </div>
@@ -534,6 +687,32 @@ class LLMCacheDashboard extends HTMLElement {
               <div class="config-item">
                 <span class="config-label">Loading...</span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="edge-instances-section" class="section">
+          <div class="section-header">Edge Instances</div>
+          <div class="section-content">
+            <table class="edge-table">
+              <thead>
+                <tr>
+                  <th>Edge ID</th>
+                  <th>Namespace</th>
+                  <th>Hits</th>
+                  <th>Misses</th>
+                  <th>Hit Rate</th>
+                  <th>Entries</th>
+                  <th>Cache Size</th>
+                  <th>Tokens Saved</th>
+                  <th>Last Update</th>
+                </tr>
+              </thead>
+              <tbody id="edge-table-body">
+              </tbody>
+            </table>
+            <div class="info-text">
+              Statistics from connected edge instances are aggregated above. Each edge maintains its own local cache.
             </div>
           </div>
         </div>

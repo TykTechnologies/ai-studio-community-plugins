@@ -8,7 +8,7 @@
     "primary_hook": "post_auth"
   },
   "permissions": {
-    "services": ["apps.read", "kv.read"],
+    "services": ["apps.read", "kv.read", "control.send"],
     "ui": ["sidebar.register", "route.register"],
     "rpc": ["call"],
     "routes": ["GET:/plugin/com.tyk.llm-cache/rpc/*"]

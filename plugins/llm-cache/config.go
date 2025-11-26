@@ -7,25 +7,27 @@ import (
 
 // CacheConfig holds the plugin configuration
 type CacheConfig struct {
-	Enabled              bool     `json:"enabled"`
-	TTLSeconds           int      `json:"ttl_seconds"`
-	MaxEntrySizeKB       int64    `json:"max_entry_size_kb"`
-	MaxCacheSizeMB       int64    `json:"max_cache_size_mb"`
-	Namespaces           []string `json:"namespaces"`
-	NormalizePrompts     bool     `json:"normalize_prompts"`
-	ExposeCacheKeyHeader bool     `json:"expose_cache_key_header"`
+	Enabled               bool     `json:"enabled"`
+	TTLSeconds            int      `json:"ttl_seconds"`
+	MaxEntrySizeKB        int64    `json:"max_entry_size_kb"`
+	MaxCacheSizeMB        int64    `json:"max_cache_size_mb"`
+	Namespaces            []string `json:"namespaces"`
+	NormalizePrompts      bool     `json:"normalize_prompts"`
+	ExposeCacheKeyHeader  bool     `json:"expose_cache_key_header"`
+	ReportIntervalSeconds int      `json:"report_interval_seconds"` // How often to send stats to control (edge mode)
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *CacheConfig {
 	return &CacheConfig{
-		Enabled:              true,
-		TTLSeconds:           3600,
-		MaxEntrySizeKB:       2048,
-		MaxCacheSizeMB:       256,
-		Namespaces:           []string{"api_key"},
-		NormalizePrompts:     true,
-		ExposeCacheKeyHeader: false,
+		Enabled:               true,
+		TTLSeconds:            3600,
+		MaxEntrySizeKB:        2048,
+		MaxCacheSizeMB:        256,
+		Namespaces:            []string{"api_key"},
+		NormalizePrompts:      true,
+		ExposeCacheKeyHeader:  false,
+		ReportIntervalSeconds: 60, // Report stats to control every 60 seconds
 	}
 }
 
@@ -74,6 +76,12 @@ func ParseConfig(configMap map[string]string) (*CacheConfig, error) {
 		config.ExposeCacheKeyHeader = exposeKey == "true"
 	}
 
+	if reportInterval, ok := configMap["report_interval_seconds"]; ok {
+		if val, err := parseInt(reportInterval); err == nil {
+			config.ReportIntervalSeconds = val
+		}
+	}
+
 	// Validate configuration
 	if config.TTLSeconds < 60 {
 		config.TTLSeconds = 60
@@ -89,6 +97,12 @@ func ParseConfig(configMap map[string]string) (*CacheConfig, error) {
 	}
 	if len(config.Namespaces) == 0 {
 		config.Namespaces = []string{"api_key"}
+	}
+	if config.ReportIntervalSeconds < 10 {
+		config.ReportIntervalSeconds = 10
+	}
+	if config.ReportIntervalSeconds > 300 {
+		config.ReportIntervalSeconds = 300
 	}
 
 	return config, nil

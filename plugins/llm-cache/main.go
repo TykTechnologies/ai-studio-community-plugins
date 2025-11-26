@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -46,20 +47,43 @@ type LLMCachePlugin struct {
 	metrics      *CacheMetrics
 	pendingMu    sync.RWMutex
 	pendingCache map[string]*PendingCacheOp
+
+	// Runtime mode detection
+	runtime plugin_sdk.RuntimeType
+
+	// Services reference for background operations (gateway mode)
+	gatewayServices plugin_sdk.GatewayServices
+
+	// Control plane mode: aggregated stats from edge instances
+	aggregateMu      sync.RWMutex
+	aggregatedStats  map[string]*EdgeStatsRecord
+	stopStatsReporter chan struct{}
+
+	// Track if reporter has been started (Initialize is called twice in gateway mode)
+	reporterStarted bool
+	reporterMu      sync.Mutex
+
+	// Broker warmup - ensures broker connection is established on first RPC
+	warmupBrokerOnce sync.Once
 }
 
 // NewLLMCachePlugin creates a new cache plugin
 func NewLLMCachePlugin() *LLMCachePlugin {
 	return &LLMCachePlugin{
-		BasePlugin:   plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "LLM Response Cache - reduces costs and latency by caching identical requests"),
-		pendingCache: make(map[string]*PendingCacheOp),
-		metrics:      NewCacheMetrics(),
+		BasePlugin:        plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "LLM Response Cache - reduces costs and latency by caching identical requests"),
+		pendingCache:      make(map[string]*PendingCacheOp),
+		metrics:           NewCacheMetrics(),
+		aggregatedStats:   make(map[string]*EdgeStatsRecord),
+		stopStatsReporter: make(chan struct{}),
 	}
 }
 
 // Initialize implements plugin_sdk.Plugin
 func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string]string) error {
 	log.Printf("%s: Initializing in %s runtime", PluginName, ctx.Runtime)
+
+	// Store runtime for mode-specific behavior
+	p.runtime = ctx.Runtime
 
 	// Parse configuration
 	config, err := ParseConfig(configMap)
@@ -69,7 +93,7 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 	}
 	p.config = config
 
-	// Initialize cache with config values
+	// Initialize cache with config values (used in gateway mode)
 	p.cache = NewMemoryCache(
 		config.MaxCacheSizeMB,
 		config.MaxEntrySizeKB,
@@ -78,6 +102,40 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 
 	// Start periodic cleanup goroutine
 	go p.periodicCleanup()
+
+	// Runtime-specific initialization
+	if p.runtime == plugin_sdk.RuntimeGateway {
+		// Gateway (edge) mode: Store services reference and start stats reporter
+		// Broker ID is now passed in the first (and only) Initialize call
+		p.gatewayServices = ctx.Services.Gateway()
+
+		// Check if we have the broker ID
+		hasBrokerID := false
+		if _, ok := configMap["_service_broker_id"]; ok {
+			hasBrokerID = true
+		}
+
+		if p.gatewayServices != nil && hasBrokerID {
+			p.reporterMu.Lock()
+			if !p.reporterStarted {
+				p.reporterStarted = true
+				p.reporterMu.Unlock()
+				log.Printf("%s: Gateway mode - services available, starting stats reporter", PluginName)
+				go p.reportStatsToControl()
+				log.Printf("%s: Gateway mode - stats reporter started (interval: %ds)", PluginName, config.ReportIntervalSeconds)
+			} else {
+				p.reporterMu.Unlock()
+				log.Printf("%s: Gateway mode - reporter already running", PluginName)
+			}
+		} else if !hasBrokerID {
+			log.Printf("%s: Gateway mode - no broker ID available, stats reporting disabled", PluginName)
+		} else {
+			log.Printf("%s: Gateway mode - WARNING: Gateway services not available, stats reporting disabled", PluginName)
+		}
+	} else {
+		// Studio (control) mode: We receive stats via AcceptEdgePayload
+		log.Printf("%s: Studio mode - ready to receive stats from edge instances", PluginName)
+	}
 
 	log.Printf("%s: Initialized with TTL=%ds, MaxSize=%dMB, MaxEntry=%dKB, Namespaces=%v",
 		PluginName, config.TTLSeconds, config.MaxCacheSizeMB, config.MaxEntrySizeKB, config.Namespaces)
@@ -88,12 +146,36 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 // Shutdown implements plugin_sdk.Plugin
 func (p *LLMCachePlugin) Shutdown(ctx plugin_sdk.Context) error {
 	log.Printf("%s: Shutting down", PluginName)
+
+	// Stop the stats reporter if running (gateway mode)
+	if p.runtime == plugin_sdk.RuntimeGateway {
+		close(p.stopStatsReporter)
+	}
+
 	return nil
 }
 
 // HandlePostAuth implements plugin_sdk.PostAuthHandler
 // This is called before the request is forwarded to the LLM
 func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.EnrichedRequest) (*pb.PluginResponse, error) {
+	// Warm up the broker connection on first request if not already done
+	// This is needed because the broker connection isn't fully established until
+	// an RPC call triggers the dial from within the plugin RPC context
+	p.warmupBrokerOnce.Do(func() {
+		if p.gatewayServices != nil && p.runtime == plugin_sdk.RuntimeGateway {
+			warmupCtx := context.Background()
+			_, err := p.gatewayServices.SendToControlJSON(warmupCtx, map[string]string{
+				"event": "broker_warmup",
+				"plugin": PluginName,
+			}, "broker-warmup", nil)
+			if err != nil {
+				log.Printf("%s: Broker warmup failed: %v (stats reporting may not work)", PluginName, err)
+			} else {
+				log.Printf("%s: Broker connection warmed up successfully", PluginName)
+			}
+		}
+	})
+
 	if !p.config.Enabled {
 		return &pb.PluginResponse{Modified: false}, nil
 	}
@@ -447,18 +529,29 @@ func (p *LLMCachePlugin) cleanupStalePending() {
 // RPC method implementations
 
 func (p *LLMCachePlugin) rpcGetMetrics() interface{} {
+	log.Printf("%s: rpcGetMetrics called, runtime=%s", PluginName, p.runtime)
+
+	// In control plane (studio) mode, return aggregated stats from all edges
+	if p.runtime == plugin_sdk.RuntimeStudio {
+		result := p.getAggregatedMetrics()
+		log.Printf("%s: Returning aggregated metrics: edge_count=%d", PluginName, len(p.aggregatedStats))
+		return result
+	}
+
+	// In gateway (edge) mode, return local stats
 	entries, sizeBytes, evictions := p.cache.Stats()
 
 	return map[string]interface{}{
-		"hit_count":           p.metrics.GetHitCount(),
-		"miss_count":          p.metrics.GetMissCount(),
-		"bypass_count":        p.metrics.GetBypassCount(),
-		"eviction_count":      evictions,
-		"active_entries":      entries,
-		"cache_size_bytes":    sizeBytes,
-		"max_size_bytes":      p.cache.GetMaxSize(),
-		"hit_rate":            p.metrics.GetHitRate(),
-		"total_tokens_saved":  p.metrics.GetTotalTokensSaved(),
+		"mode":               "local",
+		"hit_count":          p.metrics.GetHitCount(),
+		"miss_count":         p.metrics.GetMissCount(),
+		"bypass_count":       p.metrics.GetBypassCount(),
+		"eviction_count":     evictions,
+		"active_entries":     entries,
+		"cache_size_bytes":   sizeBytes,
+		"max_size_bytes":     p.cache.GetMaxSize(),
+		"hit_rate":           p.metrics.GetHitRate(),
+		"total_tokens_saved": p.metrics.GetTotalTokensSaved(),
 	}
 }
 
@@ -474,6 +567,158 @@ func (p *LLMCachePlugin) rpcClearCache() interface{} {
 
 func (p *LLMCachePlugin) rpcGetConfig() interface{} {
 	return p.config
+}
+
+// ============================================================================
+// Edge-to-Control Communication
+// ============================================================================
+
+// reportStatsToControl periodically sends cache statistics to the control plane
+// This runs only in gateway (edge) mode
+func (p *LLMCachePlugin) reportStatsToControl() {
+	interval := time.Duration(p.config.ReportIntervalSeconds) * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stopStatsReporter:
+			log.Printf("%s: Stats reporter stopped", PluginName)
+			return
+		case <-ticker.C:
+			p.sendStatsToControl()
+		}
+	}
+}
+
+// sendStatsToControl collects current stats and sends them to the control plane
+func (p *LLMCachePlugin) sendStatsToControl() {
+	// Check if gateway services are available
+	if p.gatewayServices == nil {
+		log.Printf("%s: Cannot send stats - gateway services not available", PluginName)
+		return
+	}
+
+	// Collect current stats
+	entries, sizeBytes, evictions := p.cache.Stats()
+
+	stats := EdgeCacheStats{
+		HitCount:         p.metrics.GetHitCount(),
+		MissCount:        p.metrics.GetMissCount(),
+		BypassCount:      p.metrics.GetBypassCount(),
+		EvictionCount:    evictions,
+		ActiveEntries:    entries,
+		CacheSizeBytes:   sizeBytes,
+		MaxSizeBytes:     p.cache.GetMaxSize(),
+		HitRate:          p.metrics.GetHitRate(),
+		TotalTokensSaved: p.metrics.GetTotalTokensSaved(),
+		Timestamp:        time.Now().Unix(),
+	}
+
+	// Send to control plane using unified SDK's gateway services
+	ctx := context.Background()
+	pendingCount, err := p.gatewayServices.SendToControlJSON(ctx, stats, "", map[string]string{
+		"metric_type": "llm_cache_stats",
+	})
+
+	if err != nil {
+		log.Printf("%s: Failed to send stats to control plane: %v", PluginName, err)
+		return
+	}
+
+	log.Printf("%s: Stats sent to control plane (hits=%d, misses=%d, pending_queue=%d)",
+		PluginName, stats.HitCount, stats.MissCount, pendingCount)
+}
+
+// AcceptEdgePayload implements plugin_sdk.EdgePayloadReceiver
+// This is called on the control plane when stats arrive from edge instances
+func (p *LLMCachePlugin) AcceptEdgePayload(ctx plugin_sdk.Context, payload *plugin_sdk.EdgePayload) (bool, error) {
+	// Check if this payload is for us
+	metricType, ok := payload.Metadata["metric_type"]
+	if !ok || metricType != "llm_cache_stats" {
+		// Not our payload, return handled=false so other plugins can process it
+		return false, nil
+	}
+
+	// Parse the stats payload
+	var stats EdgeCacheStats
+	if err := json.Unmarshal(payload.Payload, &stats); err != nil {
+		log.Printf("%s: Failed to parse edge stats from %s: %v", PluginName, payload.EdgeID, err)
+		return true, fmt.Errorf("invalid payload format: %w", err)
+	}
+
+	// Store/update stats for this edge instance
+	p.aggregateMu.Lock()
+	p.aggregatedStats[payload.EdgeID] = &EdgeStatsRecord{
+		EdgeID:     payload.EdgeID,
+		Namespace:  payload.EdgeNamespace,
+		Stats:      stats,
+		LastUpdate: time.Unix(payload.EdgeTimestamp, 0),
+	}
+	p.aggregateMu.Unlock()
+
+	log.Printf("%s: Received stats from edge %s: hits=%d, misses=%d, hit_rate=%.2f%%",
+		PluginName, payload.EdgeID, stats.HitCount, stats.MissCount, stats.HitRate*100)
+
+	return true, nil
+}
+
+// getAggregatedMetrics returns combined stats from all edge instances (control plane mode)
+func (p *LLMCachePlugin) getAggregatedMetrics() map[string]interface{} {
+	p.aggregateMu.RLock()
+	defer p.aggregateMu.RUnlock()
+
+	var totalHits, totalMisses, totalBypass, totalTokensSaved, totalEvictions int64
+	var totalCacheSize, totalMaxSize int64
+	var totalEntries int
+
+	edgeStats := make([]map[string]interface{}, 0, len(p.aggregatedStats))
+
+	for _, es := range p.aggregatedStats {
+		totalHits += es.Stats.HitCount
+		totalMisses += es.Stats.MissCount
+		totalBypass += es.Stats.BypassCount
+		totalEvictions += es.Stats.EvictionCount
+		totalTokensSaved += es.Stats.TotalTokensSaved
+		totalCacheSize += es.Stats.CacheSizeBytes
+		totalMaxSize += es.Stats.MaxSizeBytes
+		totalEntries += es.Stats.ActiveEntries
+
+		edgeStats = append(edgeStats, map[string]interface{}{
+			"edge_id":          es.EdgeID,
+			"namespace":        es.Namespace,
+			"hit_count":        es.Stats.HitCount,
+			"miss_count":       es.Stats.MissCount,
+			"bypass_count":     es.Stats.BypassCount,
+			"hit_rate":         es.Stats.HitRate,
+			"active_entries":   es.Stats.ActiveEntries,
+			"cache_size_bytes": es.Stats.CacheSizeBytes,
+			"max_size_bytes":   es.Stats.MaxSizeBytes,
+			"tokens_saved":     es.Stats.TotalTokensSaved,
+			"last_update":      es.LastUpdate.Unix(),
+		})
+	}
+
+	// Calculate overall hit rate
+	hitRate := float64(0)
+	if totalHits+totalMisses > 0 {
+		hitRate = float64(totalHits) / float64(totalHits+totalMisses)
+	}
+
+	return map[string]interface{}{
+		"mode":               "aggregated",
+		"edge_count":         len(p.aggregatedStats),
+		"hit_count":          totalHits,
+		"miss_count":         totalMisses,
+		"bypass_count":       totalBypass,
+		"eviction_count":     totalEvictions,
+		"active_entries":     totalEntries,
+		"cache_size_bytes":   totalCacheSize,
+		"max_size_bytes":     totalMaxSize,
+		"hit_rate":           hitRate,
+		"total_tokens_saved": totalTokensSaved,
+		"edges":              edgeStats,
+	}
 }
 
 func main() {
