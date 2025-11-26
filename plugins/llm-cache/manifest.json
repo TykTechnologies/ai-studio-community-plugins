@@ -1,0 +1,48 @@
+{
+  "id": "com.tyk.llm-cache",
+  "version": "1.0.0",
+  "name": "LLM Response Cache",
+  "description": "Cache LLM responses to reduce costs and latency. Supports deterministic caching with prompt normalization, namespace isolation, and LRU eviction.",
+  "capabilities": {
+    "hooks": ["studio_ui", "post_auth", "on_response"],
+    "primary_hook": "post_auth"
+  },
+  "permissions": {
+    "services": ["apps.read", "kv.read"],
+    "ui": ["sidebar.register", "route.register"],
+    "rpc": ["call"],
+    "routes": ["GET:/plugin/com.tyk.llm-cache/rpc/*"]
+  },
+  "ui": {
+    "slots": [
+      {
+        "slot": "sidebar.section",
+        "label": "LLM Cache",
+        "icon": "/assets/icon.svg",
+        "items": [
+          {
+            "type": "route",
+            "path": "/admin/llm-cache/dashboard",
+            "title": "Cache Dashboard",
+            "mount": {
+              "kind": "webc",
+              "tag": "llm-cache-dashboard",
+              "entry": "/ui/webc/dashboard.js"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "compat": {
+    "min_gateway_version": "1.0.0",
+    "min_studio_version": "2.6.0"
+  },
+  "security": {
+    "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  },
+  "assets": [
+    "/assets/icon.svg",
+    "/ui/webc/dashboard.js"
+  ]
+}

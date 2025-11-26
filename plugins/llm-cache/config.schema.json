@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "LLM Cache Configuration",
+  "description": "Configuration for the LLM Response Cache plugin",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable Caching",
+      "description": "Enable or disable the cache plugin",
+      "default": true
+    },
+    "ttl_seconds": {
+      "type": "integer",
+      "title": "Default TTL (seconds)",
+      "description": "Time-to-live for cached responses in seconds",
+      "default": 3600,
+      "minimum": 60,
+      "maximum": 86400
+    },
+    "max_entry_size_kb": {
+      "type": "integer",
+      "title": "Max Entry Size (KB)",
+      "description": "Maximum size of a single cache entry in kilobytes",
+      "default": 2048,
+      "minimum": 1,
+      "maximum": 10240
+    },
+    "max_cache_size_mb": {
+      "type": "integer",
+      "title": "Max Cache Size (MB)",
+      "description": "Maximum total cache size in megabytes before LRU eviction",
+      "default": 256,
+      "minimum": 1,
+      "maximum": 4096
+    },
+    "namespaces": {
+      "type": "array",
+      "title": "Namespace Isolation",
+      "description": "Fields to include in cache key for isolation between tenants",
+      "items": {
+        "type": "string",
+        "enum": ["api_key", "app_id", "org_id"]
+      },
+      "default": ["api_key"],
+      "uniqueItems": true
+    },
+    "normalize_prompts": {
+      "type": "boolean",
+      "title": "Normalize Prompts",
+      "description": "Normalize whitespace and JSON ordering before hashing to improve cache hit rate",
+      "default": true
+    },
+    "expose_cache_key_header": {
+      "type": "boolean",
+      "title": "Expose Cache Key Header",
+      "description": "Include X-Cache-Key header in responses (useful for debugging)",
+      "default": false
+    }
+  },
+  "required": ["enabled"],
+  "additionalProperties": false
+}
