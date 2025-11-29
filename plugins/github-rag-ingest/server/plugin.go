@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
+	"log"
 	"mime"
 	"path/filepath"
 
@@ -49,19 +51,8 @@ func NewGitHubRAGPlugin() *GitHubRAGPlugin {
 
 // Initialize sets up the plugin with broker ID and configuration
 func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]string) error {
-	// Extract broker ID for Service API access
-	brokerIDStr := ""
-	if id, ok := config["_service_broker_id"]; ok {
-		brokerIDStr = id
-	} else if id, ok := config["service_broker_id"]; ok {
-		brokerIDStr = id
-	}
-
-	if brokerIDStr != "" {
-		var brokerID uint32
-		fmt.Sscanf(brokerIDStr, "%d", &brokerID)
-		ai_studio_sdk.SetServiceBrokerID(brokerID)
-	}
+	// NOTE: Broker ID is now handled automatically by the SDK via OpenSession.
+	// The SessionAware pattern (OnSessionReady) is used to warm up the connection.
 
 	// Extract plugin ID
 	if pluginIDStr, ok := config["plugin_id"]; ok {
@@ -115,11 +106,39 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 
 	ctx.Services.Logger().Info("GitHub RAG Ingestion Plugin initialized",
 		"plugin_id", p.pluginID,
-		"broker_id", brokerIDStr,
 		"secrets_backend", secretsBackend,
 		"cache_dir", cacheDir)
 
 	return nil
+}
+
+// OnSessionReady implements plugin_sdk.SessionAware
+// This is called when the session-based broker connection is established.
+// We warm up the Service API connection here so it's ready for RPC calls.
+func (p *GitHubRAGPlugin) OnSessionReady(ctx plugin_sdk.Context) {
+	log.Printf("github-rag-ingest: OnSessionReady called - session broker is now active")
+
+	// Eagerly establish the broker connection by making a lightweight API call.
+	// This "warms up" the connection so subsequent RPC calls don't need to dial.
+	// The go-plugin broker only accepts ONE connection per broker ID, so we need
+	// to establish it early while the broker is fresh.
+	if ai_studio_sdk.IsInitialized() {
+		log.Printf("github-rag-ingest: Warming up service API connection...")
+		_, err := ai_studio_sdk.GetPluginsCount(context.Background())
+		if err != nil {
+			log.Printf("github-rag-ingest: Service API warmup failed: %v", err)
+		} else {
+			log.Printf("github-rag-ingest: Service API connection established successfully")
+		}
+	} else {
+		log.Printf("github-rag-ingest: SDK not initialized yet, skipping warmup")
+	}
+}
+
+// OnSessionClosing implements plugin_sdk.SessionAware
+// This is called before the session is explicitly closed.
+func (p *GitHubRAGPlugin) OnSessionClosing(ctx plugin_sdk.Context) {
+	log.Printf("github-rag-ingest: OnSessionClosing called")
 }
 
 // GetManifest returns the plugin manifest
@@ -162,11 +181,9 @@ func (p *GitHubRAGPlugin) ListAssets(pathPrefix string) ([]*pb.AssetInfo, error)
 
 // HandleRPC processes RPC calls from the UI
 func (p *GitHubRAGPlugin) HandleRPC(method string, payload []byte) ([]byte, error) {
-	// Extract broker ID from payload if present
-	brokerID := ai_studio_sdk.ExtractBrokerIDFromPayload(payload)
-	if brokerID != 0 {
-		ai_studio_sdk.SetServiceBrokerID(brokerID)
-	}
+	// NOTE: The Service API connection is warmed up in OnSessionReady via the SessionAware pattern.
+	// The SDK wrapper (Call method in wrapper.go) automatically sets the broker ID from
+	// req.ServiceBrokerId before calling HandleRPC, so service APIs should "just work".
 
 	// Delegate to RPC handler
 	if p.rpcHandler == nil {

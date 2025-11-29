@@ -64,6 +64,12 @@
       "default": 60,
       "minimum": 10,
       "maximum": 300
+    },
+    "cache_streaming_responses": {
+      "type": "boolean",
+      "title": "Cache Streaming Responses",
+      "description": "Enable caching of streaming (SSE) responses. When enabled, streaming responses are reconstructed to JSON for storage and re-streamed on cache HIT.",
+      "default": true
     }
   },
   "required": ["enabled"],

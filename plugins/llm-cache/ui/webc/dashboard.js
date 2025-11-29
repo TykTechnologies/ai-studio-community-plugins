@@ -79,15 +79,86 @@ class LLMCacheDashboard extends HTMLElement {
       return;
     }
 
+    const clearBtn = this.shadowRoot.querySelector('#clear-cache-btn');
+    if (clearBtn) {
+      clearBtn.disabled = true;
+      clearBtn.textContent = 'Clearing...';
+    }
+
     try {
       const result = await this.pluginAPI.call('clearCache', {});
       console.log('Cache cleared:', result);
-      this.showSuccess('Cache cleared successfully');
+
+      if (result.distributed && result.operation_id) {
+        // Distributed clear - poll for acknowledgements
+        this.showInfo('Cache clear initiated. Waiting for edge confirmations...');
+        await this.pollClearStatus(result.operation_id);
+      } else {
+        this.showSuccess('Cache cleared successfully');
+      }
+
       await this.loadMetrics();
     } catch (error) {
       console.error('Failed to clear cache:', error);
       this.showError('Failed to clear cache: ' + error.message);
+    } finally {
+      if (clearBtn) {
+        clearBtn.disabled = false;
+        clearBtn.textContent = 'Clear Cache';
+      }
     }
+  }
+
+  async pollClearStatus(operationId) {
+    const maxPolls = 10;
+    const pollInterval = 1000; // 1 second
+
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      try {
+        const status = await this.pluginAPI.call('getClearStatus', { operation_id: operationId });
+        console.log('Clear status:', status);
+
+        if (!status.found) {
+          this.showError('Clear operation not found');
+          return;
+        }
+
+        const ackCount = status.ack_count || 0;
+        const ackedEdges = status.acked_edges || [];
+
+        // Show progress
+        if (ackCount > 0) {
+          const edgeNames = ackedEdges.map(e => e.edge_id).join(', ');
+          this.showInfo(`Cache clear acknowledged by ${ackCount} edge(s): ${edgeNames}`);
+        }
+
+        if (status.timed_out) {
+          if (ackCount > 0) {
+            this.showSuccess(`Cache cleared on ${ackCount} edge(s). Some edges may not have responded.`);
+          } else {
+            this.showWarning('Cache clear sent but no edge acknowledgements received (edges may be offline)');
+          }
+          return;
+        }
+
+        // Check if we have acks from all known edges (based on metrics)
+        const metrics = this.data.metrics;
+        if (metrics && metrics.mode === 'aggregated' && metrics.edges) {
+          const knownEdgeCount = metrics.edges.length;
+          if (ackCount >= knownEdgeCount && knownEdgeCount > 0) {
+            this.showSuccess(`Cache cleared successfully on all ${ackCount} edge(s)`);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to get clear status:', error);
+      }
+    }
+
+    // Polling complete without all acks
+    this.showWarning('Cache clear operation timed out. Some edges may not have been cleared.');
   }
 
   setLoading(loading) {
@@ -288,6 +359,14 @@ class LLMCacheDashboard extends HTMLElement {
     this.showMessage(message, 'success');
   }
 
+  showInfo(message) {
+    this.showMessage(message, 'info');
+  }
+
+  showWarning(message) {
+    this.showMessage(message, 'warning');
+  }
+
   showMessage(message, type) {
     const messageDiv = this.shadowRoot.querySelector('#message');
     if (!messageDiv) return;
@@ -295,19 +374,33 @@ class LLMCacheDashboard extends HTMLElement {
     messageDiv.style.display = 'block';
     messageDiv.textContent = message;
 
-    if (type === 'success') {
-      messageDiv.style.background = '#e8f5e9';
-      messageDiv.style.color = '#2e7d32';
-      messageDiv.style.borderLeft = '4px solid #4caf50';
-    } else {
-      messageDiv.style.background = '#ffebee';
-      messageDiv.style.color = '#c62828';
-      messageDiv.style.borderLeft = '4px solid #f44336';
+    switch (type) {
+      case 'success':
+        messageDiv.style.background = '#e8f5e9';
+        messageDiv.style.color = '#2e7d32';
+        messageDiv.style.borderLeft = '4px solid #4caf50';
+        break;
+      case 'info':
+        messageDiv.style.background = '#e3f2fd';
+        messageDiv.style.color = '#1565c0';
+        messageDiv.style.borderLeft = '4px solid #2196f3';
+        break;
+      case 'warning':
+        messageDiv.style.background = '#fff3e0';
+        messageDiv.style.color = '#e65100';
+        messageDiv.style.borderLeft = '4px solid #ff9800';
+        break;
+      default: // error
+        messageDiv.style.background = '#ffebee';
+        messageDiv.style.color = '#c62828';
+        messageDiv.style.borderLeft = '4px solid #f44336';
     }
 
+    // Longer timeout for info/warning messages during polling
+    const timeout = (type === 'info') ? 2000 : 5000;
     setTimeout(() => {
       messageDiv.style.display = 'none';
-    }, 5000);
+    }, timeout);
   }
 
   render() {
