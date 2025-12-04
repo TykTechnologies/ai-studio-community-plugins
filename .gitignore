@@ -27,3 +27,7 @@ plugins/llm-firewall/llm-firewall
 plugins/llm-cache/llm-cache
 plugins/llm-firewall/llm-firewall-darwin-arm64
 plugins/llm-firewall/llm-firewall-linux-amd64
+plugins/github-rag-ingest/github-rag-ingest-darwin-arm64
+plugins/github-rag-ingest/github-rag-ingest-linux-amd64
+plugins/llm-cache/llm-cache-darwin-arm64
+plugins/llm-cache/llm-cache-linux-amd64
