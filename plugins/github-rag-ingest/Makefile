@@ -4,9 +4,14 @@ REGISTRY_PATH := studio-plugins/github-rag-ingest
 VERSION := 1.0
 BUILD_DIR := server
 
+# Build UI components (must run before Go build)
+.PHONY: build-ui
+build-ui:
+	cd $(BUILD_DIR)/ui && npm install && npm run build
+
 # Build binaries for all platforms
 .PHONY: build
-build:
+build: build-ui
 	cd $(BUILD_DIR) && GOOS=darwin GOARCH=arm64 go build -o ../$(PLUGIN_NAME)-darwin-arm64
 	cd $(BUILD_DIR) && GOOS=linux GOARCH=amd64 go build -o ../$(PLUGIN_NAME)-linux-amd64
 
@@ -46,3 +51,4 @@ all: build publish sign
 .PHONY: clean
 clean:
 	rm -f $(PLUGIN_NAME)-darwin-arm64 $(PLUGIN_NAME)-linux-amd64
+	cd $(BUILD_DIR)/ui && npm run clean
