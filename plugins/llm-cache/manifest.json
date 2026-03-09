@@ -1,6 +1,6 @@
 {
   "id": "com.tyk.llm-cache",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "LLM Response Cache",
   "description": "Cache LLM responses to reduce costs and latency. Supports deterministic caching with prompt normalization, namespace isolation, and LRU eviction.",
   "capabilities": {
