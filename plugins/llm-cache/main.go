@@ -468,11 +468,21 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 	// Extract token usage for metrics
 	tokensSaved := ExtractTokensFromResponse(req.Body)
 
+	// Sanitize headers before caching - strip compression/transfer headers
+	// since the body is already decompressed by the proxy layer
+	cacheHeaders := make(map[string]string)
+	for k, v := range req.Headers {
+		cacheHeaders[k] = v
+	}
+	delete(cacheHeaders, "Content-Encoding")
+	delete(cacheHeaders, "Transfer-Encoding")
+	cacheHeaders["Content-Length"] = fmt.Sprintf("%d", len(req.Body))
+
 	// Store in cache
 	p.cache.Set(
 		pendingOp.CacheKey,
 		req.Body,
-		req.Headers,
+		cacheHeaders,
 		pendingOp.Model,
 		tokensSaved,
 		nil, // Use default TTL
@@ -542,12 +552,22 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
+	// Sanitize headers before caching - strip compression/transfer headers
+	// since the body is already decompressed by the proxy layer
+	streamCacheHeaders := make(map[string]string)
+	for k, v := range req.Headers {
+		streamCacheHeaders[k] = v
+	}
+	delete(streamCacheHeaders, "Content-Encoding")
+	delete(streamCacheHeaders, "Transfer-Encoding")
+	streamCacheHeaders["Content-Length"] = fmt.Sprintf("%d", len(reconstructedJSON))
+
 	// Store in cache - store the reconstructed JSON, not the raw SSE
 	// When a cache HIT occurs, HandlePostAuth will convert it back to SSE if needed
 	p.cache.Set(
 		pendingOp.CacheKey,
 		reconstructedJSON,
-		req.Headers,
+		streamCacheHeaders,
 		pendingOp.Model,
 		tokenUsage,
 		nil, // Use default TTL
