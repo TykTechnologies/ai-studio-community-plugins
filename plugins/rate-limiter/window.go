@@ -49,17 +49,26 @@ type Store interface {
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	Delete(ctx context.Context, key string) error
 
-	// Increment atomically adds delta to an integer counter and returns the new value.
-	// Creates the key with value=delta if it doesn't exist. Sets TTL on every call.
-	// For kvStore this falls back to read-modify-write (protected by caller's lock).
-	// For redisStore this uses INCRBY which is atomic across instances.
-	Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error)
-
 	// EvalSlidingWindow atomically reads the previous and current window buckets,
 	// computes the sliding window count, and optionally increments the current bucket.
+	// Returns the effective count BEFORE the increment.
 	// For kvStore this falls back to non-atomic read (protected by caller's lock).
 	// For redisStore this uses a Lua script for cross-instance atomicity.
 	EvalSlidingWindow(ctx context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, ttl time.Duration) (effectiveCount int, err error)
+
+	// IncrementIfBelow atomically increments a concurrent counter only if its
+	// current value is below the given limit. Returns the current count (before
+	// increment) and whether the increment was applied.
+	// Both backends store JSON {"c":<count>,"u":<timestamp>} for format consistency.
+	// For kvStore: read-modify-write (caller must hold a lock).
+	// For redisStore: Lua script for cross-instance atomicity.
+	IncrementIfBelow(ctx context.Context, key string, limit int, ttl time.Duration) (currentCount int, allowed bool, err error)
+
+	// DecrementCounter atomically decrements a concurrent counter, flooring at 0.
+	// Both backends operate on JSON {"c":<count>,"u":<timestamp>}.
+	// For kvStore: read-modify-write (caller must hold a lock).
+	// For redisStore: Lua script for cross-instance atomicity.
+	DecrementCounter(ctx context.Context, key string, ttl time.Duration) (newCount int, err error)
 }
 
 // --- Sliding Window ---
@@ -137,14 +146,31 @@ func (s *kvStore) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-// Increment for kvStore does a read-modify-write. Caller must hold a lock.
-func (s *kvStore) Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error) {
+// IncrementIfBelow for kvStore does a read-modify-write. Caller must hold a lock.
+func (s *kvStore) IncrementIfBelow(ctx context.Context, key string, limit int, ttl time.Duration) (int, bool, error) {
 	state := ConcurrentState{}
 	data, err := s.kv.Read(ctx, key)
 	if err == nil && len(data) > 0 {
 		json.Unmarshal(data, &state)
 	}
-	state.Count += delta
+	if state.Count >= limit {
+		return state.Count, false, nil
+	}
+	state.Count++
+	state.UpdatedAt = time.Now().Unix()
+	out, _ := json.Marshal(state)
+	_, err = s.kv.WriteWithTTL(ctx, key, out, ttl)
+	return state.Count - 1, true, err // return pre-increment count
+}
+
+// DecrementCounter for kvStore does a read-modify-write. Caller must hold a lock.
+func (s *kvStore) DecrementCounter(ctx context.Context, key string, ttl time.Duration) (int, error) {
+	state := ConcurrentState{}
+	data, err := s.kv.Read(ctx, key)
+	if err == nil && len(data) > 0 {
+		json.Unmarshal(data, &state)
+	}
+	state.Count--
 	if state.Count < 0 {
 		state.Count = 0
 	}
@@ -187,9 +213,64 @@ func readCounter(ctx context.Context, s *kvStore, key string) int {
 // --- redisStore ---
 
 type redisStore struct {
-	client          *redis.Client
+	client           *redis.Client
 	slidingWindowLua *redis.Script
+	incrIfBelowLua   *redis.Script
+	decrCounterLua   *redis.Script
 }
+
+// Lua script for atomic IncrementIfBelow on a JSON counter.
+// KEYS[1] = counter key
+// ARGV[1] = limit
+// ARGV[2] = current unix timestamp
+// ARGV[3] = TTL in seconds
+// Returns: [currentCount, allowed] where allowed=1 if incremented, 0 if at/above limit
+const incrIfBelowLuaScript = `
+local data = redis.call('GET', KEYS[1])
+local count = 0
+if data then
+    local state = cjson.decode(data)
+    count = tonumber(state.c) or 0
+end
+
+local limit = tonumber(ARGV[1])
+local now = tonumber(ARGV[2])
+local ttl_sec = tonumber(ARGV[3])
+
+if count >= limit then
+    return {count, 0}
+end
+
+-- Increment and save as JSON
+count = count + 1
+local new_state = cjson.encode({c = count, u = now})
+redis.call('SET', KEYS[1], new_state, 'EX', ttl_sec)
+return {count - 1, 1}
+`
+
+// Lua script for atomic DecrementCounter on a JSON counter.
+// KEYS[1] = counter key
+// ARGV[1] = current unix timestamp
+// ARGV[2] = TTL in seconds
+// Returns: new count (floored at 0)
+const decrCounterLuaScript = `
+local data = redis.call('GET', KEYS[1])
+local count = 0
+if data then
+    local state = cjson.decode(data)
+    count = tonumber(state.c) or 0
+end
+
+local now = tonumber(ARGV[1])
+local ttl_sec = tonumber(ARGV[2])
+
+count = count - 1
+if count < 0 then count = 0 end
+
+local new_state = cjson.encode({c = count, u = now})
+redis.call('SET', KEYS[1], new_state, 'EX', ttl_sec)
+return count
+`
 
 // Lua script for atomic sliding window evaluation + optional increment.
 // KEYS[1] = current bucket key
@@ -259,8 +340,10 @@ func newRedisStore(redisURL string) (Store, error) {
 	}
 
 	return &redisStore{
-		client:          client,
+		client:           client,
 		slidingWindowLua: redis.NewScript(slidingWindowLuaScript),
+		incrIfBelowLua:   redis.NewScript(incrIfBelowLuaScript),
+		decrCounterLua:   redis.NewScript(decrCounterLuaScript),
 	}, nil
 }
 
@@ -283,22 +366,41 @@ func (s *redisStore) Delete(ctx context.Context, key string) error {
 	return s.client.Del(ctx, key).Err()
 }
 
-// Increment uses Redis INCRBY for atomic cross-instance counter updates.
-// The value stored is a plain integer (not JSON) for atomicity.
-func (s *redisStore) Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error) {
-	pipe := s.client.Pipeline()
-	incrCmd := pipe.IncrBy(ctx, key, int64(delta))
-	pipe.Expire(ctx, key, ttl)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return 0, err
+// IncrementIfBelow uses a Lua script to atomically check the concurrent counter
+// against the limit and increment only if below. Stores JSON for format consistency.
+// Returns (currentCount before increment, allowed, error).
+func (s *redisStore) IncrementIfBelow(ctx context.Context, key string, limit int, ttl time.Duration) (int, bool, error) {
+	ttlSeconds := int(ttl.Seconds())
+	if ttlSeconds < 1 {
+		ttlSeconds = 1
 	}
-	newVal := int(incrCmd.Val())
-	// Floor at zero for decrements
-	if newVal < 0 {
-		s.client.Set(ctx, key, "0", ttl)
-		return 0, nil
+
+	result, err := s.incrIfBelowLua.Run(ctx, s.client,
+		[]string{key}, limit, time.Now().Unix(), ttlSeconds,
+	).Int64Slice()
+	if err != nil {
+		return 0, false, fmt.Errorf("IncrementIfBelow lua error: %w", err)
 	}
-	return newVal, nil
+	currentCount := int(result[0])
+	allowed := result[1] == 1
+	return currentCount, allowed, nil
+}
+
+// DecrementCounter uses a Lua script to atomically decrement a concurrent counter,
+// flooring at 0. Stores JSON for format consistency.
+func (s *redisStore) DecrementCounter(ctx context.Context, key string, ttl time.Duration) (int, error) {
+	ttlSeconds := int(ttl.Seconds())
+	if ttlSeconds < 1 {
+		ttlSeconds = 1
+	}
+
+	result, err := s.decrCounterLua.Run(ctx, s.client,
+		[]string{key}, time.Now().Unix(), ttlSeconds,
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("DecrementCounter lua error: %w", err)
+	}
+	return result, nil
 }
 
 // EvalSlidingWindow uses a Lua script for atomic sliding window evaluation + increment.

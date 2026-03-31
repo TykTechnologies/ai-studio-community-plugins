@@ -135,12 +135,28 @@ func (s *memStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (s *memStore) Increment(_ context.Context, key string, delta int, _ time.Duration) (int, error) {
+func (s *memStore) IncrementIfBelow(_ context.Context, key string, limit int, _ time.Duration) (int, bool, error) {
 	state := ConcurrentState{}
 	if data, ok := s.data[key]; ok {
 		json.Unmarshal(data, &state)
 	}
-	state.Count += delta
+	if state.Count >= limit {
+		return state.Count, false, nil
+	}
+	preCount := state.Count
+	state.Count++
+	state.UpdatedAt = time.Now().Unix()
+	out, _ := json.Marshal(state)
+	s.data[key] = out
+	return preCount, true, nil
+}
+
+func (s *memStore) DecrementCounter(_ context.Context, key string, _ time.Duration) (int, error) {
+	state := ConcurrentState{}
+	if data, ok := s.data[key]; ok {
+		json.Unmarshal(data, &state)
+	}
+	state.Count--
 	if state.Count < 0 {
 		state.Count = 0
 	}

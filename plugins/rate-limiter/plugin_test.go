@@ -417,10 +417,13 @@ func (s *failingStore) Set(_ context.Context, _ string, _ []byte, _ time.Duratio
 func (s *failingStore) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("storage unavailable")
 }
-func (s *failingStore) Increment(_ context.Context, _ string, _ int, _ time.Duration) (int, error) {
+func (s *failingStore) EvalSlidingWindow(_ context.Context, _, _ string, _ int, _ int64, _ int, _ time.Duration) (int, error) {
 	return 0, fmt.Errorf("storage unavailable")
 }
-func (s *failingStore) EvalSlidingWindow(_ context.Context, _, _ string, _ int, _ int64, _ int, _ time.Duration) (int, error) {
+func (s *failingStore) IncrementIfBelow(_ context.Context, _ string, _ int, _ time.Duration) (int, bool, error) {
+	return 0, false, fmt.Errorf("storage unavailable")
+}
+func (s *failingStore) DecrementCounter(_ context.Context, _ string, _ time.Duration) (int, error) {
 	return 0, fmt.Errorf("storage unavailable")
 }
 
@@ -1145,27 +1148,81 @@ func TestEvalSlidingWindow_AtomicEvalAndIncrement(t *testing.T) {
 	}
 }
 
-func TestIncrement_AtomicDecrementFloorsAtZero(t *testing.T) {
+func TestIncrementIfBelow_RejectsAtLimit(t *testing.T) {
+	store := newMemStore()
+	ctx := context.Background()
+
+	// Increment twice (limit 3 → both allowed)
+	_, allowed, _ := store.IncrementIfBelow(ctx, "conc:test", 3, time.Minute)
+	if !allowed {
+		t.Error("expected allowed")
+	}
+	_, allowed, _ = store.IncrementIfBelow(ctx, "conc:test", 3, time.Minute)
+	if !allowed {
+		t.Error("expected allowed")
+	}
+
+	// Third increment (count=2, limit=3 → allowed, count becomes 3)
+	preCount, allowed, _ := store.IncrementIfBelow(ctx, "conc:test", 3, time.Minute)
+	if !allowed {
+		t.Error("expected allowed (count was 2, limit 3)")
+	}
+	if preCount != 2 {
+		t.Errorf("expected pre-count=2, got %d", preCount)
+	}
+
+	// Fourth increment (count=3, limit=3 → rejected)
+	preCount, allowed, _ = store.IncrementIfBelow(ctx, "conc:test", 3, time.Minute)
+	if allowed {
+		t.Error("expected rejected (count=3 >= limit=3)")
+	}
+	if preCount != 3 {
+		t.Errorf("expected pre-count=3, got %d", preCount)
+	}
+}
+
+func TestDecrementCounter_FloorsAtZero(t *testing.T) {
 	store := newMemStore()
 	ctx := context.Background()
 
 	// Increment to 2
-	store.Increment(ctx, "conc:test", 1, time.Minute)
-	store.Increment(ctx, "conc:test", 1, time.Minute)
+	store.IncrementIfBelow(ctx, "conc:test", 10, time.Minute)
+	store.IncrementIfBelow(ctx, "conc:test", 10, time.Minute)
 
 	// Decrement to 0
-	val, _ := store.Increment(ctx, "conc:test", -1, time.Minute)
+	val, _ := store.DecrementCounter(ctx, "conc:test", time.Minute)
 	if val != 1 {
 		t.Errorf("expected 1, got %d", val)
 	}
-	val, _ = store.Increment(ctx, "conc:test", -1, time.Minute)
+	val, _ = store.DecrementCounter(ctx, "conc:test", time.Minute)
 	if val != 0 {
 		t.Errorf("expected 0, got %d", val)
 	}
 
 	// Should floor at 0
-	val, _ = store.Increment(ctx, "conc:test", -1, time.Minute)
+	val, _ = store.DecrementCounter(ctx, "conc:test", time.Minute)
 	if val != 0 {
 		t.Errorf("expected 0 (floored), got %d", val)
+	}
+}
+
+func TestIncrementIfBelow_FormatConsistentWithReadConcurrentState(t *testing.T) {
+	store := newMemStore()
+	ctx := context.Background()
+
+	// IncrementIfBelow stores JSON, ReadConcurrentState should parse it
+	store.IncrementIfBelow(ctx, "conc:fmt", 10, time.Minute)
+	store.IncrementIfBelow(ctx, "conc:fmt", 10, time.Minute)
+
+	state := ReadConcurrentState(ctx, store, "conc:fmt")
+	if state.Count != 2 {
+		t.Errorf("expected ReadConcurrentState to parse count=2, got %d", state.Count)
+	}
+
+	// After decrement
+	store.DecrementCounter(ctx, "conc:fmt", time.Minute)
+	state = ReadConcurrentState(ctx, store, "conc:fmt")
+	if state.Count != 1 {
+		t.Errorf("expected count=1 after decrement, got %d", state.Count)
 	}
 }

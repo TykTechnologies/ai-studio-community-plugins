@@ -223,15 +223,11 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 
 		case "concurrent":
 			concKey := ConcurrentKey(rule.ID, dimensionKey)
-			// Read current value
-			state := ReadConcurrentState(ctx, p.store, concKey)
-			effectiveCount = state.Count
-			if effectiveCount < rule.Limit.Value {
-				// Atomic increment
-				_, storageErr = p.store.Increment(ctx, concKey, 1, 5*time.Minute)
-				if storageErr == nil {
-					reqState.ConcRuleKeys = append(reqState.ConcRuleKeys, concKey)
-				}
+			// Atomic check-and-increment: only increments if count < limit
+			var allowed bool
+			effectiveCount, allowed, storageErr = p.store.IncrementIfBelow(ctx, concKey, rule.Limit.Value, 5*time.Minute)
+			if storageErr == nil && allowed {
+				reqState.ConcRuleKeys = append(reqState.ConcRuleKeys, concKey)
 			}
 		}
 
@@ -345,7 +341,7 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 	for _, concKey := range reqState.ConcRuleKeys {
 		lock := p.getLock(concKey)
 		lock.Lock()
-		_, err := p.store.Increment(ctx, concKey, -1, 5*time.Minute)
+		_, err := p.store.DecrementCounter(ctx, concKey, 5*time.Minute)
 		if err != nil {
 			log.Printf("%s: failed to decrement concurrent: %v", PluginName, err)
 		}
