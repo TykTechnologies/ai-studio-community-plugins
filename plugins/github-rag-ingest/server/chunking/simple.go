@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
 )
@@ -72,12 +73,18 @@ func (c *SimpleChunker) Chunk(content []byte, filePath, fileType string) ([]type
 	return chunks, nil
 }
 
-// getOverlap returns the last N characters from text
+// getOverlap returns the last N bytes from text, adjusted to avoid splitting
+// multi-byte UTF-8 characters at the boundary.
 func getOverlap(text string, size int) string {
 	if len(text) <= size {
 		return text
 	}
-	return text[len(text)-size:]
+	start := len(text) - size
+	// Walk forward to the start of a valid UTF-8 character boundary
+	for start < len(text) && start > 0 && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
 }
 
 // countLines counts the number of newlines in text
