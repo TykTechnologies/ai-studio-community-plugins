@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1081,6 +1082,26 @@ func TestRPC_OptimisticLocking_AllowsFreshWrite(t *testing.T) {
 	}
 	if rs2.Version != 2 {
 		t.Errorf("expected version 2, got %d", rs2.Version)
+	}
+}
+
+func TestRPC_OptimisticLocking_RejectsCorruptedData(t *testing.T) {
+	p := newTestPlugin(nil)
+
+	// Write corrupted data directly to KV
+	p.store.Set(context.Background(), rulesKVKey, []byte("not valid json{{{"), 0)
+
+	// Attempt to save a valid ruleset — should fail with corruption error
+	rs := &RuleSet{
+		Rules:   []Rule{{ID: "r1", Name: "test", Dimensions: []string{"global"}, Limit: Limit{Type: "requests", Value: 1}, Enabled: true}},
+		Version: 0,
+	}
+	err := p.saveRuleSetToKV(rs)
+	if err == nil {
+		t.Error("expected error when KV contains corrupted data")
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("expected corruption error message, got: %v", err)
 	}
 }
 

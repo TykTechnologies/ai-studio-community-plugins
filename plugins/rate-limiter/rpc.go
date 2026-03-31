@@ -306,10 +306,11 @@ func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
 
 	if currentData != nil {
 		var current RuleSet
-		if err := json.Unmarshal(currentData, &current); err == nil {
-			if current.Version != rs.Version {
-				return ErrVersionConflict
-			}
+		if err := json.Unmarshal(currentData, &current); err != nil {
+			return fmt.Errorf("corrupted ruleset in KV store (cannot unmarshal): %w", err)
+		}
+		if current.Version != rs.Version {
+			return ErrVersionConflict
 		}
 	}
 
