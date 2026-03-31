@@ -3,6 +3,8 @@ package ingestion
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/chunking"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/git"
@@ -46,6 +48,12 @@ func (fp *FileProcessor) ProcessFile(ctx context.Context, gitRepo *gogit.Reposit
 	include, reason := fp.filter.ShouldInclude(filePath, content)
 	if !include {
 		return nil, &SkipError{Reason: reason}
+	}
+
+	// Sanitize non-UTF-8 bytes before chunking — protobuf3 string fields require valid UTF-8.
+	// This handles text files with non-UTF-8 encoding (e.g., Latin-1) that pass the binary filter.
+	if !utf8.Valid(content) {
+		content = []byte(strings.ToValidUTF8(string(content), "\uFFFD"))
 	}
 
 	// Chunk the file
