@@ -86,9 +86,10 @@ jobs:
           mkdir -p "${STUDIO_PATH}/ui/admin-frontend/build"
           echo "placeholder" > "${STUDIO_PATH}/ui/admin-frontend/build/index.html"
 
-      - name: Download dependencies
+      - name: Tidy and download dependencies
         run: |
           cd ${{ matrix.plugin }}
+          go mod tidy
           go mod download
 
       - name: Build
