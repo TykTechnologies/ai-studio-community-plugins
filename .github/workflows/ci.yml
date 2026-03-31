@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  GOPRIVATE: github.com/TykTechnologies
+
+jobs:
+  # ==========================================================================
+  # Discover all plugin modules
+  # ==========================================================================
+  discover:
+    name: Discover Plugins
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.find.outputs.plugins }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Find plugin modules
+        id: find
+        run: |
+          # Find all directories containing a go.mod under plugins/
+          plugins=$(find plugins -name go.mod -exec dirname {} \; | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "plugins=$plugins" >> $GITHUB_OUTPUT
+          echo "Found plugins: $plugins"
+
+  # ==========================================================================
+  # Build & Test each plugin
+  # ==========================================================================
+  test:
+    name: Test (${{ matrix.plugin }})
+    runs-on: ubuntu-latest
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJson(needs.discover.outputs.plugins) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout main repo (for replace directives)
+        uses: actions/checkout@v4
+        with:
+          repository: TykTechnologies/ai-studio
+          path: _ai-studio
+          token: ${{ secrets.CI_SUBMODULE_PAT }}
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.plugin }}/go.mod
+          cache-dependency-path: ${{ matrix.plugin }}/go.sum
+
+      - name: Rewrite replace directives
+        run: |
+          cd ${{ matrix.plugin }}
+
+          # Rewrite replace directives to point at the checked-out main repo
+          STUDIO_PATH="${GITHUB_WORKSPACE}/_ai-studio"
+          GATEWAY_PATH="${GITHUB_WORKSPACE}/_ai-studio/microgateway"
+
+          go mod edit -replace "github.com/TykTechnologies/midsommar/v2=${STUDIO_PATH}"
+          go mod edit -replace "github.com/TykTechnologies/midsommar/microgateway=${GATEWAY_PATH}"
+
+          echo "Updated go.mod:"
+          cat go.mod
+
+      - name: Create embed placeholders
+        run: |
+          # Plugins depend on the main repo which embeds frontend/docs assets
+          STUDIO_PATH="${GITHUB_WORKSPACE}/_ai-studio"
+          mkdir -p "${STUDIO_PATH}/docs/site/dist"
+          echo "placeholder" > "${STUDIO_PATH}/docs/site/dist/index.html"
+          mkdir -p "${STUDIO_PATH}/ui/admin-frontend/build"
+          echo "placeholder" > "${STUDIO_PATH}/ui/admin-frontend/build/index.html"
+
+      - name: Download dependencies
+        run: |
+          cd ${{ matrix.plugin }}
+          go mod download
+
+      - name: Build
+        run: |
+          cd ${{ matrix.plugin }}
+          go build ./...
+
+      - name: Vet
+        run: |
+          cd ${{ matrix.plugin }}
+          go vet ./...
+
+      - name: Test
+        run: |
+          cd ${{ matrix.plugin }}
+          go test -v -race -short -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ hashFiles(format('{0}/go.mod', matrix.plugin)) }}
+          path: ${{ matrix.plugin }}/coverage.out
+          retention-days: 7
+
+  # ==========================================================================
+  # Summary
+  # ==========================================================================
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# Community Plugins CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Plugin Tests | ${{ needs.test.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Results
+        if: needs.test.result != 'success'
+        run: |
+          echo "Some plugin tests failed!"
+          exit 1
