@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Rate Limiter Configuration",
+  "description": "Global settings for the rate limiter plugin. Rules are managed via the UI.",
+  "properties": {
+    "fail_open": {
+      "type": "boolean",
+      "title": "Fail Open",
+      "description": "If true, allow requests when storage is unavailable. If false, reject with 503.",
+      "default": true
+    },
+    "storage_backend": {
+      "type": "string",
+      "title": "Storage Backend",
+      "description": "Storage backend: 'kv' for plugin SDK KV store (single instance), 'redis' for distributed deployments.",
+      "enum": ["kv", "redis"],
+      "default": "kv"
+    },
+    "redis_url": {
+      "type": "string",
+      "title": "Redis URL",
+      "description": "Redis connection URL (only used when storage_backend is 'redis'). Example: redis://localhost:6379/0",
+      "default": ""
+    },
+    "window_size_seconds": {
+      "type": "integer",
+      "title": "Window Size (seconds)",
+      "description": "Duration of the sliding window in seconds.",
+      "default": 60,
+      "minimum": 10,
+      "maximum": 3600
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,48 @@
+{
+  "id": "com.tyk.rate-limiter",
+  "version": "1.0.0",
+  "name": "Rate Limiter",
+  "description": "Sliding-window rate limiting with composable key dimensions for LLM requests. Supports request rate, token rate, and concurrent request limits.",
+  "capabilities": {
+    "hooks": ["studio_ui", "post_auth", "on_response"],
+    "primary_hook": "post_auth"
+  },
+  "permissions": {
+    "services": ["kv.readwrite"],
+    "ui": ["sidebar.register", "route.register"],
+    "rpc": ["call"],
+    "routes": ["GET:/plugin/com.tyk.rate-limiter/rpc/*"]
+  },
+  "ui": {
+    "slots": [
+      {
+        "slot": "sidebar.section",
+        "label": "Rate Limiting",
+        "icon": "/assets/rate-limit-icon.svg",
+        "items": [
+          {
+            "type": "route",
+            "path": "/admin/rate-limiter/rules",
+            "title": "Rate Limit Rules",
+            "mount": {
+              "kind": "webc",
+              "tag": "rate-limit-rule-manager",
+              "entry": "/ui/webc/rule-manager.js"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "compat": {
+    "min_gateway_version": "1.0.0",
+    "min_studio_version": "2.6.0"
+  },
+  "security": {
+    "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  },
+  "assets": [
+    "/assets/rate-limit-icon.svg",
+    "/ui/webc/rule-manager.js"
+  ]
+}
