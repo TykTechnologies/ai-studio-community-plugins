@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -132,6 +133,49 @@ func (s *memStore) Set(_ context.Context, key string, value []byte, _ time.Durat
 func (s *memStore) Delete(_ context.Context, key string) error {
 	delete(s.data, key)
 	return nil
+}
+
+func (s *memStore) Increment(_ context.Context, key string, delta int, _ time.Duration) (int, error) {
+	state := ConcurrentState{}
+	if data, ok := s.data[key]; ok {
+		json.Unmarshal(data, &state)
+	}
+	state.Count += delta
+	if state.Count < 0 {
+		state.Count = 0
+	}
+	state.UpdatedAt = time.Now().Unix()
+	out, _ := json.Marshal(state)
+	s.data[key] = out
+	return state.Count, nil
+}
+
+// EvalSlidingWindow returns the effective count BEFORE the increment,
+// matching the semantics of the Redis Lua script and kvStore.
+func (s *memStore) EvalSlidingWindow(_ context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, _ time.Duration) (int, error) {
+	prevCount := 0
+	if data, ok := s.data[previousKey]; ok {
+		var st WindowState
+		if json.Unmarshal(data, &st) == nil {
+			prevCount = st.Count
+		}
+	}
+	curCount := 0
+	if data, ok := s.data[currentKey]; ok {
+		var st WindowState
+		if json.Unmarshal(data, &st) == nil {
+			curCount = st.Count
+		}
+	}
+
+	effective := SlidingWindowCountFromUnix(prevCount, curCount, nowUnix, windowSeconds)
+
+	if incrDelta != 0 {
+		curCount += incrDelta
+		out, _ := json.Marshal(WindowState{Count: curCount, UpdatedAt: nowUnix})
+		s.data[currentKey] = out
+	}
+	return effective, nil
 }
 
 func TestReadWriteWindowState(t *testing.T) {

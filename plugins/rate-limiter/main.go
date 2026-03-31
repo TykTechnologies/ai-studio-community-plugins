@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ var configSchemaBytes []byte
 const (
 	PluginName    = "rate-limiter"
 	PluginVersion = "1.0.0"
+
+	// stripedLockCount is the fixed size of the striped lock pool.
+	// Must be a power of 2 for efficient modulo via bitmask.
+	stripedLockCount = 256
 )
 
 // RateLimiterPlugin implements sliding-window rate limiting with composable dimensions.
@@ -33,7 +38,7 @@ type RateLimiterPlugin struct {
 	config     *Config
 	store      Store
 	mu         sync.RWMutex
-	locks      map[string]*sync.Mutex
+	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
 	rulesCache *RuleSet
 	rulesTTL   time.Time
 }
@@ -41,7 +46,6 @@ type RateLimiterPlugin struct {
 func NewRateLimiterPlugin() *RateLimiterPlugin {
 	return &RateLimiterPlugin{
 		BasePlugin: plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "Sliding-window rate limiting with composable key dimensions"),
-		locks:      make(map[string]*sync.Mutex),
 	}
 }
 
@@ -193,34 +197,41 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 			continue // missing dimension — skip silently
 		}
 
-		// Acquire per-key lock for atomic read-modify-write
+		// Acquire striped lock for local atomicity (kvStore needs this;
+		// redisStore operations are inherently atomic but the lock is harmless)
 		lock := p.getLock(rule.ID + ":" + dimensionKey)
 		lock.Lock()
 
 		var effectiveCount int
 		var storageErr error
 
+		currentKey := WindowKey(rule.ID, dimensionKey, currentEpoch)
+		previousKey := WindowKey(rule.ID, dimensionKey, previousEpoch)
+
 		switch rule.Limit.Type {
 		case "requests":
-			effectiveCount, storageErr = p.evalWindow(ctx, rule, dimensionKey, currentEpoch, previousEpoch, now, W)
-			if storageErr == nil {
-				// Increment current bucket
-				storageErr = p.incrementWindow(ctx, rule, dimensionKey, currentEpoch, 1, bucketTTL)
-			}
+			// Atomic: evaluate sliding window + increment current bucket
+			effectiveCount, storageErr = p.store.EvalSlidingWindow(ctx, currentKey, previousKey, W, now.Unix(), 1, bucketTTL)
 
 		case "tokens":
-			effectiveCount, storageErr = p.evalWindow(ctx, rule, dimensionKey, currentEpoch, previousEpoch, now, W)
-			// Don't increment — tokens counted on response phase
+			// Evaluate only — tokens counted on response phase
+			effectiveCount, storageErr = p.store.EvalSlidingWindow(ctx, currentKey, previousKey, W, now.Unix(), 0, bucketTTL)
 			reqState.TokenRuleKeys = append(reqState.TokenRuleKeys, TokenRuleRef{
 				RuleID:       rule.ID,
 				DimensionKey: dimensionKey,
 			})
 
 		case "concurrent":
-			effectiveCount, storageErr = p.evalConcurrent(ctx, rule, dimensionKey)
-			if storageErr == nil {
-				storageErr = p.incrementConcurrent(ctx, rule, dimensionKey, 1)
-				reqState.ConcRuleKeys = append(reqState.ConcRuleKeys, ConcurrentKey(rule.ID, dimensionKey))
+			concKey := ConcurrentKey(rule.ID, dimensionKey)
+			// Read current value
+			state := ReadConcurrentState(ctx, p.store, concKey)
+			effectiveCount = state.Count
+			if effectiveCount < rule.Limit.Value {
+				// Atomic increment
+				_, storageErr = p.store.Increment(ctx, concKey, 1, 5*time.Minute)
+				if storageErr == nil {
+					reqState.ConcRuleKeys = append(reqState.ConcRuleKeys, concKey)
+				}
 			}
 		}
 
@@ -306,46 +317,36 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 	// Load request state
 	reqState, err := ReadRequestState(ctx, p.store, RequestStateKey(pluginCtx.RequestId))
 	if err != nil {
-		// No request state — post_auth may have skipped or state expired
 		return &pb.ResponseWriteResponse{Modified: false, Body: req.Body, Headers: req.Headers}, nil
 	}
 
-	now := time.Now()
 	W := p.config.WindowSizeSeconds
 	bucketTTL := time.Duration(2*W) * time.Second
 
 	// Extract actual token usage
 	usage := ExtractTokenUsage(req.Body)
 
-	// Update token counters
+	// Update token counters atomically
 	if usage.TotalTokens > 0 && len(reqState.TokenRuleKeys) > 0 {
 		for _, ref := range reqState.TokenRuleKeys {
-			// Use the bucket epoch from post_auth to update the correct window
-			key := WindowKey(ref.RuleID, ref.DimensionKey, reqState.BucketEpoch)
+			currentKey := WindowKey(ref.RuleID, ref.DimensionKey, reqState.BucketEpoch)
+			previousKey := WindowKey(ref.RuleID, ref.DimensionKey, reqState.BucketEpoch-int64(W))
 			lock := p.getLock(ref.RuleID + ":" + ref.DimensionKey)
 			lock.Lock()
-			state := ReadWindowState(ctx, p.store, key)
-			state.Count += usage.TotalTokens
-			state.UpdatedAt = now.Unix()
-			if err := WriteWindowState(ctx, p.store, key, state, bucketTTL); err != nil {
+			_, err := p.store.EvalSlidingWindow(ctx, currentKey, previousKey, W, time.Now().Unix(), usage.TotalTokens, bucketTTL)
+			if err != nil {
 				log.Printf("%s: failed to update token count: %v", PluginName, err)
 			}
 			lock.Unlock()
 		}
 	}
 
-	// Decrement concurrent counters
+	// Decrement concurrent counters atomically
 	for _, concKey := range reqState.ConcRuleKeys {
-		// Extract rule+dimension from the key to get lock
 		lock := p.getLock(concKey)
 		lock.Lock()
-		state := ReadConcurrentState(ctx, p.store, concKey)
-		state.Count--
-		if state.Count < 0 {
-			state.Count = 0
-		}
-		state.UpdatedAt = now.Unix()
-		if err := WriteConcurrentState(ctx, p.store, concKey, state, 5*time.Minute); err != nil {
+		_, err := p.store.Increment(ctx, concKey, -1, 5*time.Minute)
+		if err != nil {
 			log.Printf("%s: failed to decrement concurrent: %v", PluginName, err)
 		}
 		lock.Unlock()
@@ -371,47 +372,14 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 	}, nil
 }
 
-// --- Internal helpers ---
+// --- Striped lock pool ---
 
-func (p *RateLimiterPlugin) evalWindow(ctx plugin_sdk.Context, rule Rule, dimensionKey string, currentEpoch, previousEpoch int64, now time.Time, windowSeconds int) (int, error) {
-	currentKey := WindowKey(rule.ID, dimensionKey, currentEpoch)
-	previousKey := WindowKey(rule.ID, dimensionKey, previousEpoch)
-
-	currentState := ReadWindowState(ctx, p.store, currentKey)
-	previousState := ReadWindowState(ctx, p.store, previousKey)
-
-	return SlidingWindowCount(previousState.Count, currentState.Count, now, windowSeconds), nil
-}
-
-func (p *RateLimiterPlugin) incrementWindow(ctx plugin_sdk.Context, rule Rule, dimensionKey string, bucketEpoch int64, delta int, ttl time.Duration) error {
-	key := WindowKey(rule.ID, dimensionKey, bucketEpoch)
-	state := ReadWindowState(ctx, p.store, key)
-	state.Count += delta
-	state.UpdatedAt = time.Now().Unix()
-	return WriteWindowState(ctx, p.store, key, state, ttl)
-}
-
-func (p *RateLimiterPlugin) evalConcurrent(ctx plugin_sdk.Context, rule Rule, dimensionKey string) (int, error) {
-	key := ConcurrentKey(rule.ID, dimensionKey)
-	state := ReadConcurrentState(ctx, p.store, key)
-	return state.Count, nil
-}
-
-func (p *RateLimiterPlugin) incrementConcurrent(ctx plugin_sdk.Context, rule Rule, dimensionKey string, delta int) error {
-	key := ConcurrentKey(rule.ID, dimensionKey)
-	state := ReadConcurrentState(ctx, p.store, key)
-	state.Count += delta
-	state.UpdatedAt = time.Now().Unix()
-	return WriteConcurrentState(ctx, p.store, key, state, 5*time.Minute)
-}
-
+// getLock returns a mutex from the fixed-size striped pool, selected by hashing the key.
+// This bounds memory to exactly stripedLockCount mutexes regardless of key cardinality.
 func (p *RateLimiterPlugin) getLock(key string) *sync.Mutex {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, ok := p.locks[key]; !ok {
-		p.locks[key] = &sync.Mutex{}
-	}
-	return p.locks[key]
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return &p.stripeLocks[h.Sum32()%stripedLockCount]
 }
 
 func main() {

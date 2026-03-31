@@ -29,9 +29,11 @@ type Limit struct {
 }
 
 // RuleSet is the complete set of rules stored in KV.
+// Version is incremented on every write for optimistic concurrency control.
 type RuleSet struct {
 	Rules     []Rule `json:"rules"`
 	UpdatedAt string `json:"updated_at"`
+	Version   int    `json:"version"`
 }
 
 // ValidDimensions is the set of allowed dimension names.
@@ -117,7 +119,7 @@ func resolveDimension(dim string, ctx *pb.PluginContext, req *pb.EnrichedRequest
 		if req != nil && req.Request != nil && req.Request.Headers != nil {
 			if auth, ok := req.Request.Headers["Authorization"]; ok && auth != "" {
 				h := sha256.Sum256([]byte(auth))
-				return fmt.Sprintf("%x", h[:8]), true
+				return fmt.Sprintf("%x", h), true
 			}
 		}
 		return "", false

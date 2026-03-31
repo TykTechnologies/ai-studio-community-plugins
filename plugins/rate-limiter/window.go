@@ -14,6 +14,9 @@ import (
 // ErrKeyNotFound is returned when a key does not exist in the store.
 var ErrKeyNotFound = errors.New("key not found")
 
+// ErrVersionConflict is returned when an optimistic lock detects a concurrent modification.
+var ErrVersionConflict = errors.New("version conflict: data was modified concurrently")
+
 // WindowState is the counter for a single time bucket.
 type WindowState struct {
 	Count     int   `json:"c"`
@@ -45,6 +48,18 @@ type Store interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	Delete(ctx context.Context, key string) error
+
+	// Increment atomically adds delta to an integer counter and returns the new value.
+	// Creates the key with value=delta if it doesn't exist. Sets TTL on every call.
+	// For kvStore this falls back to read-modify-write (protected by caller's lock).
+	// For redisStore this uses INCRBY which is atomic across instances.
+	Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error)
+
+	// EvalSlidingWindow atomically reads the previous and current window buckets,
+	// computes the sliding window count, and optionally increments the current bucket.
+	// For kvStore this falls back to non-atomic read (protected by caller's lock).
+	// For redisStore this uses a Lua script for cross-instance atomicity.
+	EvalSlidingWindow(ctx context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, ttl time.Duration) (effectiveCount int, err error)
 }
 
 // --- Sliding Window ---
@@ -62,9 +77,6 @@ func PreviousBucketEpoch(now time.Time, windowSeconds int) int64 {
 }
 
 // SlidingWindowCount computes the effective count across two buckets.
-// previousCount is the count from the previous window bucket.
-// currentCount is the count from the current window bucket.
-// now is the current time, windowSeconds is the window duration.
 func SlidingWindowCount(previousCount, currentCount int, now time.Time, windowSeconds int) int {
 	w := int64(windowSeconds)
 	currentStart := BucketEpoch(now, windowSeconds)
@@ -73,7 +85,21 @@ func SlidingWindowCount(previousCount, currentCount int, now time.Time, windowSe
 		elapsed = 0
 	}
 	if elapsed >= w {
-		// Entire window elapsed, previous bucket contributes nothing
+		return currentCount
+	}
+	weightPrevious := float64(w-elapsed) / float64(w)
+	return int(float64(previousCount)*weightPrevious) + currentCount
+}
+
+// SlidingWindowCountFromUnix is like SlidingWindowCount but takes raw unix timestamp.
+func SlidingWindowCountFromUnix(previousCount, currentCount int, nowUnix int64, windowSeconds int) int {
+	w := int64(windowSeconds)
+	currentStart := nowUnix - (nowUnix % w)
+	elapsed := nowUnix - currentStart
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if elapsed >= w {
 		return currentCount
 	}
 	weightPrevious := float64(w-elapsed) / float64(w)
@@ -111,11 +137,112 @@ func (s *kvStore) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+// Increment for kvStore does a read-modify-write. Caller must hold a lock.
+func (s *kvStore) Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error) {
+	state := ConcurrentState{}
+	data, err := s.kv.Read(ctx, key)
+	if err == nil && len(data) > 0 {
+		json.Unmarshal(data, &state)
+	}
+	state.Count += delta
+	if state.Count < 0 {
+		state.Count = 0
+	}
+	state.UpdatedAt = time.Now().Unix()
+	out, _ := json.Marshal(state)
+	_, err = s.kv.WriteWithTTL(ctx, key, out, ttl)
+	return state.Count, err
+}
+
+// EvalSlidingWindow for kvStore does read + optional increment. Caller must hold a lock.
+// Returns the effective count BEFORE the increment (consistent with redisStore Lua script).
+func (s *kvStore) EvalSlidingWindow(ctx context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, ttl time.Duration) (int, error) {
+	prev := readCounter(ctx, s, previousKey)
+	cur := readCounter(ctx, s, currentKey)
+	effective := SlidingWindowCountFromUnix(prev, cur, nowUnix, windowSeconds)
+
+	if incrDelta != 0 {
+		newCount := cur + incrDelta
+		state := WindowState{Count: newCount, UpdatedAt: nowUnix}
+		data, _ := json.Marshal(state)
+		if _, err := s.kv.WriteWithTTL(ctx, currentKey, data, ttl); err != nil {
+			return effective, err
+		}
+	}
+	return effective, nil
+}
+
+func readCounter(ctx context.Context, s *kvStore, key string) int {
+	data, err := s.kv.Read(ctx, key)
+	if err != nil || len(data) == 0 {
+		return 0
+	}
+	var state WindowState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return 0
+	}
+	return state.Count
+}
+
 // --- redisStore ---
 
 type redisStore struct {
-	client *redis.Client
+	client          *redis.Client
+	slidingWindowLua *redis.Script
 }
+
+// Lua script for atomic sliding window evaluation + optional increment.
+// KEYS[1] = current bucket key
+// KEYS[2] = previous bucket key
+// ARGV[1] = window size in seconds
+// ARGV[2] = current unix timestamp
+// ARGV[3] = increment delta (0 for read-only)
+// ARGV[4] = TTL in seconds
+// Returns: effective sliding window count BEFORE the increment.
+// The increment is applied atomically but the returned value reflects the
+// pre-increment state so the caller can compare against the limit correctly
+// (i.e., limit=100 means 100 requests are allowed, not 99).
+const slidingWindowLuaScript = `
+local cur_data = redis.call('GET', KEYS[1])
+local prev_data = redis.call('GET', KEYS[2])
+
+local cur_count = 0
+local prev_count = 0
+
+if cur_data then
+    local cur = cjson.decode(cur_data)
+    cur_count = tonumber(cur.c) or 0
+end
+if prev_data then
+    local prev = cjson.decode(prev_data)
+    prev_count = tonumber(prev.c) or 0
+end
+
+local W = tonumber(ARGV[1])
+local now = tonumber(ARGV[2])
+local delta = tonumber(ARGV[3])
+local ttl_sec = tonumber(ARGV[4])
+
+-- Compute sliding window BEFORE increment
+local current_start = now - (now % W)
+local elapsed = now - current_start
+if elapsed < 0 then elapsed = 0 end
+
+local weight_prev = 0
+if elapsed < W then
+    weight_prev = (W - elapsed) / W
+end
+local effective = math.floor(prev_count * weight_prev) + cur_count
+
+-- Increment current bucket if requested (after computing effective)
+if delta ~= 0 then
+    cur_count = cur_count + delta
+    local state = cjson.encode({c = cur_count, u = now})
+    redis.call('SET', KEYS[1], state, 'EX', ttl_sec)
+end
+
+return effective
+`
 
 func newRedisStore(redisURL string) (Store, error) {
 	opt, err := redis.ParseURL(redisURL)
@@ -131,7 +258,10 @@ func newRedisStore(redisURL string) (Store, error) {
 		return nil, fmt.Errorf("redis connection failed: %w", err)
 	}
 
-	return &redisStore{client: client}, nil
+	return &redisStore{
+		client:          client,
+		slidingWindowLua: redis.NewScript(slidingWindowLuaScript),
+	}, nil
 }
 
 func (s *redisStore) Get(ctx context.Context, key string) ([]byte, error) {
@@ -151,6 +281,41 @@ func (s *redisStore) Set(ctx context.Context, key string, value []byte, ttl time
 
 func (s *redisStore) Delete(ctx context.Context, key string) error {
 	return s.client.Del(ctx, key).Err()
+}
+
+// Increment uses Redis INCRBY for atomic cross-instance counter updates.
+// The value stored is a plain integer (not JSON) for atomicity.
+func (s *redisStore) Increment(ctx context.Context, key string, delta int, ttl time.Duration) (int, error) {
+	pipe := s.client.Pipeline()
+	incrCmd := pipe.IncrBy(ctx, key, int64(delta))
+	pipe.Expire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, err
+	}
+	newVal := int(incrCmd.Val())
+	// Floor at zero for decrements
+	if newVal < 0 {
+		s.client.Set(ctx, key, "0", ttl)
+		return 0, nil
+	}
+	return newVal, nil
+}
+
+// EvalSlidingWindow uses a Lua script for atomic sliding window evaluation + increment.
+func (s *redisStore) EvalSlidingWindow(ctx context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, ttl time.Duration) (int, error) {
+	ttlSeconds := int(ttl.Seconds())
+	if ttlSeconds < 1 {
+		ttlSeconds = 1
+	}
+
+	result, err := s.slidingWindowLua.Run(ctx, s.client,
+		[]string{currentKey, previousKey},
+		windowSeconds, nowUnix, incrDelta, ttlSeconds,
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("sliding window lua error: %w", err)
+	}
+	return result, nil
 }
 
 // --- Helpers ---

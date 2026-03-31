@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +31,6 @@ func newTestPlugin(rules []Rule, opts ...func(*Config)) *RateLimiterPlugin {
 		BasePlugin: plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "test"),
 		config:     config,
 		store:      store,
-		locks:      make(map[string]*sync.Mutex),
 	}
 
 	// Seed rules into KV
@@ -173,7 +172,7 @@ func TestPostAuth_RequestRate_BlocksOnBreach(t *testing.T) {
 	}})
 	ctx := testCtx()
 
-	// First 3 requests should pass
+	// First 3 requests should pass (pre-increment effective counts: 0, 1, 2)
 	for i := 0; i < 3; i++ {
 		req := testEnrichedRequest(42, 0, 0, "gpt-4o", fmt.Sprintf("req-%d", i))
 		resp, err := p.HandlePostAuth(ctx, req)
@@ -185,7 +184,7 @@ func TestPostAuth_RequestRate_BlocksOnBreach(t *testing.T) {
 		}
 	}
 
-	// 4th request should be blocked
+	// 4th request: pre-increment effective count is 3 which >= limit → blocked
 	req := testEnrichedRequest(42, 0, 0, "gpt-4o", "req-3")
 	resp, err := p.HandlePostAuth(ctx, req)
 	if err != nil {
@@ -417,6 +416,12 @@ func (s *failingStore) Set(_ context.Context, _ string, _ []byte, _ time.Duratio
 }
 func (s *failingStore) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("storage unavailable")
+}
+func (s *failingStore) Increment(_ context.Context, _ string, _ int, _ time.Duration) (int, error) {
+	return 0, fmt.Errorf("storage unavailable")
+}
+func (s *failingStore) EvalSlidingWindow(_ context.Context, _, _ string, _ int, _ int64, _ int, _ time.Duration) (int, error) {
+	return 0, fmt.Errorf("storage unavailable")
 }
 
 func TestPostAuth_FailOpen_AllowsOnStorageError(t *testing.T) {
@@ -931,10 +936,15 @@ func TestRulesCache_HitAndExpiry(t *testing.T) {
 	}
 
 	// Mutate KV directly — cache should still return old value
-	p.saveRulesToKV([]Rule{{
-		ID: "r2", Name: "new-rule", Dimensions: []string{"global"},
-		Limit: Limit{Type: "requests", Value: 50}, Enabled: true,
-	}})
+	rs := &RuleSet{
+		Rules: []Rule{{
+			ID: "r2", Name: "new-rule", Dimensions: []string{"global"},
+			Limit: Limit{Type: "requests", Value: 50}, Enabled: true,
+		}},
+		Version: 999, // bypass version conflict
+	}
+	data, _ := json.Marshal(rs)
+	p.store.Set(context.Background(), rulesKVKey, data, 0)
 
 	rules = p.loadRulesCached()
 	if len(rules) != 1 || rules[0].Name != "cached" {
@@ -966,5 +976,196 @@ func TestOnBeforeWriteHeaders_NoOp(t *testing.T) {
 	}
 	if resp.Headers["X-Existing"] != "value" {
 		t.Error("should pass through existing headers")
+	}
+}
+
+// ==========================================================================
+// Tests for code review findings
+// ==========================================================================
+
+// --- Finding: Full SHA256 hash for api_key dimension ---
+
+func TestResolveKey_ApiKey_FullHash(t *testing.T) {
+	ctx := &pb.PluginContext{}
+	req := &pb.EnrichedRequest{
+		Request: &pb.PluginRequest{
+			Headers: map[string]string{"Authorization": "Bearer sk-test-123"},
+		},
+	}
+	rule := Rule{Dimensions: []string{"api_key"}}
+
+	key, ok := ResolveKey(rule, ctx, req)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	// Full SHA256 = 64 hex chars. "api_key:" prefix = 8 chars. Total = 72.
+	// Old truncated was 8 bytes = 16 hex + prefix = 24 chars.
+	if len(key) < 72 {
+		t.Errorf("expected full SHA256 hash (72+ chars), got %d chars: %s", len(key), key)
+	}
+}
+
+// --- Finding: Optimistic locking on RPC rule updates ---
+
+func TestRPC_OptimisticLocking_RejectsStaleWrite(t *testing.T) {
+	p := newTestPlugin(nil)
+
+	// Create a rule (version goes to 1)
+	payload, _ := json.Marshal(CreateRuleRequest{
+		Name: "rule-a", Dimensions: []string{"global"},
+		Limit: Limit{Type: "requests", Value: 100},
+	})
+	_, err := p.rpcCreateRule(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the ruleset — version is 1
+	rs1, err := p.loadRuleSetFromKV()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs1.Version != 1 {
+		t.Fatalf("expected version 1, got %d", rs1.Version)
+	}
+
+	// Simulate a concurrent write by saving with version 2
+	payload, _ = json.Marshal(CreateRuleRequest{
+		Name: "rule-b", Dimensions: []string{"global"},
+		Limit: Limit{Type: "requests", Value: 50},
+	})
+	_, err = p.rpcCreateRule(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now try to save with the stale version 1 snapshot
+	rs1.Rules[0].Name = "stale-update"
+	err = p.saveRuleSetToKV(rs1)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Errorf("expected ErrVersionConflict, got %v", err)
+	}
+}
+
+func TestRPC_OptimisticLocking_AllowsFreshWrite(t *testing.T) {
+	p := newTestPlugin(nil)
+
+	// Create a rule
+	payload, _ := json.Marshal(CreateRuleRequest{
+		Name: "fresh", Dimensions: []string{"global"},
+		Limit: Limit{Type: "requests", Value: 100},
+	})
+	_, err := p.rpcCreateRule(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read fresh, modify, save — should succeed
+	rs, err := p.loadRuleSetFromKV()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs.Rules[0].Name = "modified"
+	err = p.saveRuleSetToKV(rs)
+	if err != nil {
+		t.Errorf("expected no error for fresh write, got %v", err)
+	}
+
+	// Verify
+	rs2, _ := p.loadRuleSetFromKV()
+	if rs2.Rules[0].Name != "modified" {
+		t.Errorf("expected 'modified', got %s", rs2.Rules[0].Name)
+	}
+	if rs2.Version != 2 {
+		t.Errorf("expected version 2, got %d", rs2.Version)
+	}
+}
+
+// --- Finding: Striped lock pool is bounded ---
+
+func TestStripedLockPool_BoundedSize(t *testing.T) {
+	p := NewRateLimiterPlugin()
+
+	// Getting locks for many different keys should not grow any map
+	for i := 0; i < 10000; i++ {
+		key := fmt.Sprintf("rule-%d:app_id:%d", i, i)
+		lock := p.getLock(key)
+		if lock == nil {
+			t.Fatal("getLock returned nil")
+		}
+	}
+	// No assertion on map size needed — stripeLocks is a fixed array [256]sync.Mutex
+	// The test just confirms no panic or allocation issues under high cardinality
+}
+
+func TestStripedLockPool_SameKeyGetsSameLock(t *testing.T) {
+	p := NewRateLimiterPlugin()
+
+	lock1 := p.getLock("rule-1:app_id:42")
+	lock2 := p.getLock("rule-1:app_id:42")
+	if lock1 != lock2 {
+		t.Error("same key should return same lock")
+	}
+}
+
+// --- Finding: EvalSlidingWindow atomicity (memStore acts like kvStore) ---
+
+func TestEvalSlidingWindow_AtomicEvalAndIncrement(t *testing.T) {
+	store := newMemStore()
+	now := time.Now()
+	epoch := BucketEpoch(now, 60)
+	currentKey := fmt.Sprintf("rl:w:r1:global:_:%d", epoch)
+	previousKey := fmt.Sprintf("rl:w:r1:global:_:%d", epoch-60)
+
+	// Seed previous bucket with 100 requests
+	prev := WindowState{Count: 100, UpdatedAt: now.Unix() - 60}
+	prevData, _ := json.Marshal(prev)
+	store.Set(context.Background(), previousKey, prevData, time.Minute)
+
+	// Eval with increment of 1
+	effective, err := store.EvalSlidingWindow(context.Background(), currentKey, previousKey, 60, now.Unix(), 1, 2*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should include weighted previous + new increment
+	if effective < 1 {
+		t.Errorf("expected effective >= 1, got %d", effective)
+	}
+
+	// Current bucket should have count=1
+	curData, err := store.Get(context.Background(), currentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cur WindowState
+	json.Unmarshal(curData, &cur)
+	if cur.Count != 1 {
+		t.Errorf("expected current bucket count=1, got %d", cur.Count)
+	}
+}
+
+func TestIncrement_AtomicDecrementFloorsAtZero(t *testing.T) {
+	store := newMemStore()
+	ctx := context.Background()
+
+	// Increment to 2
+	store.Increment(ctx, "conc:test", 1, time.Minute)
+	store.Increment(ctx, "conc:test", 1, time.Minute)
+
+	// Decrement to 0
+	val, _ := store.Increment(ctx, "conc:test", -1, time.Minute)
+	if val != 1 {
+		t.Errorf("expected 1, got %d", val)
+	}
+	val, _ = store.Increment(ctx, "conc:test", -1, time.Minute)
+	if val != 0 {
+		t.Errorf("expected 0, got %d", val)
+	}
+
+	// Should floor at 0
+	val, _ = store.Increment(ctx, "conc:test", -1, time.Minute)
+	if val != 0 {
+		t.Errorf("expected 0 (floored), got %d", val)
 	}
 }
