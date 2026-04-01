@@ -32,3 +32,5 @@ plugins/github-rag-ingest/github-rag-ingest-linux-amd64
 plugins/llm-cache/llm-cache-darwin-arm64
 plugins/llm-cache/llm-cache-linux-amd64
 plugins/github-rag-ingest/server/server
+plugins/rate-limiter/rate-limiter-darwin-arm64
+plugins/rate-limiter/rate-limiter-linux-amd64
