@@ -1,7 +1,7 @@
 # GitHub RAG Ingest Plugin Makefile
 PLUGIN_NAME := github-rag-ingest
 REGISTRY_PATH := studio-plugins/github-rag-ingest
-VERSION := 1.1
+VERSION := 1.0.2
 BUILD_DIR := server
 
 # Build UI components (must run before Go build)
