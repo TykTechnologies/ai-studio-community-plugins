@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TykTechnologies/midsommar/v2/pkg/ai_studio_sdk"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
@@ -35,12 +37,13 @@ const (
 // RateLimiterPlugin implements sliding-window rate limiting with composable dimensions.
 type RateLimiterPlugin struct {
 	plugin_sdk.BasePlugin
-	config     *Config
-	store      Store
-	mu         sync.RWMutex
+	pluginID    uint32
+	config      *Config
+	store       Store
+	mu          sync.RWMutex
 	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
-	rulesCache *RuleSet
-	rulesTTL   time.Time
+	rulesCache  *RuleSet
+	rulesTTL    time.Time
 }
 
 func NewRateLimiterPlugin() *RateLimiterPlugin {
@@ -51,6 +54,12 @@ func NewRateLimiterPlugin() *RateLimiterPlugin {
 
 // Initialize parses global config and sets up the storage backend.
 func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string]string) error {
+	// Extract plugin ID for service API calls
+	if pluginIDStr, ok := config["plugin_id"]; ok {
+		fmt.Sscanf(pluginIDStr, "%d", &p.pluginID)
+		ai_studio_sdk.SetPluginID(p.pluginID)
+	}
+
 	p.config = ParseConfig(config)
 
 	// Initialize storage backend
@@ -68,6 +77,31 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 		p.store = newKVStore(ctx.Services.KV())
 	}
 
+	// Seed rules from config (these come from the config snapshot on gateways,
+	// or from the persisted config on Studio). This ensures gateway instances
+	// have rules without needing access to Studio's KV store.
+	if len(p.config.Rules) > 0 {
+		log.Printf("%s: loaded %d rules from config", PluginName, len(p.config.Rules))
+		p.mu.Lock()
+		p.rulesCache = &RuleSet{Rules: p.config.Rules}
+		if ctx.Runtime == plugin_sdk.RuntimeGateway {
+			// On the gateway, rules only change via config push (which triggers a
+			// full plugin reload), so the cache never needs to expire and refresh
+			// from KV. This avoids depending on Redis for rule storage.
+			p.rulesTTL = time.Now().Add(365 * 24 * time.Hour)
+		} else {
+			p.rulesTTL = time.Now().Add(30 * time.Second)
+		}
+		p.mu.Unlock()
+	} else if ctx.Runtime == plugin_sdk.RuntimeStudio {
+		// On Studio, rules may exist in KV from before config sync was added.
+		// Sync them to plugin config so they propagate to gateways.
+		if rules, err := p.loadRulesFromKV(); err == nil && len(rules) > 0 {
+			log.Printf("%s: found %d rules in KV but not in config, syncing to config", PluginName, len(rules))
+			p.syncRulesToConfig(rules)
+		}
+	}
+
 	log.Printf("%s: initialized (runtime=%s, backend=%s, window=%ds, fail_open=%v)",
 		PluginName, ctx.Runtime, p.config.StorageBackend, p.config.WindowSizeSeconds, p.config.FailOpen)
 	return nil
@@ -77,6 +111,42 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 func (p *RateLimiterPlugin) Shutdown(ctx plugin_sdk.Context) error {
 	log.Printf("%s: shutting down", PluginName)
 	return nil
+}
+
+// --- SessionAware ---
+
+// OnSessionReady implements plugin_sdk.SessionAware.
+// It warms up the broker connection so subsequent RPC calls from the UI don't time out.
+func (p *RateLimiterPlugin) OnSessionReady(ctx plugin_sdk.Context) {
+	log.Printf("%s: OnSessionReady called - session broker is now active (runtime=%s)", PluginName, ctx.Runtime)
+
+	// Warm up the broker connection by making a lightweight call.
+	// On the gateway, use KV (which goes through the microgateway SDK broker).
+	// On Studio, use the AI Studio SDK.
+	if ctx.Runtime == plugin_sdk.RuntimeGateway {
+		log.Printf("%s: Warming up Gateway service API connection...", PluginName)
+		_, err := ctx.Services.KV().Read(ctx, "warmup-probe")
+		if err != nil {
+			log.Printf("%s: Gateway service API warmup completed (probe key not found is expected)", PluginName)
+		} else {
+			log.Printf("%s: Gateway service API connection established successfully", PluginName)
+		}
+	} else if ai_studio_sdk.IsInitialized() {
+		log.Printf("%s: Warming up Studio service API connection...", PluginName)
+		_, err := ai_studio_sdk.GetPluginsCount(context.Background())
+		if err != nil {
+			log.Printf("%s: Studio service API warmup failed: %v", PluginName, err)
+		} else {
+			log.Printf("%s: Studio service API connection established successfully", PluginName)
+		}
+	} else {
+		log.Printf("%s: SDK not initialized yet, skipping warmup", PluginName)
+	}
+}
+
+// OnSessionClosing implements plugin_sdk.SessionAware.
+func (p *RateLimiterPlugin) OnSessionClosing(ctx plugin_sdk.Context) {
+	log.Printf("%s: OnSessionClosing called", PluginName)
 }
 
 // --- UIProvider ---
@@ -176,7 +246,9 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 	W := p.config.WindowSizeSeconds
 	currentEpoch := BucketEpoch(now, W)
 	previousEpoch := PreviousBucketEpoch(now, W)
-	windowEnd := time.Unix(currentEpoch+int64(W), 0)
+	// The sliding window blends the previous and current buckets, so counts
+	// don't fully expire until one full window from now — not at the bucket boundary.
+	windowEnd := now.Add(time.Duration(W) * time.Second)
 	bucketTTL := time.Duration(2*W) * time.Second
 
 	sorted := SortedRules(rules)
@@ -189,6 +261,11 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 
 	for _, rule := range sorted {
 		if !rule.Enabled {
+			continue
+		}
+
+		// Check match conditions (WHERE clause) before evaluating counters
+		if !MatchesContext(rule, pluginCtx, req) {
 			continue
 		}
 

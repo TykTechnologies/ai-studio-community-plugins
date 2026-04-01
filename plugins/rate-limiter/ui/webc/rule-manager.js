@@ -125,6 +125,14 @@ class RateLimitRuleManager extends HTMLElement {
           background: #f0fdf4;
           color: #166534;
         }
+        .badge-match {
+          background: #fef3c7;
+          color: #92400e;
+        }
+        .match-any {
+          color: #94a3b8;
+          font-size: 12px;
+        }
         .toggle {
           position: relative;
           width: 40px;
@@ -285,6 +293,33 @@ class RateLimitRuleManager extends HTMLElement {
           margin-top: 20px;
         }
         .limit-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+        .match-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          margin-bottom: 6px;
+        }
+        .match-row select, .match-row input {
+          padding: 6px 10px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 13px;
+        }
+        .match-row select { flex: 0 0 140px; }
+        .match-row input { flex: 1; }
+        .match-row .btn-remove-match {
+          background: none;
+          border: none;
+          color: #dc2626;
+          cursor: pointer;
+          font-size: 16px;
+          padding: 4px 8px;
+        }
+        .match-hint {
+          font-size: 12px;
+          color: #94a3b8;
+          margin-top: 4px;
+        }
       </style>
 
       <div id="message"></div>
@@ -304,6 +339,7 @@ class RateLimitRuleManager extends HTMLElement {
             <tr>
               <th style="width:30px"></th>
               <th>Name</th>
+              <th>Match</th>
               <th>Dimensions</th>
               <th>Limit</th>
               <th>Action</th>
@@ -353,7 +389,11 @@ class RateLimitRuleManager extends HTMLElement {
           </div>
         </td>
         <td><strong>${this.esc(rule.name)}</strong></td>
-        <td>${rule.dimensions.map(d => `<span class="badge badge-dim">${d}</span>`).join('')}</td>
+        <td>${rule.match && Object.keys(rule.match).length > 0
+          ? Object.entries(rule.match).map(([k,v]) => `<span class="badge badge-match">${k}=${this.esc(v)}</span>`).join('')
+          : '<span class="match-any">any</span>'
+        }</td>
+        <td>${(rule.dimensions || []).map(d => `<span class="badge badge-dim">${d}</span>`).join('') || '<span class="match-any">none</span>'}</td>
         <td>
           <span class="badge badge-type">${rule.limit.type}</span>
           <span class="limit-value">${rule.limit.value.toLocaleString()}</span>
@@ -409,7 +449,14 @@ class RateLimitRuleManager extends HTMLElement {
         </div>
 
         <div class="form-group">
-          <label>Key Dimensions</label>
+          <label>Match Conditions <span style="font-weight:400;color:#64748b">(optional - only apply rule when these match)</span></label>
+          <div id="match-conditions"></div>
+          <button class="btn btn-secondary btn-sm" id="btn-add-match" type="button">+ Add condition</button>
+          <div class="match-hint">e.g. llm_id = 5 means this rule only applies to LLM #5</div>
+        </div>
+
+        <div class="form-group">
+          <label>Counter Dimensions <span style="font-weight:400;color:#64748b">(group counters by)</span></label>
           <div class="checkbox-group">
             ${dims.map(d => `
               <label><input type="checkbox" value="${d}" ${selectedDims.includes(d) ? 'checked' : ''}> ${d}</label>
@@ -448,6 +495,32 @@ class RateLimitRuleManager extends HTMLElement {
 
     this.shadowRoot.appendChild(overlay);
 
+    // Match conditions UI
+    const matchDims = ['app_id', 'user_id', 'model', 'llm_id', 'api_key'];
+    const matchContainer = overlay.querySelector('#match-conditions');
+
+    const addMatchRow = (key = '', value = '') => {
+      const row = document.createElement('div');
+      row.className = 'match-row';
+      row.innerHTML = `
+        <select class="match-key">
+          <option value="">Select...</option>
+          ${matchDims.map(d => `<option value="${d}" ${d === key ? 'selected' : ''}>${d}</option>`).join('')}
+        </select>
+        <input type="text" class="match-value" placeholder="value (e.g. 5)" value="${this.esc(value)}">
+        <button class="btn-remove-match" title="Remove">&times;</button>
+      `;
+      row.querySelector('.btn-remove-match').addEventListener('click', () => row.remove());
+      matchContainer.appendChild(row);
+    };
+
+    // Pre-populate match conditions on edit
+    if (isEdit && editRule.match) {
+      Object.entries(editRule.match).forEach(([k, v]) => addMatchRow(k, v));
+    }
+
+    overlay.querySelector('#btn-add-match').addEventListener('click', () => addMatchRow());
+
     overlay.querySelector('.btn-cancel').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) overlay.remove();
@@ -460,8 +533,19 @@ class RateLimitRuleManager extends HTMLElement {
       const limitValue = parseInt(overlay.querySelector('#d-limit-value').value, 10);
       const action = overlay.querySelector('input[name="d-action"]:checked').value;
 
+      // Collect match conditions
+      const match = {};
+      const matchRows = overlay.querySelectorAll('.match-row');
+      for (const row of matchRows) {
+        const key = row.querySelector('.match-key').value;
+        const val = row.querySelector('.match-value').value.trim();
+        if (key && val) {
+          match[key] = val;
+        }
+      }
+
       if (!name) { this.showMessage('Rule name is required', 'error'); return; }
-      if (dimensions.length === 0) { this.showMessage('Select at least one dimension', 'error'); return; }
+      if (dimensions.length === 0 && Object.keys(match).length === 0) { this.showMessage('Select at least one dimension or add a match condition', 'error'); return; }
       if (!limitValue || limitValue < 1) { this.showMessage('Limit value must be > 0', 'error'); return; }
 
       const btn = overlay.querySelector('.btn-submit');
@@ -473,6 +557,7 @@ class RateLimitRuleManager extends HTMLElement {
           await this.pluginAPI.call('updateRule', {
             id: editRule.id,
             name,
+            match: Object.keys(match).length > 0 ? match : undefined,
             dimensions,
             limit: { type: limitType, value: limitValue },
             action,
@@ -481,6 +566,7 @@ class RateLimitRuleManager extends HTMLElement {
         } else {
           await this.pluginAPI.call('createRule', {
             name,
+            match: Object.keys(match).length > 0 ? match : undefined,
             dimensions,
             limit: { type: limitType, value: limitValue },
             action,
@@ -513,6 +599,7 @@ class RateLimitRuleManager extends HTMLElement {
       await this.pluginAPI.call('updateRule', {
         id: rule.id,
         name: rule.name,
+        match: rule.match || undefined,
         dimensions: rule.dimensions,
         limit: rule.limit,
         action: rule.action,

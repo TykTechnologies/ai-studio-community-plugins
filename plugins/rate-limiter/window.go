@@ -137,6 +137,11 @@ func (s *kvStore) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (s *kvStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if ttl <= 0 {
+		// TTL=0 means persist forever; WriteWithTTL(0) would expire immediately
+		_, err := s.kv.Write(ctx, key, value, nil)
+		return err
+	}
 	_, err := s.kv.WriteWithTTL(ctx, key, value, ttl)
 	return err
 }

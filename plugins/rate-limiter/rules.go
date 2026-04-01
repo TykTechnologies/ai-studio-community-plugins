@@ -11,15 +11,16 @@ import (
 
 // Rule defines a single rate limit rule.
 type Rule struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Dimensions []string `json:"dimensions"` // app_id, user_id, model, llm_id, api_key, global
-	Limit      Limit    `json:"limit"`
-	Action     string   `json:"action"`   // "enforce" or "log"
-	Enabled    bool     `json:"enabled"`
-	Priority   int      `json:"priority"` // lower = evaluated first
-	CreatedAt  string   `json:"created_at"`
-	UpdatedAt  string   `json:"updated_at"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Match      map[string]string `json:"match,omitempty"`   // optional WHERE clause: all conditions must match
+	Dimensions []string          `json:"dimensions"`        // GROUP BY keys for counter bucketing
+	Limit      Limit             `json:"limit"`
+	Action     string            `json:"action"`            // "enforce" or "log"
+	Enabled    bool              `json:"enabled"`
+	Priority   int               `json:"priority"`          // lower = evaluated first
+	CreatedAt  string            `json:"created_at"`
+	UpdatedAt  string            `json:"updated_at"`
 }
 
 // Limit defines what is being limited and to what value.
@@ -80,6 +81,18 @@ func ResolveKey(rule Rule, pluginCtx *pb.PluginContext, req *pb.EnrichedRequest)
 	// Sort for deterministic key regardless of dimension order in config
 	sort.Strings(parts)
 	return strings.Join(parts, "|"), true
+}
+
+// MatchesContext returns true if the request context satisfies all of the rule's
+// match conditions. A rule with no match conditions matches every request.
+func MatchesContext(rule Rule, pluginCtx *pb.PluginContext, req *pb.EnrichedRequest) bool {
+	for dim, expected := range rule.Match {
+		actual, ok := resolveDimension(dim, pluginCtx, req)
+		if !ok || actual != expected {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveDimension(dim string, ctx *pb.PluginContext, req *pb.EnrichedRequest) (string, bool) {
@@ -152,8 +165,20 @@ func ValidateRule(r Rule) error {
 	if r.Name == "" {
 		return fmt.Errorf("rule name is required")
 	}
-	if len(r.Dimensions) == 0 {
-		return fmt.Errorf("at least one dimension is required")
+	// Validate match conditions
+	for dim, val := range r.Match {
+		if dim == "global" {
+			return fmt.Errorf("'global' is not valid as a match condition")
+		}
+		if !ValidDimensions[dim] {
+			return fmt.Errorf("invalid match dimension: %s", dim)
+		}
+		if val == "" {
+			return fmt.Errorf("match value for %s must not be empty", dim)
+		}
+	}
+	if len(r.Dimensions) == 0 && len(r.Match) == 0 {
+		return fmt.Errorf("at least one dimension or match condition is required")
 	}
 	for _, d := range r.Dimensions {
 		if !ValidDimensions[d] {

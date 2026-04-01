@@ -165,6 +165,83 @@ func TestSortedRules(t *testing.T) {
 	}
 }
 
+func TestMatchesContext(t *testing.T) {
+	tests := []struct {
+		name  string
+		match map[string]string
+		ctx   *pb.PluginContext
+		req   *pb.EnrichedRequest
+		want  bool
+	}{
+		{
+			name:  "nil match matches everything",
+			match: nil,
+			ctx:   &pb.PluginContext{AppId: 1},
+			req:   &pb.EnrichedRequest{},
+			want:  true,
+		},
+		{
+			name:  "empty match matches everything",
+			match: map[string]string{},
+			ctx:   &pb.PluginContext{AppId: 1},
+			req:   &pb.EnrichedRequest{},
+			want:  true,
+		},
+		{
+			name:  "single match hit",
+			match: map[string]string{"llm_id": "5"},
+			ctx:   &pb.PluginContext{LlmId: 5},
+			req:   &pb.EnrichedRequest{},
+			want:  true,
+		},
+		{
+			name:  "single match miss",
+			match: map[string]string{"llm_id": "5"},
+			ctx:   &pb.PluginContext{LlmId: 7},
+			req:   &pb.EnrichedRequest{},
+			want:  false,
+		},
+		{
+			name:  "match on absent dimension",
+			match: map[string]string{"llm_id": "5"},
+			ctx:   &pb.PluginContext{LlmId: 0},
+			req:   &pb.EnrichedRequest{},
+			want:  false,
+		},
+		{
+			name:  "multi match all hit",
+			match: map[string]string{"llm_id": "5", "app_id": "10"},
+			ctx:   &pb.PluginContext{LlmId: 5, AppId: 10},
+			req:   &pb.EnrichedRequest{},
+			want:  true,
+		},
+		{
+			name:  "multi match one miss",
+			match: map[string]string{"llm_id": "5", "app_id": "10"},
+			ctx:   &pb.PluginContext{LlmId: 5, AppId: 99},
+			req:   &pb.EnrichedRequest{},
+			want:  false,
+		},
+		{
+			name:  "match on model slug",
+			match: map[string]string{"model": "gpt-4o"},
+			ctx:   &pb.PluginContext{LlmSlug: "gpt-4o"},
+			req:   &pb.EnrichedRequest{},
+			want:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule := Rule{Match: tt.match}
+			got := MatchesContext(rule, tt.ctx, tt.req)
+			if got != tt.want {
+				t.Errorf("MatchesContext() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateRule(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -182,8 +259,28 @@ func TestValidateRule(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "no dimensions",
+			name:    "no dimensions and no match",
 			rule:    Rule{Name: "test", Limit: Limit{Type: "requests", Value: 100}},
+			wantErr: true,
+		},
+		{
+			name:    "match only no dimensions valid",
+			rule:    Rule{Name: "test", Match: map[string]string{"llm_id": "5"}, Limit: Limit{Type: "requests", Value: 100}},
+			wantErr: false,
+		},
+		{
+			name:    "invalid match dimension",
+			rule:    Rule{Name: "test", Match: map[string]string{"bogus": "1"}, Limit: Limit{Type: "requests", Value: 100}},
+			wantErr: true,
+		},
+		{
+			name:    "empty match value",
+			rule:    Rule{Name: "test", Match: map[string]string{"llm_id": ""}, Limit: Limit{Type: "requests", Value: 100}},
+			wantErr: true,
+		},
+		{
+			name:    "global as match key rejected",
+			rule:    Rule{Name: "test", Match: map[string]string{"global": "_"}, Limit: Limit{Type: "requests", Value: 100}},
 			wantErr: true,
 		},
 		{

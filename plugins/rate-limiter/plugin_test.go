@@ -1247,3 +1247,275 @@ func TestIncrementIfBelow_FormatConsistentWithReadConcurrentState(t *testing.T) 
 		t.Errorf("expected count=1 after decrement, got %d", state.Count)
 	}
 }
+
+// --- Match condition integration tests ---
+
+func TestPostAuth_Match_RequestRate_OnlyMatchingLLM(t *testing.T) {
+	// Rule: match llm_id=2, dimension user_id, limit 2 requests
+	// Requests to llm_id=2 should be counted and blocked; llm_id=5 should pass freely.
+	p := newTestPlugin([]Rule{{
+		ID: "r1", Name: "llm2-user-rpm", Match: map[string]string{"llm_id": "2"},
+		Dimensions: []string{"user_id"},
+		Limit: Limit{Type: "requests", Value: 2}, Action: "enforce", Enabled: true,
+	}})
+	ctx := testCtx()
+
+	// 2 requests to llm_id=2: should pass
+	for i := 0; i < 2; i++ {
+		req := testEnrichedRequest(1, 10, 2, "claude", fmt.Sprintf("req-match-%d", i))
+		resp, err := p.HandlePostAuth(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Block {
+			t.Errorf("request %d to llm_id=2 should pass (limit=2)", i)
+		}
+	}
+
+	// 3rd request to llm_id=2: blocked
+	req := testEnrichedRequest(1, 10, 2, "claude", "req-match-2")
+	resp, err := p.HandlePostAuth(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Block {
+		t.Error("3rd request to llm_id=2 should be blocked")
+	}
+
+	// Requests to llm_id=5: should all pass (rule doesn't match)
+	for i := 0; i < 10; i++ {
+		req := testEnrichedRequest(1, 10, 5, "gpt-4o", fmt.Sprintf("req-other-%d", i))
+		resp, err := p.HandlePostAuth(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Block {
+			t.Errorf("request %d to llm_id=5 should not be blocked by llm_id=2 rule", i)
+		}
+	}
+}
+
+func TestPostAuth_Match_DifferentLimitsPerLLM(t *testing.T) {
+	// Two rules with different match conditions and limits:
+	// llm_id=1: 3 requests per user
+	// llm_id=2: 1 request per user
+	p := newTestPlugin([]Rule{
+		{
+			ID: "r1", Name: "llm1-generous", Match: map[string]string{"llm_id": "1"},
+			Dimensions: []string{"user_id"},
+			Limit: Limit{Type: "requests", Value: 3}, Action: "enforce", Enabled: true, Priority: 0,
+		},
+		{
+			ID: "r2", Name: "llm2-strict", Match: map[string]string{"llm_id": "2"},
+			Dimensions: []string{"user_id"},
+			Limit: Limit{Type: "requests", Value: 1}, Action: "enforce", Enabled: true, Priority: 1,
+		},
+	})
+	ctx := testCtx()
+
+	// LLM 1: 3 requests pass, 4th blocked
+	for i := 0; i < 3; i++ {
+		req := testEnrichedRequest(1, 7, 1, "gpt-4o", fmt.Sprintf("llm1-req-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("llm1 request %d should pass (limit=3)", i)
+		}
+	}
+	req := testEnrichedRequest(1, 7, 1, "gpt-4o", "llm1-req-3")
+	resp, _ := p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("llm1 4th request should be blocked")
+	}
+
+	// LLM 2: 1 request passes, 2nd blocked
+	req = testEnrichedRequest(1, 7, 2, "claude", "llm2-req-0")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if resp.Block {
+		t.Error("llm2 1st request should pass")
+	}
+
+	req = testEnrichedRequest(1, 7, 2, "claude", "llm2-req-1")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("llm2 2nd request should be blocked (limit=1)")
+	}
+}
+
+func TestPostAuth_Match_AppOverride(t *testing.T) {
+	// General rule: llm_id=1, per-app, 2 requests
+	// Override: llm_id=1 + app_id=10, per-app, 5 requests (higher priority)
+	p := newTestPlugin([]Rule{
+		{
+			ID: "override", Name: "app10-override",
+			Match:      map[string]string{"llm_id": "1", "app_id": "10"},
+			Dimensions: []string{"app_id"},
+			Limit: Limit{Type: "requests", Value: 5}, Action: "enforce", Enabled: true, Priority: 0,
+		},
+		{
+			ID: "general", Name: "general-limit",
+			Match:      map[string]string{"llm_id": "1"},
+			Dimensions: []string{"app_id"},
+			Limit: Limit{Type: "requests", Value: 2}, Action: "enforce", Enabled: true, Priority: 1,
+		},
+	})
+	ctx := testCtx()
+
+	// App 10 on LLM 1: gets 5 requests (override matches first, but general also matches)
+	// Both rules apply independently since they have different IDs and thus different counters.
+	// The override has limit=5 and higher priority, the general has limit=2.
+	// After 2 requests, the general rule blocks.
+	for i := 0; i < 2; i++ {
+		req := testEnrichedRequest(10, 0, 1, "gpt-4o", fmt.Sprintf("app10-req-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("app10 request %d should pass", i)
+		}
+	}
+	// 3rd request: general rule (limit=2) should block
+	req := testEnrichedRequest(10, 0, 1, "gpt-4o", "app10-req-2")
+	resp, _ := p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("app10 3rd request should be blocked by general rule (limit=2)")
+	}
+
+	// App 99 on LLM 1: only general rule matches, blocked after 2
+	for i := 0; i < 2; i++ {
+		req := testEnrichedRequest(99, 0, 1, "gpt-4o", fmt.Sprintf("app99-req-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("app99 request %d should pass", i)
+		}
+	}
+	req = testEnrichedRequest(99, 0, 1, "gpt-4o", "app99-req-2")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("app99 3rd request should be blocked (limit=2)")
+	}
+
+	// App 10 on LLM 5: neither rule matches, unlimited
+	for i := 0; i < 20; i++ {
+		req := testEnrichedRequest(10, 0, 5, "other", fmt.Sprintf("app10-llm5-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("app10 on llm5 request %d should not be blocked (no matching rules)", i)
+		}
+	}
+}
+
+func TestPostAuth_Match_TokenRate(t *testing.T) {
+	// Match llm_id=3, token limit of 500 per user
+	p := newTestPlugin([]Rule{{
+		ID: "r1", Name: "llm3-token-limit", Match: map[string]string{"llm_id": "3"},
+		Dimensions: []string{"user_id"},
+		Limit: Limit{Type: "tokens", Value: 500}, Action: "enforce", Enabled: true,
+	}})
+	ctx := testCtx()
+
+	// First request passes (tokens evaluated on response)
+	req := testEnrichedRequest(1, 5, 3, "model", "tok-req-0")
+	resp, _ := p.HandlePostAuth(ctx, req)
+	if resp.Block {
+		t.Fatal("first request should pass")
+	}
+
+	// Complete with 300 tokens
+	writeReq := testResponseWriteRequest("tok-req-0", openAIResponse(150, 150), false)
+	p.OnBeforeWrite(ctx, writeReq)
+
+	// Second request passes (300 < 500)
+	req = testEnrichedRequest(1, 5, 3, "model", "tok-req-1")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if resp.Block {
+		t.Fatal("second request should pass (300/500)")
+	}
+
+	// Complete with 300 more tokens (total 600)
+	writeReq = testResponseWriteRequest("tok-req-1", openAIResponse(150, 150), false)
+	p.OnBeforeWrite(ctx, writeReq)
+
+	// Third request: 600 >= 500, blocked
+	req = testEnrichedRequest(1, 5, 3, "model", "tok-req-2")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("third request should be blocked (600 >= 500 token limit)")
+	}
+
+	// Same user on llm_id=7: should not be affected
+	req = testEnrichedRequest(1, 5, 7, "other", "tok-req-other")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if resp.Block {
+		t.Error("request to llm_id=7 should not be blocked by llm_id=3 rule")
+	}
+}
+
+func TestPostAuth_Match_Concurrent(t *testing.T) {
+	// Match llm_id=1, concurrent limit of 2 per app
+	p := newTestPlugin([]Rule{{
+		ID: "r1", Name: "llm1-conc", Match: map[string]string{"llm_id": "1"},
+		Dimensions: []string{"app_id"},
+		Limit: Limit{Type: "concurrent", Value: 2}, Action: "enforce", Enabled: true,
+	}})
+	ctx := testCtx()
+
+	// 2 concurrent requests pass
+	for i := 0; i < 2; i++ {
+		req := testEnrichedRequest(1, 0, 1, "gpt", fmt.Sprintf("conc-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("concurrent request %d should pass (limit=2)", i)
+		}
+	}
+
+	// 3rd concurrent request blocked
+	req := testEnrichedRequest(1, 0, 1, "gpt", "conc-2")
+	resp, _ := p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("3rd concurrent request should be blocked (limit=2)")
+	}
+
+	// Complete one request — should free a slot
+	writeReq := testResponseWriteRequest("conc-0", []byte(`{}`), false)
+	p.OnBeforeWrite(ctx, writeReq)
+
+	// Now a new request passes
+	req = testEnrichedRequest(1, 0, 1, "gpt", "conc-3")
+	resp, _ = p.HandlePostAuth(ctx, req)
+	if resp.Block {
+		t.Error("request after response should pass (slot freed)")
+	}
+
+	// Different LLM: not affected
+	for i := 0; i < 10; i++ {
+		req := testEnrichedRequest(1, 0, 9, "other", fmt.Sprintf("conc-other-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("request to llm_id=9 should not be blocked by llm_id=1 rule")
+		}
+	}
+}
+
+func TestPostAuth_MatchOnly_NoExtraDimensions(t *testing.T) {
+	// Rule with match but no dimensions — single counter for all matching requests
+	p := newTestPlugin([]Rule{{
+		ID: "r1", Name: "llm2-global-cap",
+		Match: map[string]string{"llm_id": "2"},
+		Limit: Limit{Type: "requests", Value: 3}, Action: "enforce", Enabled: true,
+	}})
+	ctx := testCtx()
+
+	// 3 requests from different apps/users, all to llm_id=2 — shared counter
+	for i := 0; i < 3; i++ {
+		req := testEnrichedRequest(uint32(i+1), uint32(i+100), 2, "claude", fmt.Sprintf("global-%d", i))
+		resp, _ := p.HandlePostAuth(ctx, req)
+		if resp.Block {
+			t.Errorf("request %d should pass (limit=3, shared counter)", i)
+		}
+	}
+
+	// 4th request from yet another app/user: blocked (shared counter = 3)
+	req := testEnrichedRequest(99, 999, 2, "claude", "global-3")
+	resp, _ := p.HandlePostAuth(ctx, req)
+	if !resp.Block {
+		t.Error("4th request should be blocked (shared counter across all apps/users)")
+	}
+}

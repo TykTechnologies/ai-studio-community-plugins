@@ -8,25 +8,28 @@ import (
 	"log"
 	"time"
 
+	"github.com/TykTechnologies/midsommar/v2/pkg/ai_studio_sdk"
 	"github.com/google/uuid"
 )
 
 // --- RPC Request/Response types ---
 
 type CreateRuleRequest struct {
-	Name       string   `json:"name"`
-	Dimensions []string `json:"dimensions"`
-	Limit      Limit    `json:"limit"`
-	Action     string   `json:"action"`
+	Name       string            `json:"name"`
+	Match      map[string]string `json:"match,omitempty"`
+	Dimensions []string          `json:"dimensions"`
+	Limit      Limit             `json:"limit"`
+	Action     string            `json:"action"`
 }
 
 type UpdateRuleRequest struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Dimensions []string `json:"dimensions"`
-	Limit      Limit    `json:"limit"`
-	Action     string   `json:"action"`
-	Enabled    bool     `json:"enabled"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Match      map[string]string `json:"match,omitempty"`
+	Dimensions []string          `json:"dimensions"`
+	Limit      Limit             `json:"limit"`
+	Action     string            `json:"action"`
+	Enabled    bool              `json:"enabled"`
 }
 
 type DeleteRuleRequest struct {
@@ -90,6 +93,7 @@ func (p *RateLimiterPlugin) rpcCreateRule(payload []byte) (interface{}, error) {
 	rule := Rule{
 		ID:         uuid.New().String(),
 		Name:       req.Name,
+		Match:      req.Match,
 		Dimensions: req.Dimensions,
 		Limit:      req.Limit,
 		Action:     req.Action,
@@ -141,6 +145,7 @@ func (p *RateLimiterPlugin) rpcUpdateRule(payload []byte) (interface{}, error) {
 	}
 
 	rs.Rules[idx].Name = req.Name
+	rs.Rules[idx].Match = req.Match
 	rs.Rules[idx].Dimensions = req.Dimensions
 	rs.Rules[idx].Limit = req.Limit
 	rs.Rules[idx].Action = req.Action
@@ -322,7 +327,16 @@ func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
 	if err != nil {
 		return err
 	}
-	return p.store.Set(ctx, rulesKVKey, data, 0)
+	if err := p.store.Set(ctx, rulesKVKey, data, 0); err != nil {
+		return err
+	}
+
+	// Sync rules to plugin config so they propagate to edge gateways
+	// via the config snapshot. This is a best-effort operation — KV is
+	// already saved, so we log but don't fail on config sync errors.
+	p.syncRulesToConfig(rs.Rules)
+
+	return nil
 }
 
 // loadRulesFromKV is a convenience that returns just the rules slice.
@@ -368,4 +382,36 @@ func (p *RateLimiterPlugin) invalidateRulesCache() {
 	p.mu.Lock()
 	p.rulesTTL = time.Time{}
 	p.mu.Unlock()
+}
+
+// syncRulesToConfig writes the current rules into the plugin's persisted config
+// via the Studio Service API. This ensures rules are included in the config snapshot
+// that gets pushed to edge gateways. Only works in Studio runtime.
+func (p *RateLimiterPlugin) syncRulesToConfig(rules []Rule) {
+	if p.pluginID == 0 {
+		return
+	}
+
+	// Build config with current settings + rules
+	cfg := *p.config
+	cfg.Rules = rules
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		log.Printf("%s: failed to marshal config for sync: %v", PluginName, err)
+		return
+	}
+
+	ctx := context.Background()
+	resp, err := ai_studio_sdk.UpdatePluginConfig(ctx, p.pluginID, string(data))
+	if err != nil {
+		log.Printf("%s: config sync failed: %v", PluginName, err)
+		return
+	}
+	if resp != nil && !resp.Success {
+		log.Printf("%s: config sync rejected: %s", PluginName, resp.Message)
+		return
+	}
+
+	log.Printf("%s: synced %d rules to plugin config (will propagate to gateways)", PluginName, len(rules))
 }

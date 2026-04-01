@@ -6,12 +6,14 @@ import (
 	"log"
 )
 
-// Config holds global plugin settings. Rules are managed via UI/RPC.
+// Config holds global plugin settings. Rules are managed via UI/RPC but stored
+// in the config so they propagate to edge gateways via config snapshots.
 type Config struct {
 	FailOpen          bool   `json:"fail_open"`
 	StorageBackend    string `json:"storage_backend"`
 	RedisURL          string `json:"redis_url"`
 	WindowSizeSeconds int    `json:"window_size_seconds"`
+	Rules             []Rule `json:"rules,omitempty"`
 }
 
 // DefaultConfig returns sane defaults.
@@ -62,6 +64,14 @@ func ParseConfig(configMap map[string]string) *Config {
 	if v, ok := configMap["window_size_seconds"]; ok && v != "" {
 		if val, err := parseInt(v); err == nil {
 			config.WindowSizeSeconds = val
+		}
+	}
+	if v, ok := configMap["rules"]; ok && v != "" {
+		var rules []Rule
+		if err := json.Unmarshal([]byte(v), &rules); err != nil {
+			log.Printf("rate-limiter: failed to parse 'rules' from config: %v", err)
+		} else {
+			config.Rules = rules
 		}
 	}
 
