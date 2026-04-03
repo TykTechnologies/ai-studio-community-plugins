@@ -1,0 +1,52 @@
+{
+  "id": "com.tyk.llm-price-sync",
+  "version": "1.0.0",
+  "name": "LLM Price Sync",
+  "description": "Automatically sync LLM model prices from llm-prices.com to keep cost tracking accurate and up-to-date",
+  "capabilities": {
+    "hooks": ["studio_ui"],
+    "primary_hook": "studio_ui"
+  },
+  "permissions": {
+    "services": [
+      "kv.readwrite",
+      "pricing.read",
+      "pricing.write",
+      "scheduler.manage"
+    ],
+    "ui": ["sidebar.register", "route.register"],
+    "rpc": ["call"]
+  },
+  "ui": {
+    "slots": [
+      {
+        "slot": "sidebar.section",
+        "label": "Price Sync",
+        "icon": "/assets/price-sync-icon.svg",
+        "items": [
+          {
+            "type": "route",
+            "path": "/admin/price-sync/dashboard",
+            "title": "Price Sync Dashboard",
+            "mount": {
+              "kind": "webc",
+              "tag": "price-sync-dashboard",
+              "entry": "/ui/webc/price-sync-dashboard.js"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "compat": {
+    "min_studio_version": "2.6.0",
+    "api": ["ui-v1", "rpc-v1", "kv-v1", "scheduler-v1"]
+  },
+  "security": {
+    "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  },
+  "assets": [
+    "/assets/price-sync-icon.svg",
+    "/ui/webc/price-sync-dashboard.js"
+  ]
+}
