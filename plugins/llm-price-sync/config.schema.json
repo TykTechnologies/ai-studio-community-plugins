@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "LLM Price Sync Configuration",
+  "properties": {
+    "prices_url": {
+      "type": "string",
+      "title": "Prices URL",
+      "description": "URL to fetch current LLM prices from (JSON array format)",
+      "default": "https://www.llm-prices.com/current-v1.json"
+    },
+    "sync_interval_cron": {
+      "type": "string",
+      "title": "Sync Interval (Cron)",
+      "description": "Cron expression for how often to sync prices (e.g. '0 */6 * * *' for every 6 hours)",
+      "default": "0 */6 * * *"
+    },
+    "auto_create_models": {
+      "type": "boolean",
+      "title": "Auto-Create Models",
+      "description": "Automatically create new model price entries for models not yet in the system",
+      "default": true
+    },
+    "vendor_filter": {
+      "type": "array",
+      "title": "Vendor Filter",
+      "description": "Only sync prices for these vendors (platform slug or source name). Leave empty to sync all.",
+      "items": {
+        "type": "string",
+        "enum": ["anthropic", "openai", "google_ai", "google", "vertex", "bedrock", "amazon", "huggingface", "mistral", "deepseek", "xai", "qwen", "minimax", "moonshot-ai"]
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "dry_run": {
+      "type": "boolean",
+      "title": "Dry Run",
+      "description": "Log what would change without actually updating prices",
+      "default": false
+    }
+  }
+}
