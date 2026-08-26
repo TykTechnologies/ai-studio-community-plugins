@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"mime"
+	"os"
 	"path/filepath"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/git"
@@ -64,7 +65,24 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 	kv := storage.NewKVStore(ctx.Services.KV())
 	repoStore := storage.NewRepositoryStore(kv)
 	jobStore := storage.NewJobStore(kv)
-	secretStore := storage.NewSecretStore(kv)
+
+	// Encrypt secrets at rest when a key is configured; otherwise fall back
+	// to the legacy plaintext store with a loud warning.
+	encryptionKey := config["secret_encryption_key"]
+	if encryptionKey == "" {
+		encryptionKey = os.Getenv("GITHUB_RAG_SECRET_ENCRYPTION_KEY")
+	}
+	var secretStore *storage.SecretStore
+	if encryptionKey != "" {
+		var err error
+		secretStore, err = storage.NewEncryptedSecretStore(kv, encryptionKey)
+		if err != nil {
+			return fmt.Errorf("failed to initialize encrypted secret store: %w", err)
+		}
+	} else {
+		ctx.Services.Logger().Warn("🔒 SECURITY: no secret encryption key configured - GitHub PATs and SSH keys will be stored UNENCRYPTED in KV storage. Set the secret_encryption_key plugin config option or the GITHUB_RAG_SECRET_ENCRYPTION_KEY environment variable.")
+		secretStore = storage.NewSecretStore(kv)
+	}
 
 	// Initialize secrets backend (defaults to KV)
 	secretsBackend := config["secrets_backend"]

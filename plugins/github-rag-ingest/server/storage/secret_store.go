@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
@@ -19,14 +20,29 @@ type Secret struct {
 	SSHPassphrase  string `json:"ssh_passphrase,omitempty"`
 }
 
-// SecretStore manages secret persistence
+// SecretStore manages secret persistence. When an encryption key is set
+// (see NewEncryptedSecretStore), secrets are encrypted with AES-256-GCM
+// before being written to KV; legacy plaintext records remain readable.
 type SecretStore struct {
-	kv *KVStore
+	kv  *KVStore
+	key []byte // nil = plaintext (legacy) mode
 }
 
-// NewSecretStore creates a new secret store
+// NewSecretStore creates a secret store without encryption at rest.
+// Prefer NewEncryptedSecretStore; this exists for backward compatibility
+// when no encryption key has been configured.
 func NewSecretStore(kv *KVStore) *SecretStore {
 	return &SecretStore{kv: kv}
+}
+
+// NewEncryptedSecretStore creates a secret store that encrypts secrets with
+// AES-256-GCM using a key derived from the given passphrase. Plaintext
+// records written before encryption was enabled are still readable.
+func NewEncryptedSecretStore(kv *KVStore, passphrase string) (*SecretStore, error) {
+	if passphrase == "" {
+		return nil, fmt.Errorf("secret encryption passphrase cannot be empty")
+	}
+	return &SecretStore{kv: kv, key: deriveSecretKey(passphrase)}, nil
 }
 
 // Create creates a new secret
@@ -36,9 +52,21 @@ func (s *SecretStore) Create(ctx context.Context, secret *Secret) (string, error
 		secret.ID = uuid.New().String()
 	}
 
+	payload, err := json.Marshal(secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal secret: %w", err)
+	}
+
+	if s.key != nil {
+		payload, err = encryptSecretPayload(s.key, payload)
+		if err != nil {
+			return "", fmt.Errorf("failed to encrypt secret: %w", err)
+		}
+	}
+
 	// Store secret
 	key := secretKeyPrefix + secret.ID
-	if err := s.kv.Write(ctx, key, secret, nil); err != nil {
+	if err := s.kv.WriteRaw(ctx, key, payload, nil); err != nil {
 		return "", fmt.Errorf("failed to write secret: %w", err)
 	}
 
@@ -47,10 +75,20 @@ func (s *SecretStore) Create(ctx context.Context, secret *Secret) (string, error
 
 // Get retrieves a secret by ID
 func (s *SecretStore) Get(ctx context.Context, id string) (*Secret, error) {
-	var secret Secret
 	key := secretKeyPrefix + id
 
-	if err := s.kv.Read(ctx, key, &secret); err != nil {
+	stored, err := s.kv.ReadRaw(ctx, key)
+	if err != nil {
+		return nil, types.ErrSecretNotFound
+	}
+
+	payload, _, err := decryptSecretPayload(s.key, stored)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read secret %s: %w", id, err)
+	}
+
+	var secret Secret
+	if err := json.Unmarshal(payload, &secret); err != nil {
 		return nil, types.ErrSecretNotFound
 	}
 

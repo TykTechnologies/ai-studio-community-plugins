@@ -11,6 +11,12 @@
       "enum": ["kv", "vault"],
       "default": "kv"
     },
+    "secret_encryption_key": {
+      "type": "string",
+      "title": "Secret Encryption Key",
+      "description": "Passphrase used to encrypt stored GitHub PATs and SSH keys at rest (AES-256-GCM) when using the KV secrets backend. Falls back to the GITHUB_RAG_SECRET_ENCRYPTION_KEY environment variable. Strongly recommended: without it, secrets are stored unencrypted.",
+      "format": "password"
+    },
     "vault_address": {
       "type": "string",
       "title": "Vault Address",
