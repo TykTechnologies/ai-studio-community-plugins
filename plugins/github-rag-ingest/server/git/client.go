@@ -31,6 +31,12 @@ func NewClient(cacheDir string) (*Client, error) {
 
 // CloneOrFetch clones a repository or fetches updates if already cloned
 func (c *Client) CloneOrFetch(ctx context.Context, repo *types.Repository, secret *storage.Secret) (*git.Repository, error) {
+	// Validate the URL at the point of use so records that entered storage
+	// without validation are still caught before any network access.
+	if err := ValidateRepoURL(repo.URL); err != nil {
+		return nil, err
+	}
+
 	repoPath := c.getRepoPath(repo.ID)
 
 	// Check if repository already exists
