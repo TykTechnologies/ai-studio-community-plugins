@@ -75,12 +75,21 @@ Each repository can be configured with:
 ```json
 {
   "secrets_backend": "kv|vault",
+  "secret_encryption_key": "a-strong-passphrase",
   "vault_address": "https://vault.example.com:8200",
   "vault_token": "hvs.xxx",
   "vault_mount_path": "secret",
   "vault_secret_path": "github-rag"
 }
 ```
+
+> **Encrypting secrets at rest (KV backend)**: set `secret_encryption_key`
+> (or the `GITHUB_RAG_SECRET_ENCRYPTION_KEY` environment variable) so GitHub
+> PATs and SSH keys are encrypted with AES-256-GCM before being written to KV
+> storage. Without it, secrets are stored as plaintext JSON and a warning is
+> logged at startup. Secrets stored before enabling encryption remain
+> readable; they are re-encrypted the next time they are saved. Keep the key
+> stable — changing it makes previously encrypted secrets unreadable.
 
 ## User Interface
 
