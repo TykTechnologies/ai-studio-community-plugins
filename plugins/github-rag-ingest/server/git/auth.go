@@ -2,6 +2,8 @@ package git
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/storage"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
@@ -12,6 +14,19 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	cryptossh "golang.org/x/crypto/ssh"
 )
+
+// knownHostsCallback builds a host-key verification callback from known_hosts
+// files. GITHUB_RAG_KNOWN_HOSTS takes precedence (a list of paths in the
+// platform's path-list format); otherwise go-git's defaults apply
+// (SSH_KNOWN_HOSTS, then ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts).
+// It fails closed: if no known_hosts file is available, an error is returned
+// rather than skipping verification.
+func knownHostsCallback() (cryptossh.HostKeyCallback, error) {
+	if paths := os.Getenv("GITHUB_RAG_KNOWN_HOSTS"); paths != "" {
+		return ssh.NewKnownHostsCallback(filepath.SplitList(paths)...)
+	}
+	return ssh.NewKnownHostsCallback()
+}
 
 // GetAuthMethod returns the appropriate git authentication method
 func GetAuthMethod(secret *storage.Secret) (transport.AuthMethod, error) {
@@ -32,9 +47,15 @@ func GetAuthMethod(secret *storage.Secret) (transport.AuthMethod, error) {
 			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
 		}
 
-		// Configure host key callback to accept any host key
-		// In production, you might want to verify against known hosts
-		publicKeys.HostKeyCallback = cryptossh.InsecureIgnoreHostKey()
+		// Verify server host keys against known_hosts. Without this an
+		// attacker who can redirect or MITM the SSH connection could
+		// impersonate the Git server, capture credentials, or serve
+		// malicious repository content.
+		callback, err := knownHostsCallback()
+		if err != nil {
+			return nil, fmt.Errorf("SSH host-key verification requires a known_hosts file (set GITHUB_RAG_KNOWN_HOSTS or SSH_KNOWN_HOSTS, or provide ~/.ssh/known_hosts): %w", err)
+		}
+		publicKeys.HostKeyCallback = callback
 
 		return publicKeys, nil
 

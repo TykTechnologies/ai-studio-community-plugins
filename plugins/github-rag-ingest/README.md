@@ -139,6 +139,13 @@ When `ssh` selected:
 - **SSH Private Key** (*required*): OpenSSH format private key
 - **SSH Passphrase**: Optional passphrase if key is encrypted
 
+> **SSH host-key verification**: server host keys are verified against a
+> `known_hosts` file and cloning fails closed if none is available. The plugin
+> looks at `GITHUB_RAG_KNOWN_HOSTS` (list of paths), then `SSH_KNOWN_HOSTS`,
+> then `~/.ssh/known_hosts` and `/etc/ssh/ssh_known_hosts`. In containers,
+> mount a known_hosts file containing your Git host's keys (e.g. from
+> `ssh-keyscan github.com`).
+
 **Datasource Configuration**
 - **Datasource** (*required*): Select RAG datasource from dropdown
   - Format: "Name - VectorStoreType" (e.g., "Production RAG - chromadb")
