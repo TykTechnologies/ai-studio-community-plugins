@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/git"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/storage"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
 	"github.com/TykTechnologies/midsommar/v2/pkg/ai_studio_sdk"
@@ -48,6 +49,10 @@ func (h *Handler) CreateRepository(payload []byte) ([]byte, error) {
 	var req CreateRepositoryRequest
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return errorResponse("invalid request")
+	}
+
+	if err := git.ValidateRepoURL(req.URL); err != nil {
+		return errorResponse(fmt.Sprintf("invalid repository URL: %v", err))
 	}
 
 	ctx := context.Background()
@@ -133,6 +138,10 @@ func (h *Handler) UpdateRepository(payload []byte) ([]byte, error) {
 	repoID, ok := reqMap["id"].(string)
 	if !ok {
 		return errorResponse("repository id is required")
+	}
+
+	if err := git.ValidateRepoURL(req.URL); err != nil {
+		return errorResponse(fmt.Sprintf("invalid repository URL: %v", err))
 	}
 
 	ctx := context.Background()
