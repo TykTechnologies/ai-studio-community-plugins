@@ -39,7 +39,7 @@
     ]
   },
   "compat": {
-    "min_studio_version": "2.6.0",
+    "min_studio_version": "2.1.0",
     "api": ["ui-v1", "rpc-v1", "kv-v1", "scheduler-v1"]
   },
   "security": {

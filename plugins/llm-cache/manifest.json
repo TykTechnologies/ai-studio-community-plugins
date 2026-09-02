@@ -36,7 +36,7 @@
   },
   "compat": {
     "min_gateway_version": "1.0.0",
-    "min_studio_version": "2.6.0"
+    "min_studio_version": "2.1.0"
   },
   "security": {
     "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
