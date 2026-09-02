@@ -1,4 +1,10 @@
 # LLM Firewall Plugin Makefile
+# DEPRECATED for releases. Use `make plugin-publish NAME=llm-cache` from the repo
+# root instead: it takes the version from manifest.json, uses it as the OCI tag,
+# signs the index by digest and writes the marketplace entry from the digest the
+# registry returned. The VERSION below is a hand-maintained copy and has drifted
+# from manifest.json before, which is how tags and entries ended up disagreeing.
+# These targets are kept for one-off local pushes only.
 PLUGIN_NAME := llm-cache
 REGISTRY_PATH := studio-plugins/llm-cache
 VERSION := 1.0
