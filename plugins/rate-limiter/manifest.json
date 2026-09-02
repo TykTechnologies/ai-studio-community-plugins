@@ -1,6 +1,6 @@
 {
   "id": "com.tyk.rate-limiter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Rate Limiter",
   "description": "Sliding-window rate limiting with composable key dimensions for LLM requests. Supports request rate, token rate, and concurrent request limits.",
   "capabilities": {

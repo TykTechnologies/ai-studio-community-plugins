@@ -1,6 +1,6 @@
 {
   "id": "com.tyk.llm-price-sync",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "LLM Price Sync",
   "description": "Automatically sync LLM model prices from llm-prices.com to keep cost tracking accurate and up-to-date",
   "capabilities": {
