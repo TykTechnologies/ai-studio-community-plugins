@@ -28,7 +28,7 @@ var configSchemaFile []byte
 
 const (
 	PluginName    = "llm-cache"
-	PluginVersion = "1.0.0"
+	PluginVersion = "1.2.0"
 )
 
 // PendingCacheOp represents a pending cache operation
@@ -38,6 +38,9 @@ type PendingCacheOp struct {
 	Model       string
 	Timestamp   int64
 	ShouldCache bool
+	// Bypassed is set when the client asked to skip the cache (as opposed to
+	// a response the cache cannot store or replay).
+	Bypassed bool
 }
 
 // ClearCacheOperation tracks a pending distributed cache clear operation
@@ -323,6 +326,7 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 		p.pendingCache[requestID] = &PendingCacheOp{
 			Timestamp:   time.Now().Unix(),
 			ShouldCache: false,
+			Bypassed:    true,
 		}
 		p.pendingMu.Unlock()
 
@@ -332,58 +336,63 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 	// Generate namespace
 	namespace := p.getNamespace(ctx)
 
-	// Generate cache key from request
-	cacheKey, model, err := GenerateCacheKey(namespace, pluginReq.Body, p.config.NormalizePrompts)
+	// The key covers the LLM and the API the request is for, not only the
+	// body: two LLMs may see the same model name and messages.
+	vendor := pluginCtx.Vendor
+	scope := CacheScope{Namespace: namespace, LLMID: pluginCtx.LlmId, Vendor: vendor, Path: apiPath(pluginReq.Path)}
+	cacheKey, model, err := GenerateCacheKey(scope, pluginReq.Body, p.config.NormalizePrompts)
 	if err != nil {
 		return &pb.PluginResponse{Modified: false}, nil
 	}
 
-	// Check cache for HIT
+	format := apiFormat(vendor)
+	streaming := requestStreams(vendor, pluginReq.Path, pluginReq.Body)
+	if streaming && (format == "" || !p.config.CacheStreamingResponses) {
+		// The cache can neither replay a stream for this vendor nor store
+		// one: the request goes upstream uncached.
+		p.metrics.IncrementMiss()
+		p.pendingMu.Lock()
+		p.pendingCache[requestID] = &PendingCacheOp{Timestamp: time.Now().Unix(), ShouldCache: false}
+		p.pendingMu.Unlock()
+		return &pb.PluginResponse{Modified: false}, nil
+	}
+
+	// Check cache for HIT. Entries hold JSON; a streaming request gets it
+	// converted to the vendor's stream, when that loses nothing.
 	entry := p.cache.Get(cacheKey)
-	if entry != nil {
-		p.metrics.IncrementHit()
-		p.metrics.AddTokensSaved(int64(entry.TokensSaved))
-
-		// Build response headers
-		headers := make(map[string]string)
-		for k, v := range entry.Headers {
-			headers[k] = v
-		}
-		headers["X-Cache-Status"] = "HIT"
-		headers["X-Cache-Age"] = fmt.Sprintf("%d", time.Now().Unix()-entry.CreatedAt)
-		headers["X-Cache-TTL"] = fmt.Sprintf("%d", entry.ExpiresAt-time.Now().Unix())
-
-		if p.config.ExposeCacheKeyHeader {
-			headers["X-Cache-Key"] = cacheKey
-		}
-
-		// Determine response format based on request
+	if entry != nil && (!streaming || jsonReplayableAsStream(format, entry.Response)) {
 		responseBody := entry.Response
-		isStreamingRequest := IsStreamingRequest(pluginReq.Body)
-
-		if isStreamingRequest && p.config.CacheStreamingResponses {
-			// Convert cached JSON to SSE format for streaming requests
-			vendor := string(pluginCtx.Vendor)
+		if streaming {
 			sseResponse, err := ConvertJSONToSSE(entry.Response, vendor)
 			if err != nil {
 				log.Printf("%s: Failed to convert cache to SSE: %v", PluginName, err)
-				// Fall back to JSON response
+				responseBody = nil
 			} else {
 				responseBody = sseResponse
-				headers["Content-Type"] = "text/event-stream"
-				headers["Cache-Control"] = "no-cache"
-				headers["Connection"] = "keep-alive"
 			}
 		}
 
-		// Return cached response - block the request from going upstream
-		return &pb.PluginResponse{
-			Block:      true,
-			StatusCode: 200,
-			Headers:    headers,
-			Body:       responseBody,
-			Modified:   true,
-		}, nil
+		if responseBody != nil {
+			p.metrics.IncrementHit()
+			p.metrics.AddTokensSaved(int64(entry.TokensSaved))
+
+			headers := hitHeaders(entry.Headers, responseBody, streaming)
+			headers["X-Cache-Status"] = "HIT"
+			headers["X-Cache-Age"] = fmt.Sprintf("%d", time.Now().Unix()-entry.CreatedAt)
+			headers["X-Cache-TTL"] = fmt.Sprintf("%d", entry.ExpiresAt-time.Now().Unix())
+			if p.config.ExposeCacheKeyHeader {
+				headers["X-Cache-Key"] = cacheKey
+			}
+
+			// Return cached response - block the request from going upstream
+			return &pb.PluginResponse{
+				Block:      true,
+				StatusCode: 200,
+				Headers:    headers,
+				Body:       responseBody,
+				Modified:   true,
+			}, nil
+		}
 	}
 
 	// Cache MISS - store pending operation for response phase
@@ -446,8 +455,10 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 	}
 
 	if !pendingOp.ShouldCache {
-		// Bypass was requested
-		modifiedHeaders["X-Cache-Status"] = "BYPASS"
+		modifiedHeaders["X-Cache-Status"] = "MISS"
+		if pendingOp.Bypassed {
+			modifiedHeaders["X-Cache-Status"] = "BYPASS"
+		}
 		return &pb.ResponseWriteResponse{
 			Modified: true,
 			Body:     req.Body,
@@ -455,8 +466,9 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 		}, nil
 	}
 
-	// Check if response indicates an error (don't cache errors)
-	if p.isErrorResponse(req.Body) {
+	// Check if response indicates an error (don't cache errors), and only
+	// store JSON: entries are replayed as JSON or converted from it.
+	if p.isErrorResponse(req.Body) || !json.Valid(req.Body) {
 		modifiedHeaders["X-Cache-Status"] = "MISS"
 		return &pb.ResponseWriteResponse{
 			Modified: true,
@@ -468,21 +480,12 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 	// Extract token usage for metrics
 	tokensSaved := ExtractTokensFromResponse(req.Body)
 
-	// Sanitize headers before caching - strip compression/transfer headers
-	// since the body is already decompressed by the proxy layer
-	cacheHeaders := make(map[string]string)
-	for k, v := range req.Headers {
-		cacheHeaders[k] = v
-	}
-	delete(cacheHeaders, "Content-Encoding")
-	delete(cacheHeaders, "Transfer-Encoding")
-	cacheHeaders["Content-Length"] = fmt.Sprintf("%d", len(req.Body))
-
-	// Store in cache
+	// Store in cache, without the headers that describe this particular
+	// response on the wire (a hit sets its own, see hitHeaders)
 	p.cache.Set(
 		pendingOp.CacheKey,
 		req.Body,
-		cacheHeaders,
+		storableHeaders(req.Headers),
 		pendingOp.Model,
 		tokensSaved,
 		nil, // Use default TTL
@@ -530,14 +533,20 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 	}
 
 	if !pendingOp.ShouldCache {
-		// Bypass was requested
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
-	// Get vendor from context metadata for SSE parsing
-	vendor := ""
-	if pluginCtx.Metadata != nil {
+	// Get vendor from context metadata for SSE parsing (the gateway sets it
+	// there on this hook)
+	vendor := pluginCtx.Vendor
+	if pluginCtx.Metadata != nil && pluginCtx.Metadata["vendor"] != "" {
 		vendor = pluginCtx.Metadata["vendor"]
+	}
+
+	// Only a stream the cache can rebuild and replay without losing anything
+	// is stored: plain text in one choice (no tool calls or thinking).
+	if !streamReplayable(apiFormat(vendor), req.AccumulatedResponse) {
+		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
 	// Reconstruct a JSON response from the SSE stream
@@ -552,22 +561,12 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
-	// Sanitize headers before caching - strip compression/transfer headers
-	// since the body is already decompressed by the proxy layer
-	streamCacheHeaders := make(map[string]string)
-	for k, v := range req.Headers {
-		streamCacheHeaders[k] = v
-	}
-	delete(streamCacheHeaders, "Content-Encoding")
-	delete(streamCacheHeaders, "Transfer-Encoding")
-	streamCacheHeaders["Content-Length"] = fmt.Sprintf("%d", len(reconstructedJSON))
-
 	// Store in cache - store the reconstructed JSON, not the raw SSE
 	// When a cache HIT occurs, HandlePostAuth will convert it back to SSE if needed
 	p.cache.Set(
 		pendingOp.CacheKey,
 		reconstructedJSON,
-		streamCacheHeaders,
+		storableHeaders(req.Headers),
 		pendingOp.Model,
 		tokenUsage,
 		nil, // Use default TTL

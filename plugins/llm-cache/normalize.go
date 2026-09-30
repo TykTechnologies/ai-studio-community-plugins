@@ -11,179 +11,127 @@ import (
 	"strings"
 )
 
-// CacheKeyComponents holds the components used to generate a cache key
-type CacheKeyComponents struct {
-	Namespace    string
-	Model        string
-	Messages     []NormalizedMessage
-	SystemPrompt string
-	Tools        []NormalizedTool
-	Temperature  float64
-}
-
-// NormalizedMessage represents a normalized chat message
-type NormalizedMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// NormalizedTool represents a normalized tool definition
-type NormalizedTool struct {
-	Type     string      `json:"type"`
-	Function interface{} `json:"function,omitempty"`
+// CacheScope is where a request goes. The same body sent to another LLM, or
+// to another API of the same LLM, is a different request with a differently
+// shaped answer, so the scope is part of the key.
+type CacheScope struct {
+	Namespace string
+	LLMID     uint32
+	Vendor    string
+	// Path is the vendor API path (see apiPath).
+	Path string
 }
 
 // whitespaceRegex matches multiple whitespace characters
 var whitespaceRegex = regexp.MustCompile(`\s+`)
 
-// GenerateCacheKey generates a deterministic cache key from request components
-func GenerateCacheKey(namespace string, requestBody []byte, normalizePrompts bool) (string, string, error) {
+// transportFields ask for a form of the answer, not a different answer: a
+// hit is replayed in whichever form the request asks for (see replay.go).
+var transportFields = []string{"stream", "stream_options"}
+
+// promptTextFields hold prompt text that NormalizePrompts compares with
+// whitespace collapsed: message content, content-part text and system
+// prompts, in every vendor's request format.
+var promptTextFields = map[string]bool{"content": true, "text": true, "system": true, "prompt": true}
+
+// GenerateCacheKey generates a deterministic cache key for a request. Every
+// field of the request is part of the key (anything may change the answer:
+// max_tokens, response_format, tool results, Gemini's contents), except the
+// transport fields. With normalizePrompts, prompt text is compared with its
+// whitespace collapsed and tools are compared regardless of their order.
+func GenerateCacheKey(scope CacheScope, requestBody []byte, normalizePrompts bool) (string, string, error) {
 	var request map[string]interface{}
 	if err := json.Unmarshal(requestBody, &request); err != nil {
 		return "", "", fmt.Errorf("failed to parse request body: %w", err)
 	}
-
-	components := CacheKeyComponents{
-		Namespace: namespace,
+	if request == nil {
+		return "", "", fmt.Errorf("request body is not a JSON object")
 	}
 
-	// Extract model
-	if model, ok := request["model"].(string); ok {
-		components.Model = model
+	model, _ := request["model"].(string)
+	if model == "" {
+		model = modelFromPath(scope.Path)
 	}
 
-	// Extract temperature (default to 1.0 if not specified)
-	components.Temperature = 1.0
-	if temp, ok := request["temperature"].(float64); ok {
-		components.Temperature = temp
+	for _, field := range transportFields {
+		delete(request, field)
 	}
-
-	// Extract and normalize system prompt (Anthropic style)
-	if system, ok := request["system"].(string); ok {
-		if normalizePrompts {
-			components.SystemPrompt = normalizeText(system)
-		} else {
-			components.SystemPrompt = system
+	var body interface{} = request
+	if normalizePrompts {
+		if tools, ok := request["tools"].([]interface{}); ok {
+			request["tools"] = sortTools(tools)
 		}
+		body = normalizePromptText(request, "")
 	}
 
-	// Extract and normalize messages
-	if messages, ok := request["messages"].([]interface{}); ok {
-		for _, msg := range messages {
-			if msgMap, ok := msg.(map[string]interface{}); ok {
-				normalized := normalizeMessage(msgMap, normalizePrompts)
-				components.Messages = append(components.Messages, normalized)
-			}
-		}
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	// encoding/json writes map keys in sorted order, so equal requests
+	// encode identically.
+	if err := encoder.Encode(struct {
+		Namespace string      `json:"ns"`
+		LLMID     uint32      `json:"llm"`
+		Vendor    string      `json:"vendor"`
+		Path      string      `json:"path"`
+		Body      interface{} `json:"body"`
+	}{scope.Namespace, scope.LLMID, strings.ToLower(scope.Vendor), scope.Path, body}); err != nil {
+		return "", "", fmt.Errorf("failed to encode cache key: %w", err)
 	}
+	hash := sha256.Sum256(buf.Bytes())
 
-	// Extract and normalize tools
-	if tools, ok := request["tools"].([]interface{}); ok {
-		components.Tools = normalizeTools(tools)
-	}
-
-	// Generate hash from components
-	hash, err := hashComponents(components)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to hash components: %w", err)
-	}
-
-	// Build cache key
-	cacheKey := fmt.Sprintf("cache:resp:%s:%s", namespace, hash)
-
-	return cacheKey, components.Model, nil
+	return fmt.Sprintf("cache:resp:%s:%s", scope.Namespace, hex.EncodeToString(hash[:])), model, nil
 }
 
-// normalizeMessage normalizes a single message
-func normalizeMessage(msg map[string]interface{}, normalizePrompts bool) NormalizedMessage {
-	normalized := NormalizedMessage{}
-
-	if role, ok := msg["role"].(string); ok {
-		normalized.Role = role
-	}
-
-	// Handle different content formats
-	if content, ok := msg["content"].(string); ok {
-		if normalizePrompts {
-			normalized.Content = normalizeText(content)
-		} else {
-			normalized.Content = content
+// normalizePromptText returns a copy of v with the whitespace of prompt text
+// collapsed. key is the name v was found under.
+func normalizePromptText(v interface{}, key string) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = normalizePromptText(val, k)
 		}
-	} else if contentArray, ok := msg["content"].([]interface{}); ok {
-		// Handle array content (e.g., Anthropic vision messages)
-		var parts []string
-		for _, item := range contentArray {
-			if itemMap, ok := item.(map[string]interface{}); ok {
-				if text, ok := itemMap["text"].(string); ok {
-					if normalizePrompts {
-						parts = append(parts, normalizeText(text))
-					} else {
-						parts = append(parts, text)
-					}
-				}
-				// For images, include the source hash or URL
-				if source, ok := itemMap["source"].(map[string]interface{}); ok {
-					if data, ok := source["data"].(string); ok {
-						// Hash the image data for consistency
-						hash := sha256.Sum256([]byte(data))
-						parts = append(parts, fmt.Sprintf("[image:%s]", hex.EncodeToString(hash[:8])))
-					}
-				}
-				if imageURL, ok := itemMap["image_url"].(map[string]interface{}); ok {
-					if url, ok := imageURL["url"].(string); ok {
-						parts = append(parts, fmt.Sprintf("[image:%s]", url))
-					}
-				}
-			}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, val := range t {
+			out[i] = normalizePromptText(val, key)
 		}
-		normalized.Content = strings.Join(parts, " ")
+		return out
+	case string:
+		if promptTextFields[key] {
+			return normalizeText(t)
+		}
 	}
-
-	return normalized
+	return v
 }
 
-// normalizeTools normalizes and sorts tool definitions
-func normalizeTools(tools []interface{}) []NormalizedTool {
-	normalized := make([]NormalizedTool, 0, len(tools))
-
-	for _, tool := range tools {
-		if toolMap, ok := tool.(map[string]interface{}); ok {
-			nt := NormalizedTool{}
-
-			if toolType, ok := toolMap["type"].(string); ok {
-				nt.Type = toolType
-			}
-
-			if function, ok := toolMap["function"].(map[string]interface{}); ok {
-				// Canonicalize the function definition
-				nt.Function = canonicalizeJSON(function)
-			}
-
-			normalized = append(normalized, nt)
-		}
-	}
-
-	// Sort tools by type and function name for consistency
-	sort.Slice(normalized, func(i, j int) bool {
-		if normalized[i].Type != normalized[j].Type {
-			return normalized[i].Type < normalized[j].Type
-		}
-		iName := getToolName(normalized[i])
-		jName := getToolName(normalized[j])
-		return iName < jName
+// sortTools orders tool definitions by type and name, whatever the vendor's
+// shape ({"type","function":{"name"}} or {"name","input_schema"}), keeping
+// each definition whole. Definitions without a name keep their order.
+func sortTools(tools []interface{}) []interface{} {
+	sorted := make([]interface{}, len(tools))
+	copy(sorted, tools)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return toolSortKey(sorted[i]) < toolSortKey(sorted[j])
 	})
-
-	return normalized
+	return sorted
 }
 
-// getToolName extracts the tool name for sorting
-func getToolName(tool NormalizedTool) string {
-	if funcMap, ok := tool.Function.(map[string]interface{}); ok {
-		if name, ok := funcMap["name"].(string); ok {
-			return name
+func toolSortKey(tool interface{}) string {
+	m, _ := tool.(map[string]interface{})
+	if m == nil {
+		return ""
+	}
+	name, _ := m["name"].(string)
+	if fn, ok := m["function"].(map[string]interface{}); ok {
+		if n, ok := fn["name"].(string); ok {
+			name = n
 		}
 	}
-	return ""
+	toolType, _ := m["type"].(string)
+	return toolType + "\x00" + name
 }
 
 // normalizeText normalizes text by trimming and collapsing whitespace
@@ -195,60 +143,6 @@ func normalizeText(text string) string {
 	text = whitespaceRegex.ReplaceAllString(text, " ")
 
 	return text
-}
-
-// canonicalizeJSON recursively sorts JSON object keys for consistent hashing
-func canonicalizeJSON(data interface{}) interface{} {
-	switch v := data.(type) {
-	case map[string]interface{}:
-		// Sort keys and recursively canonicalize values
-		result := make(map[string]interface{})
-		for key, val := range v {
-			result[key] = canonicalizeJSON(val)
-		}
-		return result
-	case []interface{}:
-		// Recursively canonicalize array elements
-		result := make([]interface{}, len(v))
-		for i, val := range v {
-			result[i] = canonicalizeJSON(val)
-		}
-		return result
-	default:
-		return v
-	}
-}
-
-// hashComponents generates a SHA-256 hash of the cache key components
-func hashComponents(components CacheKeyComponents) (string, error) {
-	// Create a canonical representation
-	canonical := struct {
-		Namespace    string              `json:"ns"`
-		Model        string              `json:"m"`
-		Messages     []NormalizedMessage `json:"msg"`
-		SystemPrompt string              `json:"sys"`
-		Tools        []NormalizedTool    `json:"tools"`
-		Temperature  float64             `json:"temp"`
-	}{
-		Namespace:    components.Namespace,
-		Model:        components.Model,
-		Messages:     components.Messages,
-		SystemPrompt: components.SystemPrompt,
-		Tools:        components.Tools,
-		Temperature:  components.Temperature,
-	}
-
-	// Marshal with sorted keys using a custom encoder
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(canonical); err != nil {
-		return "", err
-	}
-
-	// Generate SHA-256 hash
-	hash := sha256.Sum256(buf.Bytes())
-	return hex.EncodeToString(hash[:]), nil
 }
 
 // ExtractTokensFromResponse extracts token usage from an LLM response

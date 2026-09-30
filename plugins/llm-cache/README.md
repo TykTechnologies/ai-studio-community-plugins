@@ -4,7 +4,7 @@ A community plugin for Tyk AI Studio that caches LLM responses to reduce costs a
 
 ## Features
 
-- **Deterministic Cache Keys**: SHA-256 hashed keys based on model, messages, tools, and temperature
+- **Deterministic Cache Keys**: SHA-256 hashed keys over the LLM, its API and the whole request
 - **Prompt Normalization**: Normalizes whitespace and JSON ordering to improve cache hit rates
 - **Namespace Isolation**: Isolates cache entries by API key, app ID, or organization ID
 - **LRU Eviction**: Automatically evicts least recently used entries when cache is full
@@ -20,20 +20,45 @@ A community plugin for Tyk AI Studio that caches LLM responses to reduce costs a
    - On HIT: Return cached response immediately (blocks upstream call)
    - On MISS: Store cache key for response phase
 
-2. **Response Phase (OnBeforeWrite)**
+2. **Response Phase (OnBeforeWrite / OnStreamComplete)**
    - Retrieve pending cache operation by request ID
-   - Store LLM response in cache with TTL
+   - Store the LLM's JSON response in cache with TTL; a streamed response is
+     rebuilt into JSON first
    - Add cache status headers to response
+
+3. **Replay**
+   - A JSON request gets the stored JSON; a streaming request gets it converted
+     into the vendor's own stream (OpenAI, Anthropic and Gemini formats)
+   - Headers describing the body (`Content-Type`, `Content-Length`) are set for
+     what is actually sent, never copied from the stored response
+   - Only plain-text answers in a single choice are converted between JSON and
+     a stream. Tool calls, thinking blocks and multiple choices are replayed
+     only in the form they were stored in; otherwise the request goes upstream
+   - Vendors whose streams the cache cannot produce (for example Ollama's
+     NDJSON) are only served JSON from the cache; their streaming requests go
+     upstream uncached
 
 ## Cache Key Components
 
 The cache key is generated from:
 - **Namespace**: API key hash, app ID, or org ID (configurable)
-- **Model**: The LLM model identifier
-- **Messages**: All message content (normalized)
-- **System Prompt**: System instructions
-- **Tools**: Tool definitions (sorted alphabetically)
-- **Temperature**: Temperature value (different temps = different keys)
+- **LLM**: the LLM's ID and vendor. Two LLMs never share an entry, even with
+  the same model name and messages
+- **API**: the vendor API path (for example `/v1/messages`,
+  `/v1/chat/completions` or Gemini's `models/{model}:generateContent`, which
+  also names the model)
+- **Request**: every field of the request body (messages or Gemini `contents`,
+  system prompt, tools and tool results, temperature, `max_tokens`,
+  `response_format`, `n`, stop sequences and so on), except `stream` and
+  `stream_options`, which only choose how the answer is delivered
+
+With `normalize_prompts`, prompt text is compared with its whitespace
+collapsed and tool definitions regardless of their order.
+
+Requests reach the cache on the gateway's `/llm/` endpoints in the LLM's
+native API. That includes Studio's OpenAI-compatible endpoints (`/ai/{slug}/v1`
+and the unified `/v1` router), whose drivers call `/llm/call/{slug}/` in the
+native API and stream from it.
 
 ## Configuration
 
@@ -96,7 +121,7 @@ The admin dashboard displays:
 
 - **In-memory only**: Cache is not persisted across restarts
 - **Single instance**: Cache is not shared between gateway instances
-- **Streaming**: Streaming responses are cached as complete responses and returned non-streamed on HIT
+- **Streaming**: Streamed answers with tool calls or thinking blocks are not cached
 
 ## Future Enhancements (Enterprise)
 
