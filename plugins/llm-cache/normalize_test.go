@@ -18,7 +18,7 @@ func TestGenerateCacheKey(t *testing.T) {
 	}
 	requestBody, _ := json.Marshal(request)
 
-	key, model, err := GenerateCacheKey("test-namespace", requestBody, true)
+	key, model, err := GenerateCacheKey(CacheScope{Namespace: "test-namespace"}, requestBody, true)
 
 	if err != nil {
 		t.Fatalf("GenerateCacheKey failed: %v", err)
@@ -51,8 +51,8 @@ func TestGenerateCacheKeyDeterministic(t *testing.T) {
 	}
 	requestBody, _ := json.Marshal(request)
 
-	key1, _, _ := GenerateCacheKey("ns", requestBody, true)
-	key2, _, _ := GenerateCacheKey("ns", requestBody, true)
+	key1, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, requestBody, true)
+	key2, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, requestBody, true)
 
 	if key1 != key2 {
 		t.Error("same request should generate same cache key")
@@ -71,8 +71,8 @@ func TestGenerateCacheKeyDifferentNamespaces(t *testing.T) {
 	}
 	requestBody, _ := json.Marshal(request)
 
-	key1, _, _ := GenerateCacheKey("namespace1", requestBody, true)
-	key2, _, _ := GenerateCacheKey("namespace2", requestBody, true)
+	key1, _, _ := GenerateCacheKey(CacheScope{Namespace: "namespace1"}, requestBody, true)
+	key2, _, _ := GenerateCacheKey(CacheScope{Namespace: "namespace2"}, requestBody, true)
 
 	if key1 == key2 {
 		t.Error("different namespaces should generate different cache keys")
@@ -106,16 +106,16 @@ func TestGenerateCacheKeyNormalization(t *testing.T) {
 	body2, _ := json.Marshal(request2)
 
 	// With normalization, these should produce the same key
-	key1, _, _ := GenerateCacheKey("ns", body1, true)
-	key2, _, _ := GenerateCacheKey("ns", body2, true)
+	key1, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body1, true)
+	key2, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body2, true)
 
 	if key1 != key2 {
 		t.Error("normalized prompts with different whitespace should generate same cache key")
 	}
 
 	// Without normalization, they should differ
-	key3, _, _ := GenerateCacheKey("ns", body1, false)
-	key4, _, _ := GenerateCacheKey("ns", body2, false)
+	key3, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body1, false)
+	key4, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body2, false)
 
 	if key3 == key4 {
 		t.Error("non-normalized prompts with different whitespace should generate different cache keys")
@@ -125,7 +125,7 @@ func TestGenerateCacheKeyNormalization(t *testing.T) {
 func TestGenerateCacheKeyInvalidJSON(t *testing.T) {
 	invalidBody := []byte(`{invalid json}`)
 
-	_, _, err := GenerateCacheKey("ns", invalidBody, true)
+	_, _, err := GenerateCacheKey(CacheScope{Namespace: "ns"}, invalidBody, true)
 
 	if err == nil {
 		t.Error("expected error for invalid JSON")
@@ -145,7 +145,7 @@ func TestGenerateCacheKeyWithSystemPrompt(t *testing.T) {
 	}
 	requestBody, _ := json.Marshal(request)
 
-	key, model, err := GenerateCacheKey("ns", requestBody, true)
+	key, model, err := GenerateCacheKey(CacheScope{Namespace: "ns"}, requestBody, true)
 
 	if err != nil {
 		t.Fatalf("GenerateCacheKey failed: %v", err)
@@ -181,7 +181,7 @@ func TestGenerateCacheKeyWithTools(t *testing.T) {
 	}
 	requestBody, _ := json.Marshal(request)
 
-	key, _, err := GenerateCacheKey("ns", requestBody, true)
+	key, _, err := GenerateCacheKey(CacheScope{Namespace: "ns"}, requestBody, true)
 
 	if err != nil {
 		t.Fatalf("GenerateCacheKey failed: %v", err)
@@ -202,7 +202,7 @@ func TestGenerateCacheKeyWithTools(t *testing.T) {
 		},
 	}
 	body2, _ := json.Marshal(request2)
-	key2, _, _ := GenerateCacheKey("ns", body2, true)
+	key2, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body2, true)
 
 	if key == key2 {
 		t.Error("request with tools should have different key than without tools")
@@ -225,8 +225,8 @@ func TestGenerateCacheKeyDifferentTemperatures(t *testing.T) {
 	body1, _ := json.Marshal(request1)
 	body2, _ := json.Marshal(request2)
 
-	key1, _, _ := GenerateCacheKey("ns", body1, true)
-	key2, _, _ := GenerateCacheKey("ns", body2, true)
+	key1, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body1, true)
+	key2, _, _ := GenerateCacheKey(CacheScope{Namespace: "ns"}, body2, true)
 
 	if key1 == key2 {
 		t.Error("different temperatures should generate different cache keys")
@@ -300,194 +300,84 @@ func TestExtractTokensFromResponse(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessage(t *testing.T) {
-	// Simple string content
-	msg := map[string]interface{}{
-		"role":    "user",
-		"content": "  Hello   world  ",
-	}
-	normalized := normalizeMessage(msg, true)
-	if normalized.Role != "user" {
-		t.Errorf("expected role 'user', got '%s'", normalized.Role)
-	}
-	if normalized.Content != "Hello world" {
-		t.Errorf("expected normalized content 'Hello world', got '%s'", normalized.Content)
-	}
-
-	// Without normalization
-	normalized = normalizeMessage(msg, false)
-	if normalized.Content != "  Hello   world  " {
-		t.Errorf("without normalization, content should be unchanged")
-	}
-}
-
-func TestNormalizeMessageWithArrayContent(t *testing.T) {
-	// Array content (like Anthropic vision messages)
-	msg := map[string]interface{}{
-		"role": "user",
-		"content": []interface{}{
-			map[string]interface{}{
-				"type": "text",
-				"text": "What's in this image?",
-			},
-		},
-	}
-
-	normalized := normalizeMessage(msg, true)
-	if normalized.Content != "What's in this image?" {
-		t.Errorf("expected extracted text content, got '%s'", normalized.Content)
-	}
-}
-
-func TestNormalizeTools(t *testing.T) {
-	tools := []interface{}{
-		map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        "tool_b",
-				"description": "Second tool",
-			},
-		},
-		map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        "tool_a",
-				"description": "First tool",
-			},
-		},
-	}
-
-	normalized := normalizeTools(tools)
-
-	if len(normalized) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(normalized))
-	}
-
-	// Should be sorted by name
-	if getToolName(normalized[0]) != "tool_a" {
-		t.Error("tools should be sorted by name, expected tool_a first")
-	}
-	if getToolName(normalized[1]) != "tool_b" {
-		t.Error("tools should be sorted by name, expected tool_b second")
-	}
-}
-
-func TestGetToolName(t *testing.T) {
-	tool := NormalizedTool{
-		Type: "function",
-		Function: map[string]interface{}{
-			"name": "my_tool",
-		},
-	}
-
-	name := getToolName(tool)
-	if name != "my_tool" {
-		t.Errorf("expected 'my_tool', got '%s'", name)
-	}
-
-	// Tool without function
-	emptyTool := NormalizedTool{Type: "function"}
-	name = getToolName(emptyTool)
-	if name != "" {
-		t.Errorf("expected empty string for tool without function, got '%s'", name)
-	}
-}
-
-func TestCanonicalizeJSON(t *testing.T) {
-	// Test with nested map
-	input := map[string]interface{}{
-		"b": "value_b",
-		"a": "value_a",
-		"nested": map[string]interface{}{
-			"z": "value_z",
-			"y": "value_y",
-		},
-	}
-
-	result := canonicalizeJSON(input)
-
-	// Result should be a map
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		t.Fatal("expected map result")
-	}
-
-	// Nested should also be canonicalized
-	nested, ok := resultMap["nested"].(map[string]interface{})
-	if !ok {
-		t.Fatal("nested should be a map")
-	}
-
-	if nested["y"] != "value_y" {
-		t.Error("nested values should be preserved")
-	}
-}
-
-func TestCanonicalizeJSONArray(t *testing.T) {
-	input := []interface{}{
-		map[string]interface{}{"name": "item1"},
-		map[string]interface{}{"name": "item2"},
-	}
-
-	result := canonicalizeJSON(input)
-
-	resultArray, ok := result.([]interface{})
-	if !ok {
-		t.Fatal("expected array result")
-	}
-
-	if len(resultArray) != 2 {
-		t.Errorf("expected 2 items, got %d", len(resultArray))
-	}
-}
-
-func TestHashComponentsConsistency(t *testing.T) {
-	components := CacheKeyComponents{
-		Namespace: "test",
-		Model:     "gpt-4",
-		Messages: []NormalizedMessage{
-			{Role: "user", Content: "Hello"},
-		},
-		SystemPrompt: "Be helpful",
-		Temperature:  0.7,
-	}
-
-	hash1, err := hashComponents(components)
+func keyOf(t *testing.T, scope CacheScope, body string) string {
+	t.Helper()
+	key, _, err := GenerateCacheKey(scope, []byte(body), true)
 	if err != nil {
-		t.Fatalf("hashComponents failed: %v", err)
+		t.Fatalf("GenerateCacheKey(%s): %v", body, err)
 	}
+	return key
+}
 
-	hash2, err := hashComponents(components)
-	if err != nil {
-		t.Fatalf("hashComponents failed: %v", err)
+func TestGenerateCacheKeyScope(t *testing.T) {
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	base := CacheScope{Namespace: "ns", LLMID: 1, Vendor: "openai", Path: "/v1/chat/completions"}
+	variants := map[string]CacheScope{
+		"llm":    {Namespace: "ns", LLMID: 2, Vendor: "openai", Path: "/v1/chat/completions"},
+		"vendor": {Namespace: "ns", LLMID: 1, Vendor: "anthropic", Path: "/v1/chat/completions"},
+		"path":   {Namespace: "ns", LLMID: 1, Vendor: "openai", Path: "/v1/completions"},
 	}
-
-	if hash1 != hash2 {
-		t.Error("same components should produce same hash")
+	for name, scope := range variants {
+		if keyOf(t, base, body) == keyOf(t, scope, body) {
+			t.Errorf("a different %s gave the same key", name)
+		}
 	}
 }
 
-func TestHashComponentsDifferent(t *testing.T) {
-	components1 := CacheKeyComponents{
-		Namespace: "test",
-		Model:     "gpt-4",
-		Messages: []NormalizedMessage{
-			{Role: "user", Content: "Hello"},
-		},
+func TestGenerateCacheKeyIgnoresTransportFields(t *testing.T) {
+	scope := CacheScope{Namespace: "ns"}
+	plain := keyOf(t, scope, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	streamed := keyOf(t, scope, `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`)
+	if plain != streamed {
+		t.Error("stream and stream_options should not change the key")
 	}
+}
 
-	components2 := CacheKeyComponents{
-		Namespace: "test",
-		Model:     "gpt-4",
-		Messages: []NormalizedMessage{
-			{Role: "user", Content: "Goodbye"},
-		},
+func TestGenerateCacheKeyToolOrderAndShape(t *testing.T) {
+	scope := CacheScope{Namespace: "ns"}
+	openAIAB := keyOf(t, scope, `{"model":"m","messages":[],"tools":[{"type":"function","function":{"name":"a"}},{"type":"function","function":{"name":"b"}}]}`)
+	openAIBA := keyOf(t, scope, `{"model":"m","messages":[],"tools":[{"type":"function","function":{"name":"b"}},{"type":"function","function":{"name":"a"}}]}`)
+	if openAIAB != openAIBA {
+		t.Error("tool order should not change the key")
 	}
+	// Anthropic tools have no "function" object; two different ones must
+	// not look alike.
+	anthA := keyOf(t, scope, `{"model":"m","messages":[],"tools":[{"name":"a","input_schema":{"type":"object"}}]}`)
+	anthB := keyOf(t, scope, `{"model":"m","messages":[],"tools":[{"name":"b","input_schema":{"type":"object"}}]}`)
+	if anthA == anthB {
+		t.Error("different Anthropic tools gave the same key")
+	}
+}
 
-	hash1, _ := hashComponents(components1)
-	hash2, _ := hashComponents(components2)
+func TestGenerateCacheKeyToolResultsMatter(t *testing.T) {
+	scope := CacheScope{Namespace: "ns"}
+	conv := func(result string) string {
+		return `{"model":"m","messages":[{"role":"user","content":"weather?"},` +
+			`{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"w","input":{}}]},` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"` + result + `"}]}]}`
+	}
+	if keyOf(t, scope, conv("sunny")) == keyOf(t, scope, conv("rainy")) {
+		t.Error("different tool results gave the same key")
+	}
+}
 
-	if hash1 == hash2 {
-		t.Error("different components should produce different hashes")
+func TestGenerateCacheKeyGeminiModelFromPath(t *testing.T) {
+	_, model, err := GenerateCacheKey(CacheScope{Namespace: "ns", Path: "/v1beta/models/gemini-a:generateContent"}, []byte(`{"contents":[]}`), true)
+	if err != nil || model != "gemini-a" {
+		t.Fatalf("model = %q, %v; want gemini-a", model, err)
+	}
+}
+
+func TestAPIPath(t *testing.T) {
+	cases := map[string]string{
+		"/llm/call/claude/v1/messages":                                "/v1/messages",
+		"/llm/rest/gem/v1beta/models/g:streamGenerateContent":         "/v1beta/models/g:generateContent",
+		"/llm/call/gem/v1beta/models/g:streamGenerateContent?alt=sse": "/v1beta/models/g:generateContent",
+		"/v1/chat/completions":                                        "/v1/chat/completions",
+	}
+	for in, want := range cases {
+		if got := apiPath(in); got != want {
+			t.Errorf("apiPath(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
