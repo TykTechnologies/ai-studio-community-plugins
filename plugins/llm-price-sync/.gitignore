@@ -1,3 +1,4 @@
 llm-price-sync-darwin-arm64
 llm-price-sync-linux-amd64
 go.sum
+/llm-price-sync
