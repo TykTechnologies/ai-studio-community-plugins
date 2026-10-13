@@ -16,6 +16,12 @@
       "title": "Case Sensitive",
       "description": "Whether phrase matching is case-sensitive (applies to non-regex patterns)"
     },
+    "fail_closed": {
+      "type": "boolean",
+      "default": false,
+      "title": "Fail Closed",
+      "description": "Block requests whose content cannot be inspected (body not parseable, or no text found) when a rule applies to the model. Off: such requests pass through unfiltered."
+    },
     "rules": {
       "type": "array",
       "title": "Firewall Rules",
