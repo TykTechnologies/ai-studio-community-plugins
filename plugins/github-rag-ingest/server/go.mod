@@ -9,6 +9,7 @@ replace github.com/TykTechnologies/midsommar/microgateway => ../../../../microga
 require (
 	github.com/TykTechnologies/midsommar/v2 v2.0.0
 	github.com/bmatcuk/doublestar/v4 v4.9.1
+	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.22.0
@@ -41,7 +42,6 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.6.2 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -251,13 +251,15 @@ Displays job history with columns:
 - **Job ID**: First 8 characters of UUID
 - **Repository**: Repository name
 - **Type**: `full` or `incremental`
-- **Status**: `queued`, `running`, `success`, `failed`, or `partial`
+- **Status**: `queued`, `running`, `success`, `failed`, `partial` or `cancelled`
 - **Started**: Start timestamp
 - **Completed**: Completion timestamp (if finished)
 - **Stats**: Quick stats summary (files scanned, chunks written, errors)
 
 **Actions:**
 - **View Logs**: Opens detailed job view with execution logs
+
+**Cancelling a job** (the `cancelJob` RPC): a running job stops at the next file or batch boundary, and an in-progress clone or datasource call is interrupted. The job ends as `cancelled` and its log says how far it got. Chunks already written stay in the datasource. The repository's last-synced commit is not advanced, so the next incremental sync processes the files the cancelled run didn't finish. A queued job is cancelled before it starts. If the host stops a scheduled job (for example, on timeout), it also ends as `cancelled`, with "stopped by the host" as the reason.
 
 **Filtering:**
 - Filter by repository (dropdown)

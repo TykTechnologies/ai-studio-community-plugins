@@ -3,8 +3,11 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 
+	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/ingestion"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
 )
 
@@ -36,9 +39,8 @@ func (h *Handler) TriggerIngestion(payload []byte) ([]byte, error) {
 
 	// Run ingestion asynchronously
 	go func() {
-		bgCtx := context.Background()
-		if err := h.engine.Run(bgCtx, job); err != nil {
-			fmt.Printf("Ingestion job %s failed: %v\n", job.ID, err)
+		if err := h.engine.Run(context.Background(), job); err != nil && !errors.Is(err, ingestion.ErrJobCancelled) {
+			log.Printf("github-rag-ingest: ingestion job %s failed: %v", job.ID, err)
 		}
 	}()
 
@@ -150,7 +152,16 @@ func (h *Handler) CancelJob(payload []byte) ([]byte, error) {
 		return errorResponse("job is not running")
 	}
 
-	// Update status to cancelled
+	// A job running in this process is stopped; the engine records it as
+	// cancelled when it stops (between files or batches).
+	if h.engine.Cancel(job.ID) {
+		return successResponse(map[string]interface{}{
+			"message": "job cancellation requested",
+		})
+	}
+
+	// Not running here: queued and about to start (the engine will not start
+	// it now), or left over from a plugin restart. Record it as cancelled.
 	job.Complete(types.JobStatusCancelled, "cancelled by user")
 	if err := h.jobStore.Update(ctx, job); err != nil {
 		return errorResponse(fmt.Sprintf("failed to cancel job: %v", err))
