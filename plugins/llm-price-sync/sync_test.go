@@ -13,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // memKV is a concurrency-safe in-memory plugin_sdk.KVService.
@@ -20,6 +23,7 @@ type memKV struct {
 	mu       sync.Mutex
 	data     map[string][]byte
 	writeErr error
+	readErr  error
 }
 
 func newMemKV() *memKV { return &memKV{data: map[string][]byte{}} }
@@ -27,9 +31,12 @@ func newMemKV() *memKV { return &memKV{data: map[string][]byte{}} }
 func (m *memKV) Read(_ context.Context, key string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
 	v, ok := m.data[key]
 	if !ok {
-		return nil, errors.New("key not found")
+		return nil, fmt.Errorf("failed to read KV data: %w", status.Error(codes.NotFound, "key not found"))
 	}
 	return v, nil
 }
@@ -238,5 +245,29 @@ func TestAppendToHistoryIsSerialised(t *testing.T) {
 	}
 	if len(history) != historyLen {
 		t.Errorf("history has %d entries after %d concurrent appends", len(history), historyLen)
+	}
+}
+
+// A failed history read must not be written back as a one-entry history.
+func TestAppendToHistoryKeepsHistoryWhenReadFails(t *testing.T) {
+	kv := newMemKV()
+	p := NewPriceSyncPlugin()
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := p.appendToHistory(ctx, kv, []byte(fmt.Sprintf(`{"n":%d}`, i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	kv.readErr = status.Error(codes.Unavailable, "kv down")
+	if err := p.appendToHistory(ctx, kv, []byte(`{"n":99}`)); err == nil {
+		t.Error("appendToHistory hid the read error")
+	}
+
+	kv.readErr = nil
+	data, _ := kv.Read(ctx, historyKey)
+	var history []json.RawMessage
+	if err := json.Unmarshal(data, &history); err != nil || len(history) != 3 {
+		t.Errorf("history = %s, want the 3 earlier entries kept", data)
 	}
 }

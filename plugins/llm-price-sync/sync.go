@@ -11,6 +11,8 @@ import (
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/ai_studio_sdk"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type SyncResult struct {
@@ -231,7 +233,14 @@ func (p *PriceSyncPlugin) appendToHistory(ctx context.Context, kv plugin_sdk.KVS
 	defer p.historyMu.Unlock()
 
 	var history []json.RawMessage
-	if histData, err := kv.Read(ctx, historyKey); err == nil && len(histData) > 0 {
+	histData, err := kv.Read(ctx, historyKey)
+	if err != nil && status.Code(err) != codes.NotFound {
+		// Writing back after a failed read would replace the whole history
+		// with this one entry. Only a missing key (gRPC NotFound, the AI
+		// Studio KV contract) starts a new history.
+		return fmt.Errorf("read sync history: %w", err)
+	}
+	if err == nil && len(histData) > 0 {
 		if err := json.Unmarshal(histData, &history); err != nil {
 			// Start a fresh history rather than failing every sync on it
 			log.Printf("[price-sync] discarding unreadable sync history: %v", err)
