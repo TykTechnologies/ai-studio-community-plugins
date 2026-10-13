@@ -5,6 +5,7 @@ package main
 
 import (
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -432,147 +433,144 @@ func (p *LLMFirewallPlugin) extractModelFromPath(vendor string, path string) str
 	return ""
 }
 
-// extractTextContent extracts all text content from a request body based on vendor
-func (p *LLMFirewallPlugin) extractTextContent(vendor string, body []byte) ([]string, error) {
+// contentContainers are the request fields that carry text the model reads,
+// across vendors and API shapes: chat messages (OpenAI, Ollama, Anthropic),
+// system prompts (Anthropic system, Google systemInstruction and the
+// snake_case system_instruction its REST mapping also accepts), Google
+// contents, the OpenAI Responses API (input, instructions), legacy
+// completions (prompt), and tool definitions and settings, whose
+// descriptions the model also sees.
+var contentContainers = []string{
+	"messages", "system", "systemInstruction", "system_instruction",
+	"contents", "input", "instructions", "prompt",
+	"tools", "functions", "tool_config", "toolConfig",
+}
+
+// mediaKeys hold inline media; their content is not text.
+var mediaKeys = map[string]bool{
+	"image_url": true, "inline_data": true, "inlineData": true,
+	"file_data": true, "fileData": true, "input_audio": true,
+}
+
+// structuralKeys are message and block metadata (roles, block types, IDs,
+// MIME types). They are skipped so they neither count as text for
+// fail_closed nor slow matching; inside a payload they are ordinary data.
+var structuralKeys = map[string]bool{
+	"role": true, "type": true, "id": true, "tool_call_id": true,
+	"tool_use_id": true, "call_id": true, "media_type": true,
+	"mime_type": true, "mimeType": true, "detail": true, "cache_control": true,
+}
+
+// payloadKeys hold caller-chosen data the model reads (tool call input and
+// arguments, function call args and responses, tool parameter schemas).
+// Everything under them is inspected, with no keys skipped.
+var payloadKeys = map[string]bool{
+	"input": true, "arguments": true, "args": true, "response": true,
+	"output": true, "parameters": true,
+}
+
+// maxDecodedDocument caps how much of a base64 text document is decoded.
+const maxDecodedDocument = 1 << 20
+
+// extractTextContent extracts the text a request sends to the model. It reads
+// every string under the known content containers, whatever the nesting
+// (content blocks of any type, tool results, tool call arguments, documents,
+// tool descriptions), rather than an allowlist of shapes, so a phrase cannot
+// hide in a field the upstream accepts but a shape-based reader skips. Each
+// element of a container array (one message, say) yields one text, its
+// strings joined. The vendor does not matter: unused containers are absent.
+func (p *LLMFirewallPlugin) extractTextContent(_ string, body []byte) ([]string, error) {
 	if len(body) == 0 {
 		return nil, nil
 	}
 
-	switch strings.ToLower(vendor) {
-	case "openai", "ollama":
-		return p.extractOpenAIContent(body)
-	case "anthropic":
-		return p.extractAnthropicContent(body)
-	case "google_ai", "vertex":
-		return p.extractGoogleAIContent(body)
-	default:
-		// Fallback: try OpenAI format (most common)
-		return p.extractOpenAIContent(body)
-	}
-}
-
-// extractOpenAIContent extracts text from OpenAI-format requests
-func (p *LLMFirewallPlugin) extractOpenAIContent(body []byte) ([]string, error) {
-	var req struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
-		} `json:"messages"`
-	}
-
+	var req map[string]any
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("invalid OpenAI request: %w", err)
+		return nil, fmt.Errorf("invalid request body: %w", err)
 	}
 
 	var texts []string
-	for _, msg := range req.Messages {
-		text := p.extractContentString(msg.Content)
-		if text != "" {
-			texts = append(texts, text)
+	for _, key := range contentContainers {
+		container, ok := req[key]
+		if !ok {
+			continue
 		}
-	}
-
-	return texts, nil
-}
-
-// extractAnthropicContent extracts text from Anthropic-format requests
-func (p *LLMFirewallPlugin) extractAnthropicContent(body []byte) ([]string, error) {
-	var req struct {
-		System   any `json:"system"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content any    `json:"content"`
-		} `json:"messages"`
-	}
-
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("invalid Anthropic request: %w", err)
-	}
-
-	var texts []string
-
-	// Extract system prompt if present
-	if req.System != nil {
-		text := p.extractContentString(req.System)
-		if text != "" {
-			texts = append(texts, text)
+		items, isArray := container.([]any)
+		if !isArray {
+			items = []any{container}
 		}
-	}
-
-	// Extract messages
-	for _, msg := range req.Messages {
-		text := p.extractContentString(msg.Content)
-		if text != "" {
-			texts = append(texts, text)
-		}
-	}
-
-	return texts, nil
-}
-
-// extractGoogleAIContent extracts text from Google AI/Vertex-format requests
-func (p *LLMFirewallPlugin) extractGoogleAIContent(body []byte) ([]string, error) {
-	var req struct {
-		SystemInstruction struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"systemInstruction"`
-		Contents []struct {
-			Role  string `json:"role"`
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"contents"`
-	}
-
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("invalid Google AI request: %w", err)
-	}
-
-	var texts []string
-
-	// Extract system instruction
-	for _, part := range req.SystemInstruction.Parts {
-		if part.Text != "" {
-			texts = append(texts, part.Text)
-		}
-	}
-
-	// Extract contents
-	for _, content := range req.Contents {
-		for _, part := range content.Parts {
-			if part.Text != "" {
-				texts = append(texts, part.Text)
+		for _, item := range items {
+			var parts []string
+			collectStrings(item, false, &parts)
+			if len(parts) > 0 {
+				texts = append(texts, strings.Join(parts, " "))
 			}
 		}
 	}
-
 	return texts, nil
 }
 
-// extractContentString extracts string content from various content formats
-func (p *LLMFirewallPlugin) extractContentString(content any) string {
-	switch v := content.(type) {
+// collectStrings appends every string leaf under v. Outside a payload it
+// skips structural metadata and inline media; a base64 media source has
+// only its data skipped, and a text/* one is decoded and inspected.
+func collectStrings(v any, inPayload bool, out *[]string) {
+	switch val := v.(type) {
 	case string:
-		return v
-	case []any:
-		// Handle content arrays (e.g., Anthropic multi-part content)
-		var texts []string
-		for _, item := range v {
-			if itemMap, ok := item.(map[string]any); ok {
-				// Check for text type content blocks
-				if blockType, ok := itemMap["type"].(string); ok && blockType == "text" {
-					if text, ok := itemMap["text"].(string); ok {
-						texts = append(texts, text)
-					}
-				}
-			}
+		if val != "" {
+			*out = append(*out, val)
 		}
-		return strings.Join(texts, " ")
-	default:
-		return ""
+	case []any:
+		for _, item := range val {
+			collectStrings(item, inPayload, out)
+		}
+	case map[string]any:
+		if !inPayload && isBase64Source(val) {
+			if text, ok := decodeTextSource(val); ok {
+				*out = append(*out, text)
+			}
+			return
+		}
+		for k, item := range val {
+			if !inPayload && (mediaKeys[k] || structuralKeys[k]) {
+				continue
+			}
+			collectStrings(item, inPayload || payloadKeys[k], out)
+		}
 	}
+}
+
+// isBase64Source reports whether m is an Anthropic-style media source:
+// {"type":"base64","media_type":...,"data":...} and nothing else.
+func isBase64Source(m map[string]any) bool {
+	if t, _ := m["type"].(string); t != "base64" {
+		return false
+	}
+	for k := range m {
+		if k != "type" && k != "media_type" && k != "data" {
+			return false // other fields: inspect normally
+		}
+	}
+	_, hasData := m["data"].(string)
+	return hasData
+}
+
+// decodeTextSource decodes the data of a base64 source whose media type is
+// text/* (the model reads it as text), up to maxDecodedDocument bytes.
+func decodeTextSource(m map[string]any) (string, bool) {
+	mediaType, _ := m["media_type"].(string)
+	if !strings.HasPrefix(mediaType, "text/") {
+		return "", false
+	}
+	data, _ := m["data"].(string)
+	if len(data) > base64.StdEncoding.EncodedLen(maxDecodedDocument) {
+		data = data[:base64.StdEncoding.EncodedLen(maxDecodedDocument)]
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		// Undecodable data is inspected as is
+		return data, true
+	}
+	return string(decoded), true
 }
 
 func main() {
