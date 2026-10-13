@@ -42,13 +42,20 @@ func (c *CodeAwareChunker) Chunk(content []byte, filePath, fileType string) ([]t
 	}
 }
 
+// Declaration patterns, compiled once rather than per file.
+var (
+	// Go function/method declarations
+	goFuncPattern = regexp.MustCompile(`(?m)^func\s+(\([^)]+\)\s+)?(\w+)\s*\(`)
+	// Python def/class at column 0 (no indentation)
+	pythonDefPattern = regexp.MustCompile(`(?m)^(def|class)\s+\w+`)
+	// function/class in JS/TS
+	jsDefPattern = regexp.MustCompile(`(?m)^(export\s+)?(function|class|const\s+\w+\s*=\s*(async\s+)?function)\s+`)
+)
+
 // chunkGo chunks Go source code by functions and methods
 func (c *CodeAwareChunker) chunkGo(text string) ([]types.Chunk, error) {
-	// Regex to match Go function/method declarations
-	funcPattern := regexp.MustCompile(`(?m)^func\s+(\([^)]+\)\s+)?(\w+)\s*\(`)
-
 	lines := strings.Split(text, "\n")
-	matches := funcPattern.FindAllStringIndex(text, -1)
+	matches := goFuncPattern.FindAllStringIndex(text, -1)
 
 	if len(matches) == 0 {
 		// No functions found, use simple chunking
@@ -97,16 +104,12 @@ func (c *CodeAwareChunker) chunkGo(text string) ([]types.Chunk, error) {
 
 // chunkPython chunks Python code by functions and classes
 func (c *CodeAwareChunker) chunkPython(text string) ([]types.Chunk, error) {
-	// Regex for Python def/class at column 0 (no indentation)
-	pattern := regexp.MustCompile(`(?m)^(def|class)\s+\w+`)
-	return c.chunkByPattern(text, pattern)
+	return c.chunkByPattern(text, pythonDefPattern)
 }
 
 // chunkJavaScript chunks JavaScript/TypeScript by functions and classes
 func (c *CodeAwareChunker) chunkJavaScript(text string) ([]types.Chunk, error) {
-	// Regex for function/class in JS/TS
-	pattern := regexp.MustCompile(`(?m)^(export\s+)?(function|class|const\s+\w+\s*=\s*(async\s+)?function)\s+`)
-	return c.chunkByPattern(text, pattern)
+	return c.chunkByPattern(text, jsDefPattern)
 }
 
 // chunkByPattern is a generic pattern-based chunker

@@ -8,6 +8,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/git"
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/ingestion"
@@ -44,7 +45,7 @@ func NewGitHubRAGPlugin() *GitHubRAGPlugin {
 	return &GitHubRAGPlugin{
 		BasePlugin: plugin_sdk.NewBasePlugin(
 			"com.tyk.github-rag-ingest",
-			"1.0.0",
+			"1.1.1",
 			"GitHub RAG Ingestion Plugin - Ingest content from GitHub repositories into RAG datasources",
 		),
 	}
@@ -80,7 +81,7 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 			return fmt.Errorf("failed to initialize encrypted secret store: %w", err)
 		}
 	} else {
-		ctx.Services.Logger().Warn("🔒 SECURITY: no secret encryption key configured - GitHub PATs and SSH keys will be stored UNENCRYPTED in KV storage. Set the secret_encryption_key plugin config option or the GITHUB_RAG_SECRET_ENCRYPTION_KEY environment variable.")
+		ctx.Services.Logger().Warn("🔒 SECURITY: no secret encryption key configured - GitHub PATs and SSH keys will be stored UNENCRYPTED in KV storage. Set the secret_encryption_key plugin config option, or set GITHUB_RAG_SECRET_ENCRYPTION_KEY on the host and pass it to plugins with PLUGIN_ENV_PASSTHROUGH=GITHUB_RAG_*.")
 		secretStore = storage.NewSecretStore(kv)
 	}
 
@@ -107,11 +108,15 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 	}
 
 	// Initialize git client
-	cacheDir := config["cache_path"]
-	if cacheDir == "" {
-		cacheDir = "/tmp/github-rag-cache"
+	cacheDir, err := git.ResolveCacheDir(config["cache_path"])
+	if err != nil {
+		return fmt.Errorf("invalid cache_path: %w", err)
 	}
-	gitClient, err := git.NewClient(cacheDir)
+	var knownHosts []string
+	if paths := strings.TrimSpace(config["known_hosts_path"]); paths != "" {
+		knownHosts = filepath.SplitList(paths)
+	}
+	gitClient, err := git.NewClient(cacheDir, knownHosts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize git client: %w", err)
 	}

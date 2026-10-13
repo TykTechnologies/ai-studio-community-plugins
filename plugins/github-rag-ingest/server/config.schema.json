@@ -14,7 +14,7 @@
     "secret_encryption_key": {
       "type": "string",
       "title": "Secret Encryption Key",
-      "description": "Passphrase used to encrypt stored GitHub PATs and SSH keys at rest (AES-256-GCM) when using the KV secrets backend. Falls back to the GITHUB_RAG_SECRET_ENCRYPTION_KEY environment variable. Strongly recommended: without it, secrets are stored unencrypted.",
+      "description": "Passphrase used to encrypt stored GitHub PATs and SSH keys at rest (AES-256-GCM) when using the KV secrets backend. Falls back to the GITHUB_RAG_SECRET_ENCRYPTION_KEY environment variable, which must be passed to plugins with PLUGIN_ENV_PASSTHROUGH (e.g. GITHUB_RAG_*). Strongly recommended: without it, secrets are stored unencrypted.",
       "format": "password"
     },
     "vault_address": {
@@ -43,7 +43,12 @@
     "cache_path": {
       "type": "string",
       "title": "Git Cache Path",
-      "description": "Directory for storing cloned repositories (uses temp dir if not specified)"
+      "description": "Absolute directory for cloned repositories. Defaults to <user cache dir>/github-rag-ingest, or a private temp dir. The filesystem root, world-writable directories, directories inside a world-writable directory without the sticky bit, and directories owned by another user are refused."
+    },
+    "known_hosts_path": {
+      "type": "string",
+      "title": "SSH known_hosts Path",
+      "description": "known_hosts file(s) used to verify SSH Git servers (several paths separated by the OS path-list separator, ':' on Linux). Takes precedence over the GITHUB_RAG_KNOWN_HOSTS environment variable."
     },
     "cache_max_age_hours": {
       "type": "integer",

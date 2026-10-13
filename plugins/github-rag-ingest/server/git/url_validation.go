@@ -49,7 +49,7 @@ func ValidateRepoURL(rawURL string) error {
 	}
 	for _, ip := range ips {
 		if isInternalIP(ip) {
-			return fmt.Errorf("repository URL targets an internal network address (%s); set ALLOW_INTERNAL_NETWORK_ACCESS=true to allow this in development", endpoint.Host)
+			return fmt.Errorf("repository URL targets an internal network address (%s); set ALLOW_INTERNAL_NETWORK_ACCESS=true and pass it to plugins with PLUGIN_ENV_PASSTHROUGH to allow this in development", endpoint.Host)
 		}
 	}
 

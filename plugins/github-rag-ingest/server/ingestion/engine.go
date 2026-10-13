@@ -3,6 +3,7 @@ package ingestion
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/git"
@@ -257,12 +258,14 @@ func (e *Engine) failJob(ctx context.Context, job *types.Job, errorMessage strin
 
 // logJob adds a log entry to the job
 func (e *Engine) logJob(ctx context.Context, job *types.Job, level, message, details string) {
-	log := &types.JobLog{
+	entry := &types.JobLog{
 		JobID:     job.ID,
 		Timestamp: time.Now(),
 		Level:     level,
 		Message:   message,
 		Details:   details,
 	}
-	e.jobStore.AddLog(ctx, log)
+	if err := e.jobStore.AddLog(ctx, entry); err != nil {
+		log.Printf("github-rag-ingest: failed to record %s log for job %s: %v", level, job.ID, err)
+	}
 }
