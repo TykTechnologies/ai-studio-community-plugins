@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log"
 	"mime"
@@ -279,6 +280,10 @@ func (p *GitHubRAGPlugin) ExecuteScheduledTask(ctx plugin_sdk.Context, schedule 
 
 	// Run ingestion
 	if err := p.rpcHandler.GetEngine().Run(ctx.Context, job); err != nil {
+		if errors.Is(err, ingestion.ErrJobCancelled) {
+			logger.Info("Scheduled sync cancelled", "repo_id", repoID, "job_id", job.ID)
+			return nil
+		}
 		logger.Error("Scheduled ingestion failed",
 			"repo_id", repoID,
 			"job_id", job.ID,
