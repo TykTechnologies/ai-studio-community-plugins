@@ -79,7 +79,7 @@ Each repository can be configured with:
   "cache_path": "/var/lib/ai-studio/github-rag-cache",
   "known_hosts_path": "/etc/ai-studio/known_hosts",
   "vault_address": "https://vault.example.com:8200",
-  "vault_token": "hvs.xxx",
+  "vault_token": "$SECRET/VAULT_TOKEN",
   "vault_mount_path": "secret",
   "vault_secret_path": "github-rag"
 }
@@ -93,6 +93,19 @@ Each repository can be configured with:
 > logged at startup. Secrets stored before enabling encryption remain
 > readable; they are re-encrypted the next time they are saved. Keep the key
 > stable — changing it makes previously encrypted secrets unreadable.
+
+> **Secret references (`vault_token`, `secret_encryption_key`)**: these fields
+> accept a reference instead of the value. `$SECRET/NAME` names a secret in
+> AI Studio's secret store, and `$ENV/NAME` names an environment variable of
+> the AI Studio process. AI Studio 2.3 and later resolve references when the
+> plugin starts. On older versions, `$ENV/NAME` is read from the plugin's own
+> environment, and `$SECRET/NAME` fails with an error. **Use a `$SECRET/`
+> reference.** The plugin configuration is stored in AI Studio's database,
+> shown on the plugin page, and included in the configuration snapshot that AI
+> Studio sends to every edge gateway (for every active plugin, including
+> Studio-only ones like this one). With a reference, only the reference
+> travels; with a literal value, the token does. Both fields are declared as
+> password fields in the configuration schema.
 
 > **Clone cache**: repositories are cloned into `cache_path`, which must be an
 > absolute path. By default it is `<user cache dir>/github-rag-ingest` (for

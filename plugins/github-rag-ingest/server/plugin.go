@@ -70,13 +70,15 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 
 	// Encrypt secrets at rest when a key is configured; otherwise fall back
 	// to the legacy plaintext store with a loud warning.
-	encryptionKey := config["secret_encryption_key"]
+	encryptionKey, err := secrets.ResolveConfigRef("secret_encryption_key", config["secret_encryption_key"])
+	if err != nil {
+		return err
+	}
 	if encryptionKey == "" {
 		encryptionKey = os.Getenv("GITHUB_RAG_SECRET_ENCRYPTION_KEY")
 	}
 	var secretStore *storage.SecretStore
 	if encryptionKey != "" {
-		var err error
 		secretStore, err = storage.NewEncryptedSecretStore(kv, encryptionKey)
 		if err != nil {
 			return fmt.Errorf("failed to initialize encrypted secret store: %w", err)
@@ -90,14 +92,19 @@ func (p *GitHubRAGPlugin) Initialize(ctx plugin_sdk.Context, config map[string]s
 	secretsBackend := config["secrets_backend"]
 	var backend secrets.Backend
 	if secretsBackend == "vault" {
+		vaultToken, tokenErr := secrets.ResolveConfigRef("vault_token", config["vault_token"])
 		vaultConfig := &secrets.Config{
 			Backend:         "vault",
 			VaultAddress:    config["vault_address"],
-			VaultToken:      config["vault_token"],
+			VaultToken:      vaultToken,
 			VaultMountPath:  config["vault_mount_path"],
 			VaultSecretPath: config["vault_secret_path"],
 		}
-		vaultBackend, err := secrets.NewVaultBackend(vaultConfig)
+		var vaultBackend *secrets.VaultBackend
+		err := tokenErr
+		if err == nil {
+			vaultBackend, err = secrets.NewVaultBackend(vaultConfig)
+		}
 		if err != nil {
 			ctx.Services.Logger().Warn("Failed to initialize Vault backend, using KV", "error", err)
 			backend = secrets.NewKVBackend(secretStore)
