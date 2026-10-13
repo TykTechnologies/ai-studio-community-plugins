@@ -75,17 +75,27 @@ func newEngine(source repoSource, chunks chunkStore, secretStore *storage.Secret
 }
 
 // Cancel stops job id if it is running in this engine and reports whether
-// it was. A job not running yet is marked, so Run ends it as cancelled
-// instead of starting it.
-func (e *Engine) Cancel(id string) bool {
+// it was. A queued job that has not started yet is marked, so Run ends it as
+// cancelled instead of starting it; a job that is neither (a leftover from a
+// restart) is not marked, as no Run will ever consume the mark.
+func (e *Engine) Cancel(id string, queued bool) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if cancel, ok := e.running[id]; ok {
 		cancel()
 		return true
 	}
-	e.cancelled[id] = struct{}{}
+	if queued {
+		e.cancelled[id] = struct{}{}
+	}
 	return false
+}
+
+// pendingCancels reports how many not-yet-started jobs are marked cancelled.
+func (e *Engine) pendingCancels() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.cancelled)
 }
 
 // register makes job cancellable. It returns false if the job was

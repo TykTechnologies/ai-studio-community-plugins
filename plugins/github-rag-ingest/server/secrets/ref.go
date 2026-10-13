@@ -6,15 +6,16 @@ import (
 	"strings"
 )
 
-// ResolveConfigRef resolves a secret-bearing config value. AI Studio 2.3
-// resolves $SECRET/NAME and $ENV/NAME references in plugin config before the
-// plugin starts, so a value that still looks like a reference means:
+// ResolveConfigRef resolves a secret-bearing config value:
 //
-//   - $ENV/NAME: an older AI Studio; NAME is read from the plugin's
-//     environment (on 2.3, plugins only see host variables listed in
-//     PLUGIN_ENV_PASSTHROUGH).
-//   - $SECRET/NAME: an older AI Studio, or a secret that does not exist;
-//     the plugin cannot read AI Studio secrets itself, so this is an error.
+//   - $SECRET/NAME is resolved by AI Studio 2.3 and later before the plugin
+//     starts, so one still present here means an older AI Studio or a secret
+//     that does not exist. The plugin cannot read AI Studio secrets itself,
+//     so this is an error.
+//   - $ENV/NAME is never resolved by AI Studio (its environment holds
+//     platform secrets); NAME is read from the plugin's own environment. On
+//     AI Studio 2.3 and later that only holds the default allowlist and the
+//     variables listed in PLUGIN_ENV_PASSTHROUGH.
 //
 // Any other value is returned unchanged.
 func ResolveConfigRef(field, value string) (string, error) {

@@ -96,11 +96,12 @@ Each repository can be configured with:
 
 > **Secret references (`vault_token`, `secret_encryption_key`)**: these fields
 > accept a reference instead of the value. `$SECRET/NAME` names a secret in
-> AI Studio's secret store, and `$ENV/NAME` names an environment variable of
-> the AI Studio process. AI Studio 2.3 and later resolve references when the
-> plugin starts. On older versions, `$ENV/NAME` is read from the plugin's own
-> environment, and `$SECRET/NAME` fails with an error. **Use a `$SECRET/`
-> reference.** The plugin configuration is stored in AI Studio's database,
+> AI Studio's secret store. AI Studio 2.3 and later resolve it when the plugin
+> starts; saving a `$SECRET/` reference needs permission to read secrets
+> (administrators have it). On older versions it fails with an error.
+> `$ENV/NAME` is read by the plugin from its own environment (on AI Studio 2.3
+> and later, pass the variable with `PLUGIN_ENV_PASSTHROUGH`); AI Studio never
+> resolves it from its own environment. **Use a `$SECRET/` reference.** The plugin configuration is stored in AI Studio's database,
 > shown on the plugin page, and included in the configuration snapshot that AI
 > Studio sends to every edge gateway (for every active plugin, including
 > Studio-only ones like this one). With a reference, only the reference
