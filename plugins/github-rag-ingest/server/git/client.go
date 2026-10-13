@@ -21,9 +21,10 @@ type Client struct {
 // NewClient creates a new Git client. cacheDir comes from ResolveCacheDir;
 // knownHostsPaths (optional) lists known_hosts files for SSH repositories.
 func NewClient(cacheDir string, knownHostsPaths []string) (*Client, error) {
-	// Create the cache directory owner-only if it doesn't exist
-	if err := os.MkdirAll(cacheDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create cache directory: %w", err)
+	// Create the cache directory owner-only and check it again: another
+	// user may have created or replaced it since ResolveCacheDir
+	if err := ensureCacheDir(cacheDir); err != nil {
+		return nil, err
 	}
 
 	return &Client{
