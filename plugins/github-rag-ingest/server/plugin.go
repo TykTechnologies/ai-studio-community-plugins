@@ -155,7 +155,8 @@ func (p *GitHubRAGPlugin) OnSessionReady(ctx plugin_sdk.Context) {
 	// to establish it early while the broker is fresh.
 	if ai_studio_sdk.IsInitialized() {
 		log.Printf("github-rag-ingest: Warming up service API connection...")
-		_, err := ai_studio_sdk.GetPluginsCount(context.Background())
+		// GetLicenseInfo needs no service scope, unlike ListPlugins (plugins.read).
+		_, err := ai_studio_sdk.GetLicenseInfo(context.Background())
 		if err != nil {
 			log.Printf("github-rag-ingest: Service API warmup failed: %v", err)
 		} else {

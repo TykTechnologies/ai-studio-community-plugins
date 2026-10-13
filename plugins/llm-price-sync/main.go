@@ -118,7 +118,8 @@ func (p *PriceSyncPlugin) Shutdown(ctx plugin_sdk.Context) error {
 
 func (p *PriceSyncPlugin) OnSessionReady(ctx plugin_sdk.Context) {
 	if ai_studio_sdk.IsInitialized() {
-		_, err := ai_studio_sdk.GetPluginsCount(context.Background())
+		// GetLicenseInfo needs no service scope, unlike ListPlugins (plugins.read).
+		_, err := ai_studio_sdk.GetLicenseInfo(context.Background())
 		if err == nil {
 			log.Printf("[%s] service API connection established", PluginName)
 		} else {
