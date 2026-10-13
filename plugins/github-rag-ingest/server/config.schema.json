@@ -26,7 +26,8 @@
     "vault_token": {
       "type": "string",
       "title": "Vault Token",
-      "description": "Authentication token for Vault access"
+      "description": "Vault token. Prefer a $SECRET/NAME or $ENV/NAME reference.",
+      "format": "password"
     },
     "vault_mount_path": {
       "type": "string",
