@@ -9,6 +9,8 @@ import (
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	redis "github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ErrKeyNotFound is returned when a key does not exist in the store.
@@ -79,9 +81,21 @@ type Store interface {
 // the same as when Redis' Lua scripts fail to decode a counter.
 var errCorruptCounter = errors.New("corrupt rate limit counter")
 
+// isKVNotFound reports whether a plugin KV read failed only because the key
+// does not exist. Both the AI Studio and the Microgateway KV services answer
+// a missing key with a gRPC NotFound status (wrapped by the SDK).
+func isKVNotFound(err error) bool {
+	return status.Code(err) == codes.NotFound
+}
+
 // decodeCounter decodes a stored {"c":<count>,...} counter. A missing key is
-// zero; an undecodable value is an error naming the key.
+// zero. A failed read (store unreachable, scope denied) and an undecodable
+// value are errors naming the key, so fail_open decides; reading them as zero
+// would allow every request whatever fail_open says.
 func decodeCounter(key string, data []byte, readErr error) (int, error) {
+	if readErr != nil && !isKVNotFound(readErr) {
+		return 0, fmt.Errorf("read rate limit counter %q: %w", key, readErr)
+	}
 	if readErr != nil || len(data) == 0 {
 		return 0, nil
 	}
@@ -148,10 +162,10 @@ func newKVStore(kv plugin_sdk.KVService) Store {
 
 func (s *kvStore) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := s.kv.Read(ctx, key)
-	if err != nil {
-		return nil, ErrKeyNotFound
+	if err != nil && !isKVNotFound(err) {
+		return nil, fmt.Errorf("read %q: %w", key, err)
 	}
-	if len(data) == 0 {
+	if err != nil || len(data) == 0 {
 		return nil, ErrKeyNotFound
 	}
 	return data, nil
