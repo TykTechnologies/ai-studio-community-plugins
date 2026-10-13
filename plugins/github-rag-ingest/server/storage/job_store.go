@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/types"
@@ -40,19 +41,31 @@ func (s *JobStore) Create(ctx context.Context, job *types.Job) error {
 		return fmt.Errorf("failed to write job: %w", err)
 	}
 
-	// Add to repo index for filtering
-	repoJobsKey := jobsByRepoPrefix + job.RepoID
-	var jobIDs []string
-	s.kv.Read(ctx, repoJobsKey, &jobIDs) // Ignore error if doesn't exist
-	jobIDs = append(jobIDs, job.ID)
-	s.kv.Write(ctx, repoJobsKey, jobIDs, nil)
+	// Add to the repo index (for filtering) and the global index. If either
+	// fails the job is removed again, so no job exists that the lists miss.
+	for _, indexKey := range []string{jobsByRepoPrefix + job.RepoID, jobsIndexKey} {
+		if err := s.appendToIndex(ctx, indexKey, job.ID); err != nil {
+			if delErr := s.kv.Delete(ctx, key); delErr != nil {
+				log.Printf("github-rag-ingest: job %s is stored but not indexed; removing it failed: %v", job.ID, delErr)
+			}
+			return fmt.Errorf("failed to index job %s: %w", job.ID, err)
+		}
+	}
 
-	// Add to global jobs index
-	var allJobIDs []string
-	s.kv.Read(ctx, jobsIndexKey, &allJobIDs) // Ignore error if doesn't exist
-	allJobIDs = append(allJobIDs, job.ID)
-	s.kv.Write(ctx, jobsIndexKey, allJobIDs, nil)
+	return nil
+}
 
+// appendToIndex adds id to the ID list stored at indexKey. A missing list
+// starts empty; any other read error aborts, because writing back a list
+// that failed to load would drop every ID already in it.
+func (s *JobStore) appendToIndex(ctx context.Context, indexKey, id string) error {
+	var ids []string
+	if err := s.kv.ReadIfExists(ctx, indexKey, &ids); err != nil {
+		return fmt.Errorf("read index %s: %w", indexKey, err)
+	}
+	if err := s.kv.Write(ctx, indexKey, append(ids, id), nil); err != nil {
+		return fmt.Errorf("write index %s: %w", indexKey, err)
+	}
 	return nil
 }
 
@@ -158,7 +171,10 @@ func (s *JobStore) AddLog(ctx context.Context, log *types.JobLog) error {
 	// Get existing logs
 	logsKey := jobLogsKeyPrefix + log.JobID + jobLogsKeySuffix
 	var logs []types.JobLog
-	s.kv.Read(ctx, logsKey, &logs) // Ignore error if doesn't exist
+	// Writing back after a failed read would drop the existing logs
+	if err := s.kv.ReadIfExists(ctx, logsKey, &logs); err != nil {
+		return fmt.Errorf("read logs for job %s: %w", log.JobID, err)
+	}
 
 	// Append new log
 	logs = append(logs, *log)

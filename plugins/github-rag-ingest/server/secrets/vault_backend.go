@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/community/plugins/github-rag-ingest/storage"
+	"github.com/google/uuid"
 	vault "github.com/hashicorp/vault/api"
 )
 
@@ -141,7 +141,5 @@ func getStringField(data map[string]interface{}, key string) string {
 }
 
 func generateSecretID() string {
-	// Use simple UUID generation
-	// In production, consider using a more secure method
-	return fmt.Sprintf("secret-%d", time.Now().UnixNano())
+	return "secret-" + uuid.NewString()
 }

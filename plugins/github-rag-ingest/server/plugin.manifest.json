@@ -1,6 +1,6 @@
 {
   "id": "com.tyk.github-rag-ingest",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "Git Connector",
   "description": "Ingest content from Git repositories into RAG datasources with support for incremental sync, multiple chunking strategies, and scheduled updates",
   "capabilities": {

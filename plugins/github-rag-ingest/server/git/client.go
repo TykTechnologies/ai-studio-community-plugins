@@ -14,18 +14,21 @@ import (
 
 // Client wraps git operations for repository management
 type Client struct {
-	cacheDir string
+	cacheDir        string
+	knownHostsPaths []string // from plugin config; overrides GITHUB_RAG_KNOWN_HOSTS
 }
 
-// NewClient creates a new Git client
-func NewClient(cacheDir string) (*Client, error) {
-	// Create cache directory if it doesn't exist
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+// NewClient creates a new Git client. cacheDir comes from ResolveCacheDir;
+// knownHostsPaths (optional) lists known_hosts files for SSH repositories.
+func NewClient(cacheDir string, knownHostsPaths []string) (*Client, error) {
+	// Create the cache directory owner-only if it doesn't exist
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
 	return &Client{
-		cacheDir: cacheDir,
+		cacheDir:        cacheDir,
+		knownHostsPaths: knownHostsPaths,
 	}, nil
 }
 
@@ -52,7 +55,7 @@ func (c *Client) CloneOrFetch(ctx context.Context, repo *types.Repository, secre
 
 // clone clones a new repository
 func (c *Client) clone(ctx context.Context, repo *types.Repository, secret *storage.Secret, repoPath string) (*git.Repository, error) {
-	auth, err := GetAuthMethod(secret)
+	auth, err := GetAuthMethod(secret, c.knownHostsPaths...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth method: %w", err)
 	}
@@ -69,7 +72,7 @@ func (c *Client) clone(ctx context.Context, repo *types.Repository, secret *stor
 
 // fetch fetches updates for an existing repository
 func (c *Client) fetch(gitRepo *git.Repository, secret *storage.Secret) (*git.Repository, error) {
-	auth, err := GetAuthMethod(secret)
+	auth, err := GetAuthMethod(secret, c.knownHostsPaths...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get auth method: %w", err)
 	}

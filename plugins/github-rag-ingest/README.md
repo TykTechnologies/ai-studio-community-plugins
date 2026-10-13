@@ -76,6 +76,8 @@ Each repository can be configured with:
 {
   "secrets_backend": "kv|vault",
   "secret_encryption_key": "a-strong-passphrase",
+  "cache_path": "/var/lib/ai-studio/github-rag-cache",
+  "known_hosts_path": "/etc/ai-studio/known_hosts",
   "vault_address": "https://vault.example.com:8200",
   "vault_token": "hvs.xxx",
   "vault_mount_path": "secret",
@@ -84,12 +86,39 @@ Each repository can be configured with:
 ```
 
 > **Encrypting secrets at rest (KV backend)**: set `secret_encryption_key`
-> (or the `GITHUB_RAG_SECRET_ENCRYPTION_KEY` environment variable) so GitHub
+> (or the `GITHUB_RAG_SECRET_ENCRYPTION_KEY` environment variable, see
+> [Environment variables](#environment-variables)) so GitHub
 > PATs and SSH keys are encrypted with AES-256-GCM before being written to KV
 > storage. Without it, secrets are stored as plaintext JSON and a warning is
 > logged at startup. Secrets stored before enabling encryption remain
 > readable; they are re-encrypted the next time they are saved. Keep the key
 > stable — changing it makes previously encrypted secrets unreadable.
+
+> **Clone cache**: repositories are cloned into `cache_path`, which must be an
+> absolute path. By default it is `<user cache dir>/github-rag-ingest` (for
+> example `~/.cache/github-rag-ingest`), or a private temp directory if that
+> cannot be created. The plugin refuses the filesystem root, world-writable
+> directories, directories inside a world-writable directory without the sticky
+> bit, and directories owned by another user, and creates the directory with
+> mode 0700. Before 1.1.1 the default was the shared `/tmp/github-rag-cache`;
+> delete it after upgrading.
+
+### Environment variables
+
+From AI Studio 2.3, plugin processes only see an allowlisted part of the host
+environment (`PATH`, `HOME`, locale, proxy and TLS settings, and so on). Other
+host variables reach the plugin only when listed in `PLUGIN_ENV_PASSTHROUGH`
+(comma-separated, a trailing `*` is a prefix wildcard). The plugin reads:
+
+| Variable | Purpose | Alternative |
+|----------|---------|-------------|
+| `GITHUB_RAG_SECRET_ENCRYPTION_KEY` | Key for encrypting secrets at rest | `secret_encryption_key` plugin option |
+| `GITHUB_RAG_KNOWN_HOSTS` | known_hosts file(s) for SSH repositories | `known_hosts_path` plugin option |
+| `SSH_KNOWN_HOSTS` | go-git's default known_hosts lookup | `known_hosts_path` plugin option, or `~/.ssh/known_hosts` (`HOME` is passed) |
+| `ALLOW_INTERNAL_NETWORK_ACCESS` | Development only: allow repositories on internal addresses | none |
+
+For example: `PLUGIN_ENV_PASSTHROUGH=GITHUB_RAG_*,SSH_KNOWN_HOSTS`. Older
+AI Studio versions pass the whole environment, so no setting is needed there.
 
 ## User Interface
 
@@ -150,8 +179,9 @@ When `ssh` selected:
 
 > **SSH host-key verification**: server host keys are verified against a
 > `known_hosts` file and cloning fails closed if none is available. The plugin
-> looks at `GITHUB_RAG_KNOWN_HOSTS` (list of paths), then `SSH_KNOWN_HOSTS`,
-> then `~/.ssh/known_hosts` and `/etc/ssh/ssh_known_hosts`. In containers,
+> looks at the `known_hosts_path` plugin option, then `GITHUB_RAG_KNOWN_HOSTS`
+> (list of paths), then `SSH_KNOWN_HOSTS`, then `~/.ssh/known_hosts` and
+> `/etc/ssh/ssh_known_hosts` (see [Environment variables](#environment-variables)). In containers,
 > mount a known_hosts file containing your Git host's keys (e.g. from
 > `ssh-keyscan github.com`).
 

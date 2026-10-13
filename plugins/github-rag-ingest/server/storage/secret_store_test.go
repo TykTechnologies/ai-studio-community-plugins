@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeKV is an in-memory plugin_sdk.KVService for tests.
@@ -20,7 +23,8 @@ func newFakeKV() *fakeKV {
 func (f *fakeKV) Read(ctx context.Context, key string) ([]byte, error) {
 	v, ok := f.data[key]
 	if !ok {
-		return nil, contextKeyNotFoundErr{}
+		// Same contract as the AI Studio KV service
+		return nil, status.Errorf(codes.NotFound, "key not found: %s", key)
 	}
 	return v, nil
 }
@@ -50,10 +54,6 @@ func (f *fakeKV) List(ctx context.Context, prefix string) ([]string, error) {
 	}
 	return keys, nil
 }
-
-type contextKeyNotFoundErr struct{}
-
-func (contextKeyNotFoundErr) Error() string { return "key not found" }
 
 func testSecret() *Secret {
 	return &Secret{

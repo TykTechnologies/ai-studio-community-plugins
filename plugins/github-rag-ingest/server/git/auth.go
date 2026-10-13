@@ -16,20 +16,27 @@ import (
 )
 
 // knownHostsCallback builds a host-key verification callback from known_hosts
-// files. GITHUB_RAG_KNOWN_HOSTS takes precedence (a list of paths in the
-// platform's path-list format); otherwise go-git's defaults apply
-// (SSH_KNOWN_HOSTS, then ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts).
+// files. Paths from the known_hosts_path plugin config come first, then
+// GITHUB_RAG_KNOWN_HOSTS (a list of paths in the platform's path-list
+// format); otherwise go-git's defaults apply (SSH_KNOWN_HOSTS, then
+// ~/.ssh/known_hosts and /etc/ssh/ssh_known_hosts). Plugin processes only see
+// host environment variables the operator passes through
+// (PLUGIN_ENV_PASSTHROUGH), so the config option needs no host setup.
 // It fails closed: if no known_hosts file is available, an error is returned
 // rather than skipping verification.
-func knownHostsCallback() (cryptossh.HostKeyCallback, error) {
+func knownHostsCallback(configured []string) (cryptossh.HostKeyCallback, error) {
+	if len(configured) > 0 {
+		return ssh.NewKnownHostsCallback(configured...)
+	}
 	if paths := os.Getenv("GITHUB_RAG_KNOWN_HOSTS"); paths != "" {
 		return ssh.NewKnownHostsCallback(filepath.SplitList(paths)...)
 	}
 	return ssh.NewKnownHostsCallback()
 }
 
-// GetAuthMethod returns the appropriate git authentication method
-func GetAuthMethod(secret *storage.Secret) (transport.AuthMethod, error) {
+// GetAuthMethod returns the appropriate git authentication method.
+// knownHostsPaths optionally names the known_hosts files for SSH.
+func GetAuthMethod(secret *storage.Secret, knownHostsPaths ...string) (transport.AuthMethod, error) {
 	if secret == nil {
 		return nil, nil // Public repository
 	}
@@ -51,9 +58,9 @@ func GetAuthMethod(secret *storage.Secret) (transport.AuthMethod, error) {
 		// attacker who can redirect or MITM the SSH connection could
 		// impersonate the Git server, capture credentials, or serve
 		// malicious repository content.
-		callback, err := knownHostsCallback()
+		callback, err := knownHostsCallback(knownHostsPaths)
 		if err != nil {
-			return nil, fmt.Errorf("SSH host-key verification requires a known_hosts file (set GITHUB_RAG_KNOWN_HOSTS or SSH_KNOWN_HOSTS, or provide ~/.ssh/known_hosts): %w", err)
+			return nil, fmt.Errorf("SSH host-key verification requires a known_hosts file (set the known_hosts_path plugin option, pass GITHUB_RAG_KNOWN_HOSTS or SSH_KNOWN_HOSTS through PLUGIN_ENV_PASSTHROUGH, or provide ~/.ssh/known_hosts): %w", err)
 		}
 		publicKeys.HostKeyCallback = callback
 
