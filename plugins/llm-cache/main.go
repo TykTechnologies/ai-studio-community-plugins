@@ -96,6 +96,7 @@ type LLMCachePlugin struct {
 	bgCancel    context.CancelFunc
 	bgWG        sync.WaitGroup
 	bgMu        sync.Mutex // orders bgWG.Add against Shutdown's cancel and Wait
+	bgStarted   int        // loops started, guarded by bgMu
 	cleanupOnce sync.Once
 	// The reporter starts once, however often OnSessionReady runs
 	reporterOnce sync.Once
@@ -154,13 +155,15 @@ func stdLog(level, msg string, fields []interface{}) {
 	log.Printf("[%s] %s: %s %v", level, PluginName, msg, fields)
 }
 
-// goBackground runs loop until Shutdown. It does nothing after Shutdown.
+// goBackground runs loop until Shutdown. It does nothing after Shutdown:
+// bgCtx stays cancelled, so a plugin is not restarted by a later Initialize.
 func (p *LLMCachePlugin) goBackground(loop func(ctx context.Context)) {
 	p.bgMu.Lock()
 	defer p.bgMu.Unlock()
 	if p.bgCtx.Err() != nil {
 		return
 	}
+	p.bgStarted++
 	p.bgWG.Add(1)
 	go func() {
 		defer p.bgWG.Done()

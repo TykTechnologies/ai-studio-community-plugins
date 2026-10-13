@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,12 +44,35 @@ func TestShutdownStopsBackgroundLoopsAndIsIdempotent(t *testing.T) {
 	// needs a broker) runs on the same lifecycle
 	p.reporterOnce.Do(func() { p.goBackground(p.reportStatsToControl) })
 
+	p.bgMu.Lock()
+	started := p.bgStarted
+	p.bgMu.Unlock()
+	if started != 2 {
+		t.Fatalf("%d background loops started, want 2 (one cleanup, one reporter)", started)
+	}
+
 	shutdownWithin(t, p, 2*time.Second)
 	if p.bgCtx.Err() == nil {
 		t.Fatal("background context not cancelled by Shutdown")
 	}
 	// A second Shutdown must not panic (it used to close a closed channel) or block
 	shutdownWithin(t, p, 2*time.Second)
+}
+
+func TestShutdownWaitsForBackgroundLoops(t *testing.T) {
+	p := initializedPlugin(t, plugin_sdk.RuntimeStudio)
+
+	var finished atomic.Bool
+	p.goBackground(func(ctx context.Context) {
+		<-ctx.Done()
+		time.Sleep(100 * time.Millisecond) // a loop finishing its last tick
+		finished.Store(true)
+	})
+
+	shutdownWithin(t, p, 2*time.Second)
+	if !finished.Load() {
+		t.Fatal("Shutdown returned before a background loop finished")
+	}
 }
 
 func TestNoBackgroundLoopStartsAfterShutdown(t *testing.T) {
