@@ -23,15 +23,19 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "llm-firewall"
-	PluginVersion = "1.0.0"
+	PluginVersion = "1.1.1"
 )
 
 // FirewallConfig represents the plugin configuration
 type FirewallConfig struct {
-	HookPhase     string         `json:"hook_phase"`
-	BlockMessage  string         `json:"block_message"`
-	CaseSensitive bool           `json:"case_sensitive"`
-	Rules         []FirewallRule `json:"rules"`
+	HookPhase     string `json:"hook_phase"`
+	BlockMessage  string `json:"block_message"`
+	CaseSensitive bool   `json:"case_sensitive"`
+	// FailClosed blocks a request whose content cannot be inspected (body
+	// not parseable, or no text found) when a rule applies to its model.
+	// Off by default: such requests pass through.
+	FailClosed bool           `json:"fail_closed"`
+	Rules      []FirewallRule `json:"rules"`
 }
 
 // FirewallRule represents a model-grouped set of blocked phrases
@@ -122,6 +126,9 @@ func (p *LLMFirewallPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 	if caseSensitive, ok := config["case_sensitive"]; ok {
 		p.config.CaseSensitive = caseSensitive == "true"
 	}
+	if failClosed, ok := config["fail_closed"]; ok {
+		p.config.FailClosed = failClosed == "true"
+	}
 
 	// Compile all rules and patterns
 	if err := p.compileRules(); err != nil {
@@ -182,12 +189,21 @@ func (p *LLMFirewallPlugin) checkRequest(ctx plugin_sdk.Context, req *pb.PluginR
 	}
 
 	textContents, err := p.extractTextContent(vendor, req.Body)
-	if err != nil {
-		// Fail open - allow request if we can't parse it
-		return &pb.PluginResponse{Modified: false}, nil
-	}
-
-	if len(textContents) == 0 {
+	if err != nil || len(textContents) == 0 {
+		// The content cannot be inspected. By default it passes (fail
+		// open); with fail_closed it is blocked if any rule covers the model.
+		if p.config.FailClosed && p.anyRuleApplies(modelName) {
+			reason := "no text content found"
+			if err != nil {
+				reason = "body not parseable"
+			}
+			ctx.Services.Logger().Warn("Request blocked by firewall: content cannot be inspected (fail_closed)",
+				"model", modelName,
+				"reason", reason,
+				"request_id", ctx.RequestID,
+			)
+			return p.blockResponse(), nil
+		}
 		return &pb.PluginResponse{Modified: false}, nil
 	}
 
@@ -223,14 +239,37 @@ func (p *LLMFirewallPlugin) checkRequest(ctx plugin_sdk.Context, req *pb.PluginR
 	return &pb.PluginResponse{Modified: false}, nil
 }
 
-// blockResponse creates a blocking response
+// anyRuleApplies reports whether an enabled rule covers modelName.
+func (p *LLMFirewallPlugin) anyRuleApplies(modelName string) bool {
+	for _, rule := range p.compiledRules {
+		if rule.Enabled && p.modelMatches(rule, modelName) {
+			return true
+		}
+	}
+	return false
+}
+
+// blockErrorBody is the OpenAI-style error returned for a blocked request.
+type blockErrorBody struct {
+	Error struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+}
+
+// blockResponse creates a blocking response. The body is built with
+// json.Marshal, so any block_message (quotes, backslashes, newlines) gives
+// valid JSON.
 func (p *LLMFirewallPlugin) blockResponse() *pb.PluginResponse {
-	errorBody := fmt.Sprintf(`{"error":{"message":"%s","type":"content_policy_violation"}}`, p.config.BlockMessage)
+	var body blockErrorBody
+	body.Error.Message = p.config.BlockMessage
+	body.Error.Type = "content_policy_violation"
+	errorBody, _ := json.Marshal(body) // cannot fail for strings
 	return &pb.PluginResponse{
 		Block:      true,
 		StatusCode: 403,
 		Headers:    map[string]string{"Content-Type": "application/json"},
-		Body:       []byte(errorBody),
+		Body:       errorBody,
 	}
 }
 

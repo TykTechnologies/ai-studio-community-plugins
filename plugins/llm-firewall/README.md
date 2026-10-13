@@ -10,7 +10,7 @@ A phrase-based prompt filtering plugin for Tyk AI Studio's Microgateway. This pl
 - **Multi-vendor support** - Works with OpenAI, Anthropic, Google AI, Vertex, and Ollama
 - **Configurable hook phase** - Run checks before or after authentication
 - **Privacy-preserving** - Logs matched patterns only, not request content
-- **Fail-open design** - Allows requests through if parsing fails (configurable)
+- **Fail-open by default** - Allows requests through if their content cannot be inspected; `fail_closed` blocks them instead
 
 ## Installation
 
@@ -38,6 +38,7 @@ The plugin is configured via JSON. Configuration can be passed through the plugi
 | `hook_phase` | string | `"pre_auth"` | When to run the check: `"pre_auth"` or `"post_auth"` |
 | `block_message` | string | `"Request blocked by content policy"` | Error message returned to clients |
 | `case_sensitive` | boolean | `false` | Whether pattern matching is case-sensitive |
+| `fail_closed` | boolean | `false` | Block requests whose content cannot be inspected (see [Error Handling](#error-handling)) |
 | `rules` | array | `[]` | List of firewall rules (see below) |
 
 ### Rule Structure
@@ -230,14 +231,14 @@ Unknown vendors fall back to OpenAI format parsing.
 
 ## Error Handling
 
-The plugin follows a **fail-open** design:
+By default the plugin follows a **fail-open** design:
 
-- If request body cannot be parsed → Request is **allowed**
-- If no rules match the model → Request is **allowed**
+- If the request body cannot be parsed, or no text content is found in it → Request is **allowed** (with `fail_closed: true`: **blocked** with the normal block response, when an enabled rule applies to the model, and logged with the reason)
+- If no rules match the model → Request is **allowed** (also with `fail_closed`)
 - If invalid regex in config → Pattern is **skipped** (logged at startup)
 - If vendor unknown → Falls back to OpenAI parsing
 
-This ensures that configuration errors or edge cases don't accidentally block legitimate traffic.
+Fail-open ensures that configuration errors or edge cases don't accidentally block legitimate traffic. Use `fail_closed` when an uninspected prompt is worse than a blocked one, for example when clients could send content in a format the plugin does not parse.
 
 ## Logging
 
