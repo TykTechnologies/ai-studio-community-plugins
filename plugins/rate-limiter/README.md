@@ -21,7 +21,7 @@ Rules are managed on the plugin's **Rate Limit Rules** page, under **Rate Limiti
 - `$SECRET/NAME` names a secret in AI Studio's secret store. AI Studio 2.3 and later resolve it before the plugin starts, on AI Studio only: edge gateways receive the reference, not the value. Saving a `$SECRET/` reference needs permission to read secrets.
 - `$ENV/NAME` is read from the plugin's own environment. On AI Studio 2.3 and later, pass the variable to plugins with `PLUGIN_ENV_PASSTHROUGH`. Use this on edge gateways.
 
-A reference that cannot be resolved is never sent to Redis as the password. Redis set-up fails, and the plugin falls back to `kv` and logs why.
+A reference that cannot be resolved is never sent to Redis as the password. Redis set-up fails, and the plugin falls back to `kv` and logs why. Limits are then counted per instance instead of shared, so on edge gateways give `redis_password` as `$ENV/NAME` (with the variable passed through) or as the value, never as `$SECRET/NAME`.
 
 ## Failure handling
 

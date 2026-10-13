@@ -67,7 +67,7 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 	if p.config.StorageBackend == "redis" && p.config.RedisURL != "" {
 		store, err := newRedisStore(p.config.RedisURL, p.config.RedisPassword)
 		if err != nil {
-			log.Printf("%s: redis init failed, falling back to KV: %v", PluginName, err)
+			log.Printf("%s: redis init failed, falling back to KV (limits are counted per instance, not shared): %v", PluginName, err)
 			p.store = newKVStore(ctx.Services.KV())
 			p.config.StorageBackend = "kv"
 		} else {
