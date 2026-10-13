@@ -61,6 +61,20 @@ func TestResolveCacheDir_RefusesDangerousValues(t *testing.T) {
 	}
 }
 
+func TestResolveCacheDir_RefusesDirOwnedByAnotherUser(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	orig := ownedByAnotherUser
+	t.Cleanup(func() { ownedByAnotherUser = orig })
+	ownedByAnotherUser = func(info os.FileInfo) bool { return info.Name() == "cache" }
+
+	if _, err := ResolveCacheDir(dir); err == nil || !strings.Contains(err.Error(), "owned by another user") {
+		t.Errorf("dir owned by another user: err = %v", err)
+	}
+}
+
 func TestNewClientCreatesPrivateDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "repos")
 	if _, err := NewClient(dir, nil); err != nil {
