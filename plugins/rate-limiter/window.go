@@ -69,6 +69,27 @@ type Store interface {
 	// For kvStore: read-modify-write (caller must hold a lock).
 	// For redisStore: Lua script for cross-instance atomicity.
 	DecrementCounter(ctx context.Context, key string, ttl time.Duration) (newCount int, err error)
+
+	// Close releases the backend's connections (the Redis client); a no-op for kvStore.
+	Close() error
+}
+
+// errCorruptCounter marks a stored counter that does not decode. It is a
+// storage error, so the fail_open setting decides whether the request passes,
+// the same as when Redis' Lua scripts fail to decode a counter.
+var errCorruptCounter = errors.New("corrupt rate limit counter")
+
+// decodeCounter decodes a stored {"c":<count>,...} counter. A missing key is
+// zero; an undecodable value is an error naming the key.
+func decodeCounter(key string, data []byte, readErr error) (int, error) {
+	if readErr != nil || len(data) == 0 {
+		return 0, nil
+	}
+	var state WindowState // same JSON shape as ConcurrentState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return 0, fmt.Errorf("%w %q: %v", errCorruptCounter, key, err)
+	}
+	return state.Count, nil
 }
 
 // --- Sliding Window ---
@@ -153,11 +174,12 @@ func (s *kvStore) Delete(ctx context.Context, key string) error {
 
 // IncrementIfBelow for kvStore does a read-modify-write. Caller must hold a lock.
 func (s *kvStore) IncrementIfBelow(ctx context.Context, key string, limit int, ttl time.Duration) (int, bool, error) {
-	state := ConcurrentState{}
 	data, err := s.kv.Read(ctx, key)
-	if err == nil && len(data) > 0 {
-		json.Unmarshal(data, &state)
+	count, err := decodeCounter(key, data, err)
+	if err != nil {
+		return 0, false, err
 	}
+	state := ConcurrentState{Count: count}
 	if state.Count >= limit {
 		return state.Count, false, nil
 	}
@@ -170,11 +192,12 @@ func (s *kvStore) IncrementIfBelow(ctx context.Context, key string, limit int, t
 
 // DecrementCounter for kvStore does a read-modify-write. Caller must hold a lock.
 func (s *kvStore) DecrementCounter(ctx context.Context, key string, ttl time.Duration) (int, error) {
-	state := ConcurrentState{}
 	data, err := s.kv.Read(ctx, key)
-	if err == nil && len(data) > 0 {
-		json.Unmarshal(data, &state)
+	count, err := decodeCounter(key, data, err)
+	if err != nil {
+		return 0, err
 	}
+	state := ConcurrentState{Count: count}
 	state.Count--
 	if state.Count < 0 {
 		state.Count = 0
@@ -188,8 +211,14 @@ func (s *kvStore) DecrementCounter(ctx context.Context, key string, ttl time.Dur
 // EvalSlidingWindow for kvStore does read + optional increment. Caller must hold a lock.
 // Returns the effective count BEFORE the increment (consistent with redisStore Lua script).
 func (s *kvStore) EvalSlidingWindow(ctx context.Context, currentKey, previousKey string, windowSeconds int, nowUnix int64, incrDelta int, ttl time.Duration) (int, error) {
-	prev := readCounter(ctx, s, previousKey)
-	cur := readCounter(ctx, s, currentKey)
+	prev, err := s.readCounter(ctx, previousKey)
+	if err != nil {
+		return 0, err
+	}
+	cur, err := s.readCounter(ctx, currentKey)
+	if err != nil {
+		return 0, err
+	}
 	effective := SlidingWindowCountFromUnix(prev, cur, nowUnix, windowSeconds)
 
 	if incrDelta != 0 {
@@ -203,17 +232,12 @@ func (s *kvStore) EvalSlidingWindow(ctx context.Context, currentKey, previousKey
 	return effective, nil
 }
 
-func readCounter(ctx context.Context, s *kvStore, key string) int {
+func (s *kvStore) readCounter(ctx context.Context, key string) (int, error) {
 	data, err := s.kv.Read(ctx, key)
-	if err != nil || len(data) == 0 {
-		return 0
-	}
-	var state WindowState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return 0
-	}
-	return state.Count
+	return decodeCounter(key, data, err)
 }
+
+func (s *kvStore) Close() error { return nil }
 
 // --- redisStore ---
 
@@ -369,6 +393,10 @@ func (s *redisStore) Set(ctx context.Context, key string, value []byte, ttl time
 
 func (s *redisStore) Delete(ctx context.Context, key string) error {
 	return s.client.Del(ctx, key).Err()
+}
+
+func (s *redisStore) Close() error {
+	return s.client.Close()
 }
 
 // IncrementIfBelow uses a Lua script to atomically check the concurrent counter

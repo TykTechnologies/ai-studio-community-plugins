@@ -135,6 +135,8 @@ func (s *memStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (s *memStore) Close() error { return nil }
+
 func (s *memStore) IncrementIfBelow(_ context.Context, key string, limit int, _ time.Duration) (int, bool, error) {
 	state := ConcurrentState{}
 	if data, ok := s.data[key]; ok {

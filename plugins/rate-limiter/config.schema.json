@@ -7,7 +7,7 @@
     "fail_open": {
       "type": "boolean",
       "title": "Fail Open",
-      "description": "If true, allow requests when storage is unavailable. If false, reject with 503.",
+      "description": "If true, allow requests when storage is unavailable or a stored counter cannot be read (corrupt). If false, reject them with 503.",
       "default": true
     },
     "storage_backend": {
