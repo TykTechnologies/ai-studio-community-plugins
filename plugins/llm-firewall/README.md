@@ -227,8 +227,9 @@ The plugin inspects every string under the fields that carry prompt text, whatev
 | `contents` | Google AI and Vertex |
 | `input`, `instructions` | OpenAI Responses API |
 | `prompt` | Legacy completions |
+| `tools`, `functions`, `tool_config`, `toolConfig` | Tool definitions and settings (descriptions the model reads) |
 
-Inside these fields it reads all nested text: content blocks of any type (`text`, `input_text`, …), tool results, tool call arguments, tool messages, and text documents. It skips inline media (`image_url`, `inline_data`/`inlineData`, `file_data`, `input_audio`, base64 sources) and structural fields (`role`, `type`, IDs, MIME types). Each message, or other element of these fields, is matched as one text, with its strings joined by spaces.
+Inside these fields it reads all nested text: content blocks of any type (`text`, `input_text`, …), tool results, tool call arguments, tool messages, documents, and tool descriptions. Everything inside caller-chosen payloads (tool call `input`/`arguments`, function `args`/`response`, tool `parameters`) is read in full. Elsewhere it skips inline media (`image_url`, `inline_data`/`inlineData`, `file_data`, `input_audio`) and message or block metadata (`role`, `type`, IDs, MIME types, `detail`, `cache_control`). The data of a base64 media source is skipped, except for `text/*` documents, which are decoded (up to 1 MB) and inspected. Each message, or other element of these fields, is matched as one text, with its strings joined by spaces.
 
 ## Error Handling
 

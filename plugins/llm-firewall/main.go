@@ -5,6 +5,7 @@ package main
 
 import (
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -432,35 +433,52 @@ func (p *LLMFirewallPlugin) extractModelFromPath(vendor string, path string) str
 	return ""
 }
 
-// contentContainers are the request fields that carry prompt text, across
-// vendors and API shapes: chat messages (OpenAI, Ollama, Anthropic), system
-// prompts (Anthropic system, Google systemInstruction and the snake_case
-// system_instruction its REST mapping also accepts), Google contents, the
-// OpenAI Responses API (input, instructions) and legacy completions (prompt).
+// contentContainers are the request fields that carry text the model reads,
+// across vendors and API shapes: chat messages (OpenAI, Ollama, Anthropic),
+// system prompts (Anthropic system, Google systemInstruction and the
+// snake_case system_instruction its REST mapping also accepts), Google
+// contents, the OpenAI Responses API (input, instructions), legacy
+// completions (prompt), and tool definitions and settings, whose
+// descriptions the model also sees.
 var contentContainers = []string{
 	"messages", "system", "systemInstruction", "system_instruction",
 	"contents", "input", "instructions", "prompt",
+	"tools", "functions", "tool_config", "toolConfig",
 }
 
-// skipKeys hold inline media or structural metadata rather than prompt
-// text; their strings are not inspected.
-var skipKeys = map[string]bool{
-	// inline media
+// mediaKeys hold inline media; their content is not text.
+var mediaKeys = map[string]bool{
 	"image_url": true, "inline_data": true, "inlineData": true,
 	"file_data": true, "fileData": true, "input_audio": true,
-	// structure and identifiers
+}
+
+// structuralKeys are message and block metadata (roles, block types, IDs,
+// MIME types). They are skipped so they neither count as text for
+// fail_closed nor slow matching; inside a payload they are ordinary data.
+var structuralKeys = map[string]bool{
 	"role": true, "type": true, "id": true, "tool_call_id": true,
 	"tool_use_id": true, "call_id": true, "media_type": true,
 	"mime_type": true, "mimeType": true, "detail": true, "cache_control": true,
 }
 
+// payloadKeys hold caller-chosen data the model reads (tool call input and
+// arguments, function call args and responses, tool parameter schemas).
+// Everything under them is inspected, with no keys skipped.
+var payloadKeys = map[string]bool{
+	"input": true, "arguments": true, "args": true, "response": true,
+	"output": true, "parameters": true,
+}
+
+// maxDecodedDocument caps how much of a base64 text document is decoded.
+const maxDecodedDocument = 1 << 20
+
 // extractTextContent extracts the text a request sends to the model. It reads
 // every string under the known content containers, whatever the nesting
-// (content blocks of any type, tool results, tool call arguments, documents),
-// rather than an allowlist of shapes, so a phrase cannot hide in a field the
-// upstream accepts but a shape-based reader skips. Each element of a
-// container array (one message, say) yields one text, its strings joined.
-// The vendor does not matter: unused containers are simply absent.
+// (content blocks of any type, tool results, tool call arguments, documents,
+// tool descriptions), rather than an allowlist of shapes, so a phrase cannot
+// hide in a field the upstream accepts but a shape-based reader skips. Each
+// element of a container array (one message, say) yields one text, its
+// strings joined. The vendor does not matter: unused containers are absent.
 func (p *LLMFirewallPlugin) extractTextContent(_ string, body []byte) ([]string, error) {
 	if len(body) == 0 {
 		return nil, nil
@@ -483,7 +501,7 @@ func (p *LLMFirewallPlugin) extractTextContent(_ string, body []byte) ([]string,
 		}
 		for _, item := range items {
 			var parts []string
-			collectStrings(item, &parts)
+			collectStrings(item, false, &parts)
 			if len(parts) > 0 {
 				texts = append(texts, strings.Join(parts, " "))
 			}
@@ -492,9 +510,10 @@ func (p *LLMFirewallPlugin) extractTextContent(_ string, body []byte) ([]string,
 	return texts, nil
 }
 
-// collectStrings appends every string leaf under v, skipping inline media
-// and base64 sources.
-func collectStrings(v any, out *[]string) {
+// collectStrings appends every string leaf under v. Outside a payload it
+// skips structural metadata and inline media; a base64 media source has
+// only its data skipped, and a text/* one is decoded and inspected.
+func collectStrings(v any, inPayload bool, out *[]string) {
 	switch val := v.(type) {
 	case string:
 		if val != "" {
@@ -502,19 +521,56 @@ func collectStrings(v any, out *[]string) {
 		}
 	case []any:
 		for _, item := range val {
-			collectStrings(item, out)
+			collectStrings(item, inPayload, out)
 		}
 	case map[string]any:
-		if t, _ := val["type"].(string); t == "base64" {
-			return // Anthropic base64 source (image or PDF bytes)
+		if !inPayload && isBase64Source(val) {
+			if text, ok := decodeTextSource(val); ok {
+				*out = append(*out, text)
+			}
+			return
 		}
 		for k, item := range val {
-			if skipKeys[k] {
+			if !inPayload && (mediaKeys[k] || structuralKeys[k]) {
 				continue
 			}
-			collectStrings(item, out)
+			collectStrings(item, inPayload || payloadKeys[k], out)
 		}
 	}
+}
+
+// isBase64Source reports whether m is an Anthropic-style media source:
+// {"type":"base64","media_type":...,"data":...} and nothing else.
+func isBase64Source(m map[string]any) bool {
+	if t, _ := m["type"].(string); t != "base64" {
+		return false
+	}
+	for k := range m {
+		if k != "type" && k != "media_type" && k != "data" {
+			return false // other fields: inspect normally
+		}
+	}
+	_, hasData := m["data"].(string)
+	return hasData
+}
+
+// decodeTextSource decodes the data of a base64 source whose media type is
+// text/* (the model reads it as text), up to maxDecodedDocument bytes.
+func decodeTextSource(m map[string]any) (string, bool) {
+	mediaType, _ := m["media_type"].(string)
+	if !strings.HasPrefix(mediaType, "text/") {
+		return "", false
+	}
+	data, _ := m["data"].(string)
+	if len(data) > base64.StdEncoding.EncodedLen(maxDecodedDocument) {
+		data = data[:base64.StdEncoding.EncodedLen(maxDecodedDocument)]
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		// Undecodable data is inspected as is
+		return data, true
+	}
+	return string(decoded), true
 }
 
 func main() {
