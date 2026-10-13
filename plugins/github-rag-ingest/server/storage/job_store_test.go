@@ -77,6 +77,11 @@ func TestJobStoreCreateFailsWhenIndexUnreadable(t *testing.T) {
 	if total != 1 || len(jobs) != 1 || jobs[0].ID != "old" {
 		t.Errorf("global index = %d jobs %v, want only the existing job", total, jobs)
 	}
+	// The repo index was updated before the global one failed; that entry
+	// is rolled back too.
+	if _, total, _ := store.ListByRepo(ctx, "repo-1", 10, 0); total != 1 {
+		t.Errorf("repo index total = %d after rollback, want 1", total)
+	}
 }
 
 func TestJobStoreCreateFailsWhenIndexUnwritable(t *testing.T) {
