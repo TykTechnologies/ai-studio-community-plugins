@@ -7,7 +7,7 @@ A phrase-based prompt filtering plugin for Tyk AI Studio's Microgateway. This pl
 - **Phrase-based filtering** - Block requests containing specific phrases or patterns
 - **Regex support** - Use regular expressions for complex pattern matching
 - **Model-specific rules** - Apply different rules to different LLM models using glob patterns
-- **Multi-vendor support** - Works with OpenAI, Anthropic, Google AI, Vertex, and Ollama
+- **Multi-vendor support** - Works with OpenAI (chat and Responses API), Anthropic, Google AI, Vertex, and Ollama
 - **Configurable hook phase** - Run checks before or after authentication
 - **Privacy-preserving** - Logs matched patterns only, not request content
 - **Fail-open by default** - Allows requests through if their content cannot be inspected; `fail_closed` blocks them instead
@@ -217,17 +217,18 @@ To use PostAuth, set `"hook_phase": "post_auth"` in your configuration.
 
 ## Supported LLM Vendors
 
-The plugin automatically detects and parses request formats for:
+The plugin inspects every string under the fields that carry prompt text, whatever the vendor or API shape:
 
-| Vendor | Request Format |
-|--------|----------------|
-| OpenAI | `messages` array with `role` and `content` |
-| Anthropic | `system` field + `messages` array (supports content blocks) |
-| Google AI | `systemInstruction` + `contents` array with `parts` |
-| Vertex | Same as Google AI |
-| Ollama | Same as OpenAI |
+| Field | Used by |
+|-------|---------|
+| `messages` | OpenAI and Ollama chat, Anthropic Messages |
+| `system` | Anthropic |
+| `systemInstruction`, `system_instruction` | Google AI and Vertex (both spellings the REST API accepts) |
+| `contents` | Google AI and Vertex |
+| `input`, `instructions` | OpenAI Responses API |
+| `prompt` | Legacy completions |
 
-Unknown vendors fall back to OpenAI format parsing.
+Inside these fields it reads all nested text: content blocks of any type (`text`, `input_text`, …), tool results, tool call arguments, tool messages, and text documents. It skips inline media (`image_url`, `inline_data`/`inlineData`, `file_data`, `input_audio`, base64 sources) and structural fields (`role`, `type`, IDs, MIME types). Each message, or other element of these fields, is matched as one text, with its strings joined by spaces.
 
 ## Error Handling
 
@@ -236,7 +237,6 @@ By default the plugin follows a **fail-open** design:
 - If the request body cannot be parsed, or no text content is found in it → Request is **allowed** (with `fail_closed: true`: **blocked** with the normal block response, when an enabled rule applies to the model, and logged with the reason)
 - If no rules match the model → Request is **allowed** (also with `fail_closed`)
 - If invalid regex in config → Pattern is **skipped** (logged at startup)
-- If vendor unknown → Falls back to OpenAI parsing
 
 Fail-open ensures that configuration errors or edge cases don't accidentally block legitimate traffic. Use `fail_closed` when an uninspected prompt is worse than a blocked one, for example when clients could send content in a format the plugin does not parse.
 
