@@ -6,7 +6,7 @@
     "prices_url": {
       "type": "string",
       "title": "Prices URL",
-      "description": "URL to fetch current LLM prices from (JSON array format)",
+      "description": "HTTPS URL to fetch current LLM prices from (llm-prices.com JSON format). Internal and link-local addresses are refused; plain http and internal hosts need ALLOW_INTERNAL_NETWORK_ACCESS=true (development only; on AI Studio 2.3+ pass it to plugins with PLUGIN_ENV_PASSTHROUGH).",
       "default": "https://www.llm-prices.com/current-v1.json"
     },
     "sync_interval_cron": {

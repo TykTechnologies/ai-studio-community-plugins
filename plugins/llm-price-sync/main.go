@@ -7,13 +7,18 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/ai_studio_sdk"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
 
-const PluginName = "llm-price-sync"
+const (
+	PluginName    = "llm-price-sync"
+	PluginVersion = "1.1.1"
+)
 
 //go:embed ui assets manifest.json config.schema.json
 var embeddedAssets embed.FS
@@ -31,11 +36,13 @@ type PriceSyncPlugin struct {
 	pluginID uint32
 	config   *Config
 	kv       plugin_sdk.KVService
+
+	historyMu sync.Mutex // serialises appendToHistory
 }
 
 func NewPriceSyncPlugin() *PriceSyncPlugin {
 	return &PriceSyncPlugin{
-		BasePlugin: plugin_sdk.NewBasePlugin(PluginName, "1.0.0", "Automatically sync LLM model prices from llm-prices.com"),
+		BasePlugin: plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "Automatically sync LLM model prices from llm-prices.com"),
 		config: &Config{
 			PricesURL:        "https://www.llm-prices.com/current-v1.json",
 			SyncIntervalCron: "0 */6 * * *",
@@ -89,6 +96,10 @@ func (p *PriceSyncPlugin) Initialize(ctx plugin_sdk.Context, configMap map[strin
 				p.config.VendorFilter = vendors
 			}
 		}
+	}
+
+	if err := validatePricesURL(p.config.PricesURL); err != nil {
+		log.Printf("[%s] WARNING: syncs will fail until prices_url is fixed: %v", PluginName, err)
 	}
 
 	log.Printf("[%s] initialized: url=%s cron=%s auto_create=%v dry_run=%v vendors=%v",
@@ -156,7 +167,10 @@ func (p *PriceSyncPlugin) ensureSchedule() {
 
 func (p *PriceSyncPlugin) ExecuteScheduledTask(ctx plugin_sdk.Context, schedule *plugin_sdk.Schedule) error {
 	log.Printf("[%s] executing scheduled sync (schedule=%s, vendors=%v)", PluginName, schedule.ID, p.config.VendorFilter)
-	result := p.syncPrices(ctx)
+	result, err := p.syncPrices(ctx)
+	if err != nil {
+		return err
+	}
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("sync completed with %d errors: %s", len(result.Errors), result.Errors[0])
 	}
@@ -236,7 +250,7 @@ func (p *PriceSyncPlugin) HandleRPC(method string, payload []byte) ([]byte, erro
 func (p *PriceSyncPlugin) rpcGetStatus() ([]byte, error) {
 	ctx := context.Background()
 
-	data, err := p.kv.Read(ctx, "price-sync:last-result")
+	data, err := p.kv.Read(ctx, lastResultKey)
 	if err != nil {
 		return json.Marshal(map[string]interface{}{
 			"status": "no_sync_yet",
@@ -245,7 +259,13 @@ func (p *PriceSyncPlugin) rpcGetStatus() ([]byte, error) {
 	}
 
 	var lastResult SyncResult
-	json.Unmarshal(data, &lastResult)
+	if err := json.Unmarshal(data, &lastResult); err != nil {
+		log.Printf("[%s] stored sync result is unreadable: %v", PluginName, err)
+		return json.Marshal(map[string]interface{}{
+			"status": "unreadable_last_result",
+			"config": p.config,
+		})
+	}
 
 	return json.Marshal(map[string]interface{}{
 		"status":    "ok",
@@ -256,18 +276,26 @@ func (p *PriceSyncPlugin) rpcGetStatus() ([]byte, error) {
 
 func (p *PriceSyncPlugin) rpcTriggerSync() ([]byte, error) {
 	log.Printf("[%s] manual sync triggered via RPC (vendors=%v)", PluginName, p.config.VendorFilter)
-	result := p.syncPricesFromRPC()
+	// RPC calls carry no context; bound the sync like the scheduler does
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	result, err := p.syncPricesFromRPC(ctx)
 
-	return json.Marshal(map[string]interface{}{
+	resp := map[string]interface{}{
 		"status": "completed",
 		"result": result,
-	})
+	}
+	if err != nil {
+		resp["status"] = "completed_unsaved"
+		resp["error"] = err.Error()
+	}
+	return json.Marshal(resp)
 }
 
 func (p *PriceSyncPlugin) rpcGetSyncHistory() ([]byte, error) {
 	ctx := context.Background()
 
-	data, err := p.kv.Read(ctx, "price-sync:history")
+	data, err := p.kv.Read(ctx, historyKey)
 	if err != nil {
 		return json.Marshal([]interface{}{})
 	}
