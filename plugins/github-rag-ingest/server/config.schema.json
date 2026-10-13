@@ -44,7 +44,7 @@
     "cache_path": {
       "type": "string",
       "title": "Git Cache Path",
-      "description": "Absolute directory for cloned repositories. Defaults to <user cache dir>/github-rag-ingest, or a private temp dir. The filesystem root, world-writable directories, directories inside a world-writable directory without the sticky bit, and directories owned by another user are refused."
+      "description": "Absolute directory for cloned repositories. Defaults to <user cache dir>/github-rag-ingest, or a private temp dir. The filesystem root, world-writable directories, directories inside a world-writable directory without the sticky bit, directories owned by another user, a symlink, and paths with a parent owned by neither root nor the plugin's user are refused."
     },
     "known_hosts_path": {
       "type": "string",

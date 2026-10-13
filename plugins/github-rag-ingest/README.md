@@ -113,8 +113,10 @@ Each repository can be configured with:
 > example `~/.cache/github-rag-ingest`), or a private temp directory if that
 > cannot be created. The plugin refuses the filesystem root, world-writable
 > directories, directories inside a world-writable directory without the sticky
-> bit, and directories owned by another user, and creates the directory with
-> mode 0700. Before 1.1.1 the default was the shared `/tmp/github-rag-cache`;
+> bit, directories owned by another user, a symlink as the directory itself,
+> and a path with an existing parent owned by neither root nor the plugin's
+> user. It creates the directory with mode 0700 and checks it again after
+> creating it. Before 1.1.1 the default was the shared `/tmp/github-rag-cache`;
 > delete it after upgrading.
 
 ### Environment variables
