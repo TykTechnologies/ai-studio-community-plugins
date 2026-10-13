@@ -117,6 +117,10 @@ The admin dashboard displays:
 - **Cache Size**: Current memory usage and capacity
 - **Eviction Count**: Number of entries evicted due to size limits
 
+**Clear Cache** in the dashboard clears every edge and lists the edges that acknowledged it. Each edge reports itself by its `EDGE_ID` environment variable. An edge without one reports a random ID (`edge-<uuid>`) that stays the same until the plugin restarts.
+
+The plugin writes no files. It logs through the host's plugin logger, and per-request and per-event detail is logged at debug level.
+
 ## Limitations
 
 - **In-memory only**: Cache is not persisted across restarts
