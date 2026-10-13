@@ -42,17 +42,42 @@ func (s *JobStore) Create(ctx context.Context, job *types.Job) error {
 	}
 
 	// Add to the repo index (for filtering) and the global index. If either
-	// fails the job is removed again, so no job exists that the lists miss.
+	// fails, the job and any index entry already added are removed again, so
+	// the job record and both lists stay consistent.
+	var indexed []string
 	for _, indexKey := range []string{jobsByRepoPrefix + job.RepoID, jobsIndexKey} {
 		if err := s.appendToIndex(ctx, indexKey, job.ID); err != nil {
-			if delErr := s.kv.Delete(ctx, key); delErr != nil {
-				log.Printf("github-rag-ingest: job %s is stored but not indexed; removing it failed: %v", job.ID, delErr)
-			}
+			s.rollbackCreate(ctx, job.ID, key, indexed)
 			return fmt.Errorf("failed to index job %s: %w", job.ID, err)
 		}
+		indexed = append(indexed, indexKey)
 	}
 
 	return nil
+}
+
+// rollbackCreate undoes a partly indexed Create, best effort: it removes the
+// job ID from the indexes it was added to and deletes the job record.
+func (s *JobStore) rollbackCreate(ctx context.Context, jobID, jobKey string, indexKeys []string) {
+	for _, indexKey := range indexKeys {
+		var ids []string
+		if err := s.kv.Read(ctx, indexKey, &ids); err != nil {
+			log.Printf("github-rag-ingest: rollback of job %s: read index %s: %v", jobID, indexKey, err)
+			continue
+		}
+		kept := ids[:0]
+		for _, id := range ids {
+			if id != jobID {
+				kept = append(kept, id)
+			}
+		}
+		if err := s.kv.Write(ctx, indexKey, kept, nil); err != nil {
+			log.Printf("github-rag-ingest: rollback of job %s: write index %s: %v", jobID, indexKey, err)
+		}
+	}
+	if err := s.kv.Delete(ctx, jobKey); err != nil {
+		log.Printf("github-rag-ingest: rollback of job %s: delete record: %v", jobID, err)
+	}
 }
 
 // appendToIndex adds id to the ID list stored at indexKey. A missing list
