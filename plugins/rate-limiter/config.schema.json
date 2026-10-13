@@ -20,7 +20,14 @@
     "redis_url": {
       "type": "string",
       "title": "Redis URL",
-      "description": "Redis connection URL (only used when storage_backend is 'redis'). Example: redis://localhost:6379/0",
+      "description": "Redis URL, used when storage_backend is 'redis'. Example: redis://localhost:6379/0",
+      "default": ""
+    },
+    "redis_password": {
+      "type": "string",
+      "title": "Redis Password",
+      "description": "Overrides a password in the URL. Accepts $SECRET/NAME or $ENV/NAME.",
+      "format": "password",
       "default": ""
     },
     "window_size_seconds": {

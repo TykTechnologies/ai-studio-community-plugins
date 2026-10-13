@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
@@ -368,10 +371,57 @@ end
 return effective
 `
 
-func newRedisStore(redisURL string) (Store, error) {
+// resolveRedisPassword resolves the redis_password config value:
+//
+//   - $SECRET/NAME is resolved by AI Studio 2.3 and later before the plugin
+//     starts. One still present here means an older AI Studio, a secret that
+//     does not exist, or an edge gateway (edges receive the reference, not
+//     the value), so it is an error rather than a password.
+//   - $ENV/NAME is read from the plugin's own environment (on AI Studio 2.3
+//     and later, pass the variable with PLUGIN_ENV_PASSTHROUGH).
+//
+// Any other value is returned unchanged.
+func resolveRedisPassword(v string) (string, error) {
+	switch {
+	case strings.HasPrefix(v, "$SECRET/"):
+		return "", errors.New("redis_password: secret reference was not resolved by AI Studio")
+	case strings.HasPrefix(v, "$ENV/"):
+		name := strings.TrimPrefix(v, "$ENV/")
+		if val := os.Getenv(name); val != "" {
+			return val, nil
+		}
+		return "", fmt.Errorf("redis_password: environment variable %s is not set", name)
+	}
+	return v, nil
+}
+
+// redisOptions parses redisURL and applies password, which overrides any
+// password in the URL. Errors never include the URL, as it may carry
+// credentials.
+func redisOptions(redisURL, password string) (*redis.Options, error) {
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
+		// url.Error's message repeats the whole URL; its cause does not.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	password, err = resolveRedisPassword(password)
+	if err != nil {
+		return nil, err
+	}
+	if password != "" {
+		opt.Password = password
+	}
+	return opt, nil
+}
+
+func newRedisStore(redisURL, password string) (Store, error) {
+	opt, err := redisOptions(redisURL, password)
+	if err != nil {
+		return nil, err
 	}
 	client := redis.NewClient(opt)
 
