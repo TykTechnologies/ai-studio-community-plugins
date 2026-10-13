@@ -24,49 +24,59 @@ type SyncResult struct {
 
 const perMillionTokens = 1_000_000.0
 
-// syncPrices runs the sync using a scheduler-provided context for KV access.
-func (p *PriceSyncPlugin) syncPrices(ctx plugin_sdk.Context) *SyncResult {
-	return p.doSync(ctx.Services.KV())
+// syncPrices runs the sync under the scheduler's context and KV service.
+func (p *PriceSyncPlugin) syncPrices(ctx plugin_sdk.Context) (*SyncResult, error) {
+	return p.doSync(ctx.Context, ctx.Services.KV())
 }
 
 // syncPricesFromRPC runs the sync using the stored KV reference (for RPC calls).
-func (p *PriceSyncPlugin) syncPricesFromRPC() *SyncResult {
-	return p.doSync(p.kv)
+func (p *PriceSyncPlugin) syncPricesFromRPC(ctx context.Context) (*SyncResult, error) {
+	return p.doSync(ctx, p.kv)
 }
 
-func (p *PriceSyncPlugin) doSync(kv plugin_sdk.KVService) *SyncResult {
+// doSync fetches prices and applies them. Cancelling ctx stops the sync
+// between models. The result is always persisted; a failure to persist it is
+// the returned error.
+func (p *PriceSyncPlugin) doSync(ctx context.Context, kv plugin_sdk.KVService) (result *SyncResult, persistErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	start := time.Now()
-	result := &SyncResult{StartedAt: start}
+	result = &SyncResult{StartedAt: start}
 
-	// Always persist result to KV, even on failure
+	// Always persist result to KV, even on failure or cancellation
 	defer func() {
 		result.Duration = time.Since(start).String()
 		log.Printf("[price-sync] sync complete: created=%d updated=%d skipped=%d errors=%d duration=%s",
 			result.ModelsCreated, result.ModelsUpdated, result.ModelsSkipped, len(result.Errors), result.Duration)
-		storeSyncResult(kv, result)
+		persistErr = p.storeSyncResult(context.WithoutCancel(ctx), kv, result)
 	}()
 
 	log.Printf("[price-sync] fetching prices from %s", p.config.PricesURL)
-	prices, err := fetchCurrentPrices(p.config.PricesURL)
+	prices, err := fetchCurrentPrices(ctx, p.config.PricesURL)
 	if err != nil {
 		log.Printf("[price-sync] fetch failed: %v", err)
 		result.Errors = append(result.Errors, fmt.Sprintf("fetch failed: %v", err))
-		return result
+		return result, nil
 	}
 
 	log.Printf("[price-sync] fetched %d model prices from source", len(prices))
 
 	log.Printf("[price-sync] loading existing model prices from database")
-	existing, err := loadExistingPrices()
+	existing, err := loadExistingPrices(ctx)
 	if err != nil {
 		log.Printf("[price-sync] failed to load existing prices: %v", err)
 		result.Errors = append(result.Errors, fmt.Sprintf("loading existing prices: %v", err))
-		return result
+		return result, nil
 	}
 	log.Printf("[price-sync] loaded %d existing model prices", len(existing))
 	log.Printf("[price-sync] vendor filter: %v (len=%d)", p.config.VendorFilter, len(p.config.VendorFilter))
 
 	for _, ep := range prices {
+		if err := ctx.Err(); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("sync stopped: %v", err))
+			return result, nil
+		}
 		vendorSlug, ok := mapVendor(ep.Vendor)
 		if !ok {
 			result.ModelsSkipped++
@@ -113,7 +123,7 @@ func (p *PriceSyncPlugin) doSync(kv plugin_sdk.KVService) *SyncResult {
 				continue
 			}
 
-			_, err := ai_studio_sdk.UpdateModelPrice(context.Background(), ex.id, modelName, vendorSlug, "USD", cpt, cpit, cacheWritePT, cacheReadPT)
+			_, err := ai_studio_sdk.UpdateModelPrice(ctx, ex.id, modelName, vendorSlug, "USD", cpt, cpit, cacheWritePT, cacheReadPT)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("update %s: %v", modelName, err))
 				continue
@@ -131,7 +141,7 @@ func (p *PriceSyncPlugin) doSync(kv plugin_sdk.KVService) *SyncResult {
 				continue
 			}
 
-			_, err := ai_studio_sdk.CreateModelPrice(context.Background(), modelName, vendorSlug, "USD", cpt, cpit, cacheWritePT, cacheReadPT)
+			_, err := ai_studio_sdk.CreateModelPrice(ctx, modelName, vendorSlug, "USD", cpt, cpit, cacheWritePT, cacheReadPT)
 			if err != nil {
 				// Handle duplicate key: model already exists (race or stale cache)
 				if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -147,7 +157,7 @@ func (p *PriceSyncPlugin) doSync(kv plugin_sdk.KVService) *SyncResult {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 type existingPrice struct {
@@ -162,13 +172,13 @@ type existingPrice struct {
 // loadExistingPrices returns a map keyed by model_name (not vendor:model_name)
 // since model IDs from the source are globally unique. This allows the sync to
 // detect and correct vendor mismatches from earlier runs.
-func loadExistingPrices() (map[string]existingPrice, error) {
+func loadExistingPrices(ctx context.Context) (map[string]existingPrice, error) {
 	result := make(map[string]existingPrice)
 
 	page := int32(1)
 	limit := int32(100)
 	for {
-		resp, err := ai_studio_sdk.ListModelPrices(context.Background(), "", page, limit)
+		resp, err := ai_studio_sdk.ListModelPrices(ctx, "", page, limit)
 		if err != nil {
 			return nil, fmt.Errorf("listing model prices page %d: %w", page, err)
 		}
@@ -193,39 +203,56 @@ func loadExistingPrices() (map[string]existingPrice, error) {
 	return result, nil
 }
 
-func storeSyncResult(kv plugin_sdk.KVService, result *SyncResult) {
-	ctx := context.Background()
+// KV keys for sync results; the history keeps the last historyLen, newest first.
+const (
+	lastResultKey = "price-sync:last-result"
+	historyKey    = "price-sync:history"
+	historyLen    = 10
+)
+
+// storeSyncResult persists result as the last result and in the history.
+func (p *PriceSyncPlugin) storeSyncResult(ctx context.Context, kv plugin_sdk.KVService, result *SyncResult) error {
 	data, err := json.Marshal(result)
 	if err != nil {
-		log.Printf("[price-sync] failed to marshal sync result: %v", err)
-		return
+		return fmt.Errorf("marshal sync result: %w", err)
 	}
-
-	_, err = kv.Write(ctx, "price-sync:last-result", data, nil)
-	if err != nil {
+	if _, err := kv.Write(ctx, lastResultKey, data, nil); err != nil {
 		log.Printf("[price-sync] failed to store sync result: %v", err)
+		return fmt.Errorf("store sync result: %w", err)
 	}
-
-	// Append to history (keep last 10)
-	appendToHistory(kv, data)
+	return p.appendToHistory(ctx, kv, data)
 }
 
-func appendToHistory(kv plugin_sdk.KVService, entry []byte) {
-	ctx := context.Background()
-	histData, _ := kv.Read(ctx, "price-sync:history")
+// appendToHistory prepends entry to the history. The read-modify-write runs
+// under historyMu, so a scheduled sync and a manual one cannot drop each
+// other's entries.
+func (p *PriceSyncPlugin) appendToHistory(ctx context.Context, kv plugin_sdk.KVService, entry []byte) error {
+	p.historyMu.Lock()
+	defer p.historyMu.Unlock()
 
 	var history []json.RawMessage
-	if len(histData) > 0 {
-		json.Unmarshal(histData, &history)
+	if histData, err := kv.Read(ctx, historyKey); err == nil && len(histData) > 0 {
+		if err := json.Unmarshal(histData, &history); err != nil {
+			// Start a fresh history rather than failing every sync on it
+			log.Printf("[price-sync] discarding unreadable sync history: %v", err)
+			history = nil
+		}
 	}
 
 	history = append([]json.RawMessage{json.RawMessage(entry)}, history...)
-	if len(history) > 10 {
-		history = history[:10]
+	if len(history) > historyLen {
+		history = history[:historyLen]
 	}
 
-	data, _ := json.Marshal(history)
-	kv.Write(ctx, "price-sync:history", data, nil)
+	data, err := json.Marshal(history)
+	if err != nil {
+		return fmt.Errorf("marshal sync history: %w", err)
+	}
+	if _, err := kv.Write(ctx, historyKey, data, nil); err != nil {
+		log.Printf("[price-sync] failed to store sync history: %v", err)
+		return fmt.Errorf("store sync history: %w", err)
+	}
+	return nil
 }
 
 func safeDiv(val *float64) float64 {
