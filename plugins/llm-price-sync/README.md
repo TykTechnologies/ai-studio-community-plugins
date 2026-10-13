@@ -14,7 +14,7 @@ Keeps AI Studio's model prices up to date from [llm-prices.com](https://www.llm-
 
 ## Source URL rules
 
-`prices_url` must be an `https` URL. The plugin refuses to connect to internal addresses: loopback, private ranges, link-local (including the 169.254.169.254 cloud metadata address), CGNAT (100.64.0.0/10), multicast and unspecified. The check applies to the address actually dialled, after DNS resolution and on every redirect, so a public hostname that resolves to an internal address is refused too. Through an HTTP proxy (`HTTPS_PROXY`), the target hostname is resolved and checked before the request instead. Redirects must also be `https`.
+`prices_url` must be an `https` URL. The plugin refuses to connect to internal addresses: loopback, private ranges, link-local (including the 169.254.169.254 cloud metadata address), CGNAT (100.64.0.0/10), multicast and unspecified. The check applies to the address actually dialled, after DNS resolution and on every redirect, so a public hostname that resolves to an internal address is refused too. Through an HTTP proxy (`HTTPS_PROXY`), the target hostname is resolved and checked before the request and on every redirect instead, and a hop that the proxy settings would send direct (a loopback or `NO_PROXY` target) is refused. Redirects must also be `https`.
 
 For local development, `ALLOW_INTERNAL_NETWORK_ACCESS=true` allows plain `http` and internal addresses. From AI Studio 2.3, plugins only see that variable when it is passed through: `PLUGIN_ENV_PASSTHROUGH=ALLOW_INTERNAL_NETWORK_ACCESS`.
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -134,6 +135,45 @@ func TestRefuseInternalHost(t *testing.T) {
 	t.Setenv("ALLOW_INTERNAL_NETWORK_ACCESS", "true")
 	if err := refuseInternalHost(context.Background(), "localhost"); err != nil {
 		t.Errorf("localhost with the switch: %v", err)
+	}
+}
+
+// A redirect to an internal host is refused whether or not a proxy is in
+// play: under a proxy, loopback and NO_PROXY targets would go direct.
+func TestCheckRedirectRefusesInternalHosts(t *testing.T) {
+	t.Setenv("ALLOW_INTERNAL_NETWORK_ACCESS", "")
+	orig := proxyFor
+	t.Cleanup(func() { proxyFor = orig })
+
+	proxy, _ := url.Parse("http://proxy.example.com:3128")
+	for name, pick := range map[string]func(*http.Request) (*url.URL, error){
+		"proxied": func(*http.Request) (*url.URL, error) { return proxy, nil },
+		"direct":  func(*http.Request) (*url.URL, error) { return nil, nil },
+	} {
+		proxyFor = pick
+		req := httptest.NewRequest(http.MethodGet, "https://localhost:8443/prices.json", nil)
+		via := []*http.Request{httptest.NewRequest(http.MethodGet, "https://www.llm-prices.com/x", nil)}
+		if err := checkRedirect(req, via); !errors.Is(err, errInternalAddress) {
+			t.Errorf("%s: redirect to localhost: %v, want errInternalAddress", name, err)
+		}
+	}
+}
+
+// proxiedClient never dials a hop directly: it has no dial-time check.
+func TestProxyOnlyRefusesDirectHops(t *testing.T) {
+	orig := proxyFor
+	t.Cleanup(func() { proxyFor = orig })
+	req := httptest.NewRequest(http.MethodGet, "https://localhost:8443/", nil)
+
+	proxyFor = func(*http.Request) (*url.URL, error) { return nil, nil }
+	if _, err := proxyOnly(req); !errors.Is(err, errProxyBypass) {
+		t.Errorf("direct hop: %v, want errProxyBypass", err)
+	}
+
+	proxy, _ := url.Parse("http://proxy.example.com:3128")
+	proxyFor = func(*http.Request) (*url.URL, error) { return proxy, nil }
+	if got, err := proxyOnly(req); err != nil || got != proxy {
+		t.Errorf("proxied hop: %v, %v", got, err)
 	}
 }
 

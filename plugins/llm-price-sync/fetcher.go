@@ -104,16 +104,36 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	if err := validatePricesURL(req.URL.String()); err != nil {
 		return err
 	}
-	if usesProxy(req) {
-		return refuseInternalHost(req.Context(), req.URL.Hostname())
+	// Checked for every hop, whichever client follows it (defence in depth;
+	// directClient's dial hook checks the connected address as well).
+	return refuseInternalHost(req.Context(), req.URL.Hostname())
+}
+
+// proxyFor picks the proxy for a request; a variable so tests can set one.
+var proxyFor = http.ProxyFromEnvironment
+
+var errProxyBypass = errors.New("request would bypass the configured proxy (NO_PROXY or loopback target); refused")
+
+// proxyOnly is proxiedClient's proxy function. proxiedClient has no dial
+// hook (it dials the proxy), so a hop the proxy settings send direct, such
+// as a redirect to localhost or a NO_PROXY host, would go unchecked: it is
+// refused instead.
+func proxyOnly(req *http.Request) (*url.URL, error) {
+	proxyURL, err := proxyFor(req)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if proxyURL == nil {
+		return nil, errProxyBypass
+	}
+	return proxyURL, nil
 }
 
 // directClient checks each connection's resolved address. Through an HTTP
 // proxy the connection goes to the proxy (often an internal address), so
-// proxiedClient leaves that alone and the target host is resolved and
-// checked before the request instead.
+// proxiedClient leaves that alone; the target host is resolved and checked
+// before the request and on every redirect instead, and hops that would
+// skip the proxy are refused.
 var (
 	directClient = &http.Client{
 		Timeout: 30 * time.Second,
@@ -126,7 +146,7 @@ var (
 	proxiedClient = &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
-			Proxy:               http.ProxyFromEnvironment,
+			Proxy:               proxyOnly,
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
 		CheckRedirect: checkRedirect,
@@ -134,7 +154,7 @@ var (
 )
 
 func usesProxy(req *http.Request) bool {
-	proxyURL, err := http.ProxyFromEnvironment(req)
+	proxyURL, err := proxyFor(req)
 	return err == nil && proxyURL != nil
 }
 
