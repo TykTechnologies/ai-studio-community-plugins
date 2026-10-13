@@ -13,6 +13,7 @@ import (
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
+	"github.com/google/uuid"
 )
 
 // Embed UI assets and manifest into the binary
@@ -28,7 +29,7 @@ var configSchemaFile []byte
 
 const (
 	PluginName    = "llm-cache"
-	PluginVersion = "1.2.0"
+	PluginVersion = "1.2.1"
 )
 
 // PendingCacheOp represents a pending cache operation
@@ -45,11 +46,11 @@ type PendingCacheOp struct {
 
 // ClearCacheOperation tracks a pending distributed cache clear operation
 type ClearCacheOperation struct {
-	OperationID string              `json:"operation_id"`
-	StartTime   int64               `json:"start_time"`
-	Timeout     int64               `json:"timeout"` // seconds
-	AckEdges    map[string]int64    `json:"ack_edges"` // edge_id -> timestamp
-	Completed   bool                `json:"completed"`
+	OperationID string           `json:"operation_id"`
+	StartTime   int64            `json:"start_time"`
+	Timeout     int64            `json:"timeout"`   // seconds
+	AckEdges    map[string]int64 `json:"ack_edges"` // edge_id -> timestamp
+	Completed   bool             `json:"completed"`
 }
 
 // ClearCacheEvent is the payload sent from control to edges
@@ -83,16 +84,24 @@ type LLMCachePlugin struct {
 	gatewayServices plugin_sdk.GatewayServices
 
 	// Control plane mode: aggregated stats from edge instances
-	aggregateMu      sync.RWMutex
-	aggregatedStats  map[string]*EdgeStatsRecord
-	stopStatsReporter chan struct{}
+	aggregateMu     sync.RWMutex
+	aggregatedStats map[string]*EdgeStatsRecord
 
 	// Services reference for KV persistence (works in both modes)
 	services plugin_sdk.ServiceBroker
 
-	// Track if reporter has been started (Initialize is called twice in gateway mode)
-	reporterStarted bool
-	reporterMu      sync.Mutex
+	// Background loops (cache cleanup, edge stats reporter) run until
+	// Shutdown cancels bgCtx; Shutdown waits for them on bgWG.
+	bgCtx       context.Context
+	bgCancel    context.CancelFunc
+	bgWG        sync.WaitGroup
+	bgMu        sync.Mutex // orders bgWG.Add against Shutdown's cancel and Wait
+	cleanupOnce sync.Once
+	// The reporter starts once, however often OnSessionReady runs
+	reporterOnce sync.Once
+
+	// fallbackEdgeID names this edge in clear acks when EDGE_ID is unset
+	fallbackEdgeID string
 
 	// Broker warmup - ensures broker connection is established on first RPC
 	warmupBrokerOnce sync.Once
@@ -108,15 +117,55 @@ type LLMCachePlugin struct {
 
 // NewLLMCachePlugin creates a new cache plugin
 func NewLLMCachePlugin() *LLMCachePlugin {
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &LLMCachePlugin{
-		BasePlugin:        plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "LLM Response Cache - reduces costs and latency by caching identical requests"),
-		pendingCache:      make(map[string]*PendingCacheOp),
-		metrics:           NewCacheMetrics(),
-		aggregatedStats:   make(map[string]*EdgeStatsRecord),
-		stopStatsReporter: make(chan struct{}),
-		clearOperations:   make(map[string]*ClearCacheOperation),
-		eventSubIDs:       make([]string, 0),
+		BasePlugin:      plugin_sdk.NewBasePlugin(PluginName, PluginVersion, "LLM Response Cache - reduces costs and latency by caching identical requests"),
+		pendingCache:    make(map[string]*PendingCacheOp),
+		metrics:         NewCacheMetrics(),
+		aggregatedStats: make(map[string]*EdgeStatsRecord),
+		bgCtx:           bgCtx,
+		bgCancel:        bgCancel,
+		fallbackEdgeID:  "edge-" + uuid.NewString(),
+		clearOperations: make(map[string]*ClearCacheOperation),
+		eventSubIDs:     make([]string, 0),
 	}
+}
+
+// logger returns the SDK's levelled logger. Before Initialize, and in tests
+// that run without a service broker, it falls back to the standard logger.
+func (p *LLMCachePlugin) logger() plugin_sdk.LogService {
+	if p.services != nil {
+		if l := p.services.Logger(); l != nil {
+			return l
+		}
+	}
+	return stdLogger{}
+}
+
+// stdLogger writes in the SDK logger's format while no broker exists.
+type stdLogger struct{}
+
+func (stdLogger) Debug(msg string, fields ...interface{}) { stdLog("DEBUG", msg, fields) }
+func (stdLogger) Info(msg string, fields ...interface{})  { stdLog("INFO", msg, fields) }
+func (stdLogger) Warn(msg string, fields ...interface{})  { stdLog("WARN", msg, fields) }
+func (stdLogger) Error(msg string, fields ...interface{}) { stdLog("ERROR", msg, fields) }
+
+func stdLog(level, msg string, fields []interface{}) {
+	log.Printf("[%s] %s: %s %v", level, PluginName, msg, fields)
+}
+
+// goBackground runs loop until Shutdown. It does nothing after Shutdown.
+func (p *LLMCachePlugin) goBackground(loop func(ctx context.Context)) {
+	p.bgMu.Lock()
+	defer p.bgMu.Unlock()
+	if p.bgCtx.Err() != nil {
+		return
+	}
+	p.bgWG.Add(1)
+	go func() {
+		defer p.bgWG.Done()
+		loop(p.bgCtx)
+	}()
 }
 
 // Initialize implements plugin_sdk.Plugin
@@ -124,10 +173,13 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 	// Store runtime for mode-specific behavior
 	p.runtime = ctx.Runtime
 
+	// Store services reference for logging and event pub/sub (needed in both modes)
+	p.services = ctx.Services
+
 	// Parse configuration
 	config, err := ParseConfig(configMap)
 	if err != nil {
-		log.Printf("%s: Config parse error, using defaults: %v", PluginName, err)
+		p.logger().Warn("Config parse error, using defaults", "error", err)
 		config = DefaultConfig()
 	}
 	p.config = config
@@ -139,11 +191,8 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 		config.TTLSeconds,
 	)
 
-	// Start periodic cleanup goroutine
-	go p.periodicCleanup()
-
-	// Store services reference for event pub/sub (needed in both modes)
-	p.services = ctx.Services
+	// Start the periodic cleanup loop once, however often Initialize runs
+	p.cleanupOnce.Do(func() { p.goBackground(p.periodicCleanup) })
 
 	// Runtime-specific initialization
 	if p.runtime == plugin_sdk.RuntimeGateway {
@@ -160,7 +209,7 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 		// Load persisted stats from KV storage
 		if p.services != nil && p.services.KV() != nil {
 			if err := p.loadStatsFromKV(); err != nil {
-				log.Printf("%s: Failed to load persisted stats: %v", PluginName, err)
+				p.logger().Warn("Failed to load persisted stats", "error", err)
 			}
 		}
 
@@ -172,12 +221,13 @@ func (p *LLMCachePlugin) Initialize(ctx plugin_sdk.Context, configMap map[string
 	return nil
 }
 
-// Shutdown implements plugin_sdk.Plugin
+// Shutdown implements plugin_sdk.Plugin. It stops every background loop,
+// waits for them to return, and is safe to call more than once.
 func (p *LLMCachePlugin) Shutdown(ctx plugin_sdk.Context) error {
-	// Stop the stats reporter if running (gateway mode)
-	if p.runtime == plugin_sdk.RuntimeGateway {
-		close(p.stopStatsReporter)
-	}
+	p.bgMu.Lock()
+	p.bgCancel()
+	p.bgMu.Unlock()
+	p.bgWG.Wait()
 
 	// Unsubscribe from events
 	p.unsubscribeEvents()
@@ -185,35 +235,18 @@ func (p *LLMCachePlugin) Shutdown(ctx plugin_sdk.Context) error {
 	return nil
 }
 
-// debugLog writes to a file for debugging when stdout/stderr are not visible
-func debugLog(format string, args ...interface{}) {
-	f, err := os.OpenFile("/tmp/llm-cache-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	msg := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
-	f.WriteString(msg)
-}
-
 // OnSessionReady implements plugin_sdk.SessionAware
 // This is called when the session-based broker connection is first established.
 // The broker connection stays alive during the session, making it ideal for
 // setting up event subscriptions and starting background services that need the broker.
 func (p *LLMCachePlugin) OnSessionReady(ctx plugin_sdk.Context) {
-	debugLog("OnSessionReady called - session-based broker is now active (runtime=%v)", p.runtime)
-	log.Printf("%s: [INFO] OnSessionReady called - session-based broker is now active (runtime: %v)", PluginName, p.runtime)
+	p.logger().Debug("Session broker active", "runtime", p.runtime)
 
 	// Warm up the Service API connection first to ensure broker is ready
 	// This prevents timeout errors on subsequent service API calls
 	if p.runtime == plugin_sdk.RuntimeGateway {
-		log.Printf("%s: [INFO] Warming up Gateway Service API connection...", PluginName)
-		_, err := ctx.Services.KV().Read(ctx, "warmup-probe")
-		if err != nil {
-			log.Printf("%s: [INFO] Gateway Service API warmup completed (probe key not found is expected)", PluginName)
-		} else {
-			log.Printf("%s: [INFO] Gateway Service API connection established successfully", PluginName)
-		}
+		// A missing probe key is the expected result; the call only opens the connection
+		_, _ = ctx.Services.KV().Read(ctx, "warmup-probe")
 	}
 
 	// Set up event subscriptions now that we have a stable broker connection
@@ -221,22 +254,17 @@ func (p *LLMCachePlugin) OnSessionReady(ctx plugin_sdk.Context) {
 
 	// In gateway mode, start the stats reporter now that the broker is ready
 	if p.runtime == plugin_sdk.RuntimeGateway && p.gatewayServices != nil {
-		p.reporterMu.Lock()
-		if !p.reporterStarted {
-			p.reporterStarted = true
-			p.reporterMu.Unlock()
-			log.Printf("%s: [INFO] Starting stats reporter (broker now ready)", PluginName)
-			go p.reportStatsToControl()
-		} else {
-			p.reporterMu.Unlock()
-		}
+		p.reporterOnce.Do(func() {
+			p.logger().Debug("Starting stats reporter")
+			p.goBackground(p.reportStatsToControl)
+		})
 	}
 }
 
 // OnSessionClosing implements plugin_sdk.SessionAware
 // This is called before the session is explicitly closed (not on timeout).
 func (p *LLMCachePlugin) OnSessionClosing(ctx plugin_sdk.Context) {
-	log.Printf("%s: [INFO] OnSessionClosing called - cleaning up event subscriptions", PluginName)
+	p.logger().Debug("Session closing, removing event subscriptions")
 
 	// Clean up event subscriptions
 	p.unsubscribeEvents()
@@ -247,42 +275,26 @@ func (p *LLMCachePlugin) OnSessionClosing(ctx plugin_sdk.Context) {
 func (p *LLMCachePlugin) setupEventSubscriptions() {
 	// Use sync.Once to ensure we only set up subscriptions once
 	p.eventSubOnce.Do(func() {
-		log.Printf("%s: [INFO] Setting up event subscriptions via SessionAware pattern", PluginName)
-
-		if p.services == nil {
-			log.Printf("%s: [WARN] p.services is nil, cannot subscribe to events", PluginName)
+		if p.services == nil || p.services.Events() == nil {
+			p.logger().Warn("Events service unavailable, distributed cache clearing is disabled")
 			return
 		}
-
 		events := p.services.Events()
-		if events == nil {
-			log.Printf("%s: [WARN] p.services.Events() returned nil", PluginName)
+
+		// Edge mode: subscribe to cache clear commands from control.
+		// Control mode: subscribe to cache clear acknowledgements from edges.
+		topic, handler := TopicCacheClearAck, p.handleClearCacheAck
+		if p.runtime == plugin_sdk.RuntimeGateway {
+			topic, handler = TopicCacheClear, p.handleClearCacheEvent
+		}
+
+		subID, err := events.Subscribe(topic, handler)
+		if err != nil {
+			p.logger().Error("Failed to subscribe to events", "topic", topic, "error", err)
 			return
 		}
-
-		log.Printf("%s: [INFO] Events service available, setting up subscriptions (runtime=%v)", PluginName, p.runtime)
-
-		if p.runtime == plugin_sdk.RuntimeGateway {
-			// Edge mode: subscribe to cache clear commands from control
-			log.Printf("%s: [INFO] Edge mode: subscribing to %s", PluginName, TopicCacheClear)
-			subID, err := events.Subscribe(TopicCacheClear, p.handleClearCacheEvent)
-			if err != nil {
-				log.Printf("%s: [ERROR] Failed to subscribe to %s: %v", PluginName, TopicCacheClear, err)
-			} else {
-				p.eventSubIDs = append(p.eventSubIDs, subID)
-				log.Printf("%s: [INFO] ✅ Successfully subscribed to %s events (edge mode), subID=%s", PluginName, TopicCacheClear, subID)
-			}
-		} else {
-			// Control mode: subscribe to cache clear acknowledgements from edges
-			log.Printf("%s: [INFO] Control mode: subscribing to %s", PluginName, TopicCacheClearAck)
-			subID, err := events.Subscribe(TopicCacheClearAck, p.handleClearCacheAck)
-			if err != nil {
-				log.Printf("%s: [ERROR] Failed to subscribe to %s: %v", PluginName, TopicCacheClearAck, err)
-			} else {
-				p.eventSubIDs = append(p.eventSubIDs, subID)
-				log.Printf("%s: [INFO] ✅ Successfully subscribed to %s events (control mode), subID=%s", PluginName, TopicCacheClearAck, subID)
-			}
-		}
+		p.eventSubIDs = append(p.eventSubIDs, subID)
+		p.logger().Debug("Subscribed to events", "topic", topic, "subscription_id", subID)
 	})
 }
 
@@ -298,7 +310,7 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 				"plugin": PluginName,
 			}, "broker-warmup", nil)
 			if err != nil {
-				log.Printf("%s: Broker warmup failed: %v", PluginName, err)
+				p.logger().Warn("Broker warmup failed", "error", err)
 			}
 		}
 	})
@@ -365,7 +377,7 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 		if streaming {
 			sseResponse, err := ConvertJSONToSSE(entry.Response, vendor)
 			if err != nil {
-				log.Printf("%s: Failed to convert cache to SSE: %v", PluginName, err)
+				p.logger().Warn("Failed to convert cached response to SSE", "error", err)
 				responseBody = nil
 			} else {
 				responseBody = sseResponse
@@ -552,7 +564,7 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 	// Reconstruct a JSON response from the SSE stream
 	reconstructedJSON, tokenUsage, err := ReconstructResponseFromSSE(req.AccumulatedResponse, vendor)
 	if err != nil {
-		log.Printf("%s: Failed to reconstruct response from SSE: %v", PluginName, err)
+		p.logger().Warn("Failed to reconstruct response from SSE", "request_id", requestID, "error", err)
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false, ErrorMessage: err.Error()}, nil
 	}
 
@@ -572,7 +584,7 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 		nil, // Use default TTL
 	)
 
-	log.Printf("%s: Cached streaming response for request %s (tokens: %d)", PluginName, requestID, tokenUsage)
+	p.logger().Debug("Cached streaming response", "request_id", requestID, "tokens", tokenUsage)
 
 	return &pb.StreamCompleteResponse{Handled: true, Cached: true}, nil
 }
@@ -660,7 +672,7 @@ func (p *LLMCachePlugin) updateEventServiceBrokerFromPayload(payload []byte) {
 	if brokerIDFloat, ok := payloadMap["_service_broker_id"].(float64); ok {
 		brokerID := uint32(brokerIDFloat)
 		if brokerID > 0 {
-			log.Printf("%s: [DEBUG] Updating event service broker ID to %d (per-request broker)", PluginName, brokerID)
+			p.logger().Debug("Using per-request event service broker", "broker_id", brokerID)
 			plugin_sdk.SetEventServiceBrokerID(brokerID)
 		}
 	}
@@ -745,15 +757,27 @@ func (p *LLMCachePlugin) isErrorResponse(body []byte) bool {
 	return false
 }
 
-// periodicCleanup runs periodic cache maintenance
-func (p *LLMCachePlugin) periodicCleanup() {
+// periodicCleanup runs periodic cache maintenance until ctx is cancelled
+func (p *LLMCachePlugin) periodicCleanup(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		p.cache.CleanupExpired()
-		p.cleanupStalePending()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.cleanup()
+		}
 	}
+}
+
+// cleanup drops expired cache entries, stale pending operations and old
+// distributed clear operations
+func (p *LLMCachePlugin) cleanup() {
+	p.cache.CleanupExpired()
+	p.cleanupStalePending()
+	p.cleanupOldOperations()
 }
 
 // cleanupStalePending removes pending operations older than 5 minutes
@@ -839,30 +863,26 @@ func (p *LLMCachePlugin) rpcGetClearStatus(payload []byte) interface{} {
 // Edge-to-Control Communication
 // ============================================================================
 
-// reportStatsToControl periodically sends cache statistics to the control plane
-// This runs only in gateway (edge) mode
-func (p *LLMCachePlugin) reportStatsToControl() {
+// reportStatsToControl periodically sends cache statistics to the control
+// plane until ctx is cancelled. This runs only in gateway (edge) mode.
+func (p *LLMCachePlugin) reportStatsToControl(ctx context.Context) {
 	interval := time.Duration(p.config.ReportIntervalSeconds) * time.Second
-	log.Printf("%s: [INFO] Stats reporter goroutine started, interval=%v", PluginName, interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-p.stopStatsReporter:
-			log.Printf("%s: [INFO] Stats reporter goroutine stopped", PluginName)
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			log.Printf("%s: [DEBUG] Stats reporter tick - sending stats", PluginName)
-			p.sendStatsToControl()
+			p.sendStatsToControl(ctx)
 		}
 	}
 }
 
 // sendStatsToControl collects current stats and sends them to the control plane
-func (p *LLMCachePlugin) sendStatsToControl() {
+func (p *LLMCachePlugin) sendStatsToControl(ctx context.Context) {
 	if p.gatewayServices == nil {
-		log.Printf("%s: [WARN] sendStatsToControl: gatewayServices is nil, skipping", PluginName)
 		return
 	}
 
@@ -881,18 +901,15 @@ func (p *LLMCachePlugin) sendStatsToControl() {
 		Timestamp:        time.Now().Unix(),
 	}
 
-	log.Printf("%s: [INFO] Sending stats to control: entries=%d, hits=%d, misses=%d, hitRate=%.2f",
-		PluginName, entries, stats.HitCount, stats.MissCount, stats.HitRate)
-
-	ctx := context.Background()
 	pendingCount, err := p.gatewayServices.SendToControlJSON(ctx, stats, "", map[string]string{
 		"metric_type": "llm_cache_stats",
 	})
 	if err != nil {
-		log.Printf("%s: [ERROR] Failed to send stats to control: %v", PluginName, err)
-	} else {
-		log.Printf("%s: [INFO] Stats sent to control successfully, pending=%d", PluginName, pendingCount)
+		p.logger().Error("Failed to send stats to control", "error", err)
+		return
 	}
+	p.logger().Debug("Sent stats to control", "entries", entries, "hits", stats.HitCount,
+		"misses", stats.MissCount, "pending", pendingCount)
 }
 
 // AcceptEdgePayload implements plugin_sdk.EdgePayloadReceiver
@@ -921,7 +938,7 @@ func (p *LLMCachePlugin) AcceptEdgePayload(ctx plugin_sdk.Context, payload *plug
 
 	// Persist to KV storage for durability across restarts
 	if err := p.saveStatsToKV(); err != nil {
-		log.Printf("%s: Failed to persist stats: %v", PluginName, err)
+		p.logger().Warn("Failed to persist edge stats", "error", err)
 	}
 
 	return true, nil
@@ -1079,7 +1096,7 @@ func (p *LLMCachePlugin) unsubscribeEvents() {
 	events := p.services.Events()
 	for _, subID := range p.eventSubIDs {
 		if err := events.Unsubscribe(subID); err != nil {
-			log.Printf("%s: Failed to unsubscribe %s: %v", PluginName, subID, err)
+			p.logger().Warn("Failed to unsubscribe from events", "subscription_id", subID, "error", err)
 		}
 	}
 	p.eventSubIDs = nil
@@ -1087,49 +1104,30 @@ func (p *LLMCachePlugin) unsubscribeEvents() {
 
 // handleClearCacheEvent is called on edge instances when control sends a clear command
 func (p *LLMCachePlugin) handleClearCacheEvent(event plugin_sdk.Event) {
-	log.Printf("%s: [INFO] handleClearCacheEvent called!", PluginName)
-	log.Printf("%s: [INFO] Event details: id=%s, topic=%s, origin=%s, dir=%v",
-		PluginName, event.ID, event.Topic, event.Origin, event.Dir)
-
 	// Parse the clear event payload
 	var clearEvent ClearCacheEvent
 	if err := json.Unmarshal(event.Payload, &clearEvent); err != nil {
-		log.Printf("%s: [ERROR] Failed to parse clear event: %v", PluginName, err)
+		p.logger().Error("Failed to parse cache clear event", "origin", event.Origin, "error", err)
 		return
 	}
-
-	log.Printf("%s: [INFO] Parsed clear event: operationID=%s, timestamp=%d",
-		PluginName, clearEvent.OperationID, clearEvent.Timestamp)
 
 	// Clear the local cache
 	p.cache.Clear()
 	p.metrics.Reset()
-
-	log.Printf("%s: [INFO] Cache cleared (operation %s)", PluginName, clearEvent.OperationID)
+	p.logger().Info("Cache cleared by control plane", "operation_id", clearEvent.OperationID)
 
 	// Send acknowledgement back to control
-	log.Printf("%s: [INFO] Sending acknowledgement back to control", PluginName)
 	p.sendClearAck(clearEvent.OperationID, true, "")
 }
 
 // sendClearAck sends an acknowledgement back to the control plane
 func (p *LLMCachePlugin) sendClearAck(operationID string, success bool, message string) {
-	log.Printf("%s: [INFO] sendClearAck called, operationID=%s, success=%v", PluginName, operationID, success)
-
-	if p.services == nil {
-		log.Printf("%s: [ERROR] Cannot send ack - p.services is nil", PluginName)
-		return
-	}
-	if p.services.Events() == nil {
-		log.Printf("%s: [ERROR] Cannot send ack - p.services.Events() is nil", PluginName)
+	if p.services == nil || p.services.Events() == nil {
+		p.logger().Error("Events service unavailable, cannot acknowledge cache clear", "operation_id", operationID)
 		return
 	}
 
-	// Get edge ID from the context (set during initialization or from metadata)
-	// In gateway mode, we need to get this from the gateway services or environment
 	edgeID := p.getEdgeID()
-	log.Printf("%s: [INFO] Using edgeID=%s for ack", PluginName, edgeID)
-
 	ack := ClearCacheAck{
 		OperationID: operationID,
 		EdgeID:      edgeID,
@@ -1138,50 +1136,28 @@ func (p *LLMCachePlugin) sendClearAck(operationID string, success bool, message 
 		Timestamp:   time.Now().Unix(),
 	}
 
-	log.Printf("%s: [INFO] Publishing ack to topic=%s, dir=DirUp", PluginName, TopicCacheClearAck)
-	ctx := context.Background()
-	if err := p.services.Events().Publish(ctx, TopicCacheClearAck, ack, plugin_sdk.DirUp); err != nil {
-		log.Printf("%s: [ERROR] Failed to send clear ack: %v", PluginName, err)
-	} else {
-		log.Printf("%s: [INFO] Successfully sent cache clear ack for operation %s from edge %s", PluginName, operationID, edgeID)
+	if err := p.services.Events().Publish(p.bgCtx, TopicCacheClearAck, ack, plugin_sdk.DirUp); err != nil {
+		p.logger().Error("Failed to send cache clear ack", "operation_id", operationID, "error", err)
+		return
 	}
+	p.logger().Debug("Sent cache clear ack", "operation_id", operationID, "edge_id", edgeID)
 }
 
-// getEdgeID retrieves the edge ID for this instance
+// getEdgeID returns EDGE_ID from the environment, else an ID generated once
+// per plugin process (a UUID, so two edges never share it).
 func (p *LLMCachePlugin) getEdgeID() string {
-	// Try to get from environment (standard way in edge mode)
-	if edgeID := getEnv("EDGE_ID", ""); edgeID != "" {
+	if edgeID := strings.TrimSpace(os.Getenv("EDGE_ID")); edgeID != "" {
 		return edgeID
 	}
-	// Fallback to a generated ID
-	return fmt.Sprintf("edge-%d", time.Now().UnixNano()%10000)
+	return p.fallbackEdgeID
 }
-
-// getEnv gets an environment variable with a default value
-func getEnv(key, defaultValue string) string {
-	if value := strings.TrimSpace(getEnvRaw(key)); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvRaw gets raw environment variable (implemented via os.Getenv)
-func getEnvRaw(key string) string {
-	// Import os at top of file if not already imported
-	return strings.TrimSpace(osGetenv(key))
-}
-
-// osGetenv is a wrapper to allow testing
-var osGetenv = os.Getenv
 
 // handleClearCacheAck is called on control plane when edge sends an ack
 func (p *LLMCachePlugin) handleClearCacheAck(event plugin_sdk.Event) {
-	log.Printf("%s: Received cache clear ack from %s", PluginName, event.Origin)
-
 	// Parse the ack payload
 	var ack ClearCacheAck
 	if err := json.Unmarshal(event.Payload, &ack); err != nil {
-		log.Printf("%s: Failed to parse clear ack: %v", PluginName, err)
+		p.logger().Error("Failed to parse cache clear ack", "origin", event.Origin, "error", err)
 		return
 	}
 
@@ -1197,17 +1173,17 @@ func (p *LLMCachePlugin) handleClearCacheAck(event plugin_sdk.Event) {
 
 	op, exists := p.clearOperations[ack.OperationID]
 	if !exists {
-		log.Printf("%s: Received ack for unknown operation %s from %s", PluginName, ack.OperationID, edgeID)
+		p.logger().Debug("Ignoring cache clear ack for unknown operation", "operation_id", ack.OperationID, "edge_id", edgeID)
 		return
 	}
 
 	if op.Completed {
-		log.Printf("%s: Operation %s already completed, ignoring late ack from %s", PluginName, ack.OperationID, edgeID)
+		p.logger().Debug("Ignoring late cache clear ack", "operation_id", ack.OperationID, "edge_id", edgeID)
 		return
 	}
 
 	op.AckEdges[edgeID] = ack.Timestamp
-	log.Printf("%s: Recorded ack from %s for operation %s (%d acks)", PluginName, edgeID, ack.OperationID, len(op.AckEdges))
+	p.logger().Debug("Recorded cache clear ack", "operation_id", ack.OperationID, "edge_id", edgeID, "acks", len(op.AckEdges))
 }
 
 // extractEdgeIDFromOrigin extracts edge ID from event origin string
@@ -1222,7 +1198,6 @@ func extractEdgeIDFromOrigin(origin string) string {
 // initiateDistributedClear starts a distributed cache clear operation
 func (p *LLMCachePlugin) initiateDistributedClear() *ClearCacheOperation {
 	operationID := fmt.Sprintf("clear-%d", time.Now().UnixNano())
-	log.Printf("%s: [DEBUG] initiateDistributedClear called, operationID=%s", PluginName, operationID)
 
 	op := &ClearCacheOperation{
 		OperationID: operationID,
@@ -1238,29 +1213,23 @@ func (p *LLMCachePlugin) initiateDistributedClear() *ClearCacheOperation {
 	p.clearOpsMu.Unlock()
 
 	// Publish the clear event to all edges
-	if p.services == nil {
-		log.Printf("%s: [DEBUG] p.services is nil, cannot publish clear event", PluginName)
-	} else if p.services.Events() == nil {
-		log.Printf("%s: [DEBUG] p.services.Events() is nil, cannot publish clear event", PluginName)
+	if p.services == nil || p.services.Events() == nil {
+		p.logger().Warn("Events service unavailable, edges will not be cleared", "operation_id", operationID)
 	} else {
 		clearEvent := ClearCacheEvent{
 			OperationID: operationID,
 			Timestamp:   time.Now().Unix(),
 		}
-
-		log.Printf("%s: [DEBUG] Publishing cache clear event to topic=%s, dir=DirDown", PluginName, TopicCacheClear)
-		ctx := context.Background()
-		if err := p.services.Events().Publish(ctx, TopicCacheClear, clearEvent, plugin_sdk.DirDown); err != nil {
-			log.Printf("%s: [ERROR] Failed to publish cache clear event: %v", PluginName, err)
+		if err := p.services.Events().Publish(p.bgCtx, TopicCacheClear, clearEvent, plugin_sdk.DirDown); err != nil {
+			p.logger().Error("Failed to publish cache clear event", "operation_id", operationID, "error", err)
 		} else {
-			log.Printf("%s: [DEBUG] Successfully published cache clear event (operation %s)", PluginName, operationID)
+			p.logger().Info("Distributed cache clear started", "operation_id", operationID)
 		}
 	}
 
 	// Also clear local cache (control plane might have its own cache in some modes)
 	p.cache.Clear()
 	p.metrics.Reset()
-	log.Printf("%s: [DEBUG] Local cache cleared", PluginName)
 
 	return op
 }

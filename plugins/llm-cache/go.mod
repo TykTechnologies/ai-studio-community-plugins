@@ -6,13 +6,15 @@ replace github.com/TykTechnologies/midsommar/v2 => ../../..
 
 replace github.com/TykTechnologies/midsommar/microgateway => ../../../microgateway
 
-require github.com/TykTechnologies/midsommar/v2 v2.0.0
+require (
+	github.com/TykTechnologies/midsommar/v2 v2.0.0
+	github.com/google/uuid v1.6.0
+)
 
 require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-plugin v1.7.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
