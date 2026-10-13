@@ -9,9 +9,19 @@ Rules are managed on the plugin's **Rate Limit Rules** page, under **Rate Limiti
 | Key | Default | Description |
 |-----|---------|-------------|
 | `storage_backend` | `kv` | `kv` (plugin KV store, counters local to each instance) or `redis` (counters shared across instances) |
-| `redis_url` | | Redis URL when `storage_backend` is `redis`. If Redis is unreachable at start-up, the plugin falls back to `kv`. |
+| `redis_url` | | Redis URL when `storage_backend` is `redis`. If Redis is unreachable at start-up, the plugin falls back to `kv`. Keep the password out of the URL: the config form shows the URL in clear. |
+| `redis_password` | | Redis password. Overrides a password in `redis_url`. The config form masks it. Accepts a reference instead of the value (see below). |
 | `window_size_seconds` | `60` | Length of the sliding window |
 | `fail_open` | `true` | What happens when the limiter cannot read its counters (see below) |
+
+### Redis password references
+
+`redis_password` can be a reference instead of the value:
+
+- `$SECRET/NAME` names a secret in AI Studio's secret store. AI Studio 2.3 and later resolve it before the plugin starts, on AI Studio only: edge gateways receive the reference, not the value. Saving a `$SECRET/` reference needs permission to read secrets.
+- `$ENV/NAME` is read from the plugin's own environment. On AI Studio 2.3 and later, pass the variable to plugins with `PLUGIN_ENV_PASSTHROUGH`. Use this on edge gateways.
+
+A reference that cannot be resolved is never sent to Redis as the password. Redis set-up fails, and the plugin falls back to `kv` and logs why. Limits are then counted per instance instead of shared, so on edge gateways give `redis_password` as `$ENV/NAME` (with the variable passed through) or as the value, never as `$SECRET/NAME`.
 
 ## Failure handling
 

@@ -12,6 +12,7 @@ type Config struct {
 	FailOpen          bool   `json:"fail_open"`
 	StorageBackend    string `json:"storage_backend"`
 	RedisURL          string `json:"redis_url"`
+	RedisPassword     string `json:"redis_password"`
 	WindowSizeSeconds int    `json:"window_size_seconds"`
 	Rules             []Rule `json:"rules,omitempty"`
 }
@@ -60,6 +61,9 @@ func ParseConfig(configMap map[string]string) *Config {
 	}
 	if v, ok := configMap["redis_url"]; ok && v != "" {
 		config.RedisURL = v
+	}
+	if v, ok := configMap["redis_password"]; ok && v != "" {
+		config.RedisPassword = v
 	}
 	if v, ok := configMap["window_size_seconds"]; ok && v != "" {
 		if val, err := parseInt(v); err == nil {
