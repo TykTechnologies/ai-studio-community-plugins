@@ -57,9 +57,14 @@ func ResolveCacheDir(configured string) (string, error) {
 		}
 	}
 
-	// Every existing ancestor up to the root. Stat follows symlinks here, so
-	// system links such as /var -> /private/var are checked at their target.
+	// Every existing ancestor up to the root. A symlinked ancestor must itself
+	// be owned by root or the plugin's user (its owner could re-point it), and
+	// is then checked at its target, so system links such as
+	// /var -> /private/var pass.
 	for p := filepath.Dir(dir); ; p = filepath.Dir(p) {
+		if link, err := os.Lstat(p); err == nil && link.Mode()&fs.ModeSymlink != 0 && ancestorUntrusted(link) {
+			return "", fmt.Errorf("cache_path %q is inside %s, a symlink owned by another user", configured, p)
+		}
 		info, err := os.Stat(p)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):

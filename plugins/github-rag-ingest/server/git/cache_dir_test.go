@@ -120,6 +120,41 @@ func TestResolveCacheDir_RefusesAncestorOwnedByAnotherUser(t *testing.T) {
 	if _, err := ResolveCacheDir(filepath.Join(parent, "repos")); err == nil || !strings.Contains(err.Error(), "owned by another user") {
 		t.Errorf("ancestor owned by another user: err = %v", err)
 	}
+	// Further up the tree too, not just the immediate parent
+	if err := os.MkdirAll(filepath.Join(parent, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveCacheDir(filepath.Join(parent, "sub", "repos")); err == nil || !strings.Contains(err.Error(), "owned by another user") {
+		t.Errorf("grandparent owned by another user: err = %v", err)
+	}
+}
+
+// A symlinked ancestor owned by another user could be re-pointed later, so
+// it is refused even though its target is fine; one owned by root or the
+// plugin's user (like /var -> /private/var) is followed.
+func TestResolveCacheDir_RefusesForeignSymlinkAncestor(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "foreignlink")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// Followed while the link is ours
+	if _, err := ResolveCacheDir(filepath.Join(link, "repos")); err != nil {
+		t.Fatalf("own symlinked ancestor refused: %v", err)
+	}
+
+	orig := ancestorUntrusted
+	t.Cleanup(func() { ancestorUntrusted = orig })
+	ancestorUntrusted = func(info os.FileInfo) bool {
+		return info.Name() == "foreignlink" && info.Mode()&os.ModeSymlink != 0
+	}
+	if _, err := ResolveCacheDir(filepath.Join(link, "repos")); err == nil || !strings.Contains(err.Error(), "symlink owned by another user") {
+		t.Errorf("foreign symlinked ancestor: err = %v", err)
+	}
 }
 
 // NewClient re-checks the directory after creating it, so one another user
