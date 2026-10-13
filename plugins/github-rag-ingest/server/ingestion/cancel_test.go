@@ -177,7 +177,7 @@ func TestCancelStopsRunningJob(t *testing.T) {
 	f := newFixture(t, 120) // > 2 batches of 50
 	job := f.newJob(t)
 	f.chunks.onStore = func(batch int) {
-		if batch == 1 && !f.engine.Cancel(job.ID) {
+		if batch == 1 && !f.engine.Cancel(job.ID, false) {
 			t.Error("Cancel did not find the running job")
 		}
 	}
@@ -204,7 +204,7 @@ func TestCancelStopsRunningJob(t *testing.T) {
 func TestCancelBeforeStart(t *testing.T) {
 	f := newFixture(t, 5)
 	job := f.newJob(t)
-	if f.engine.Cancel(job.ID) {
+	if f.engine.Cancel(job.ID, true) {
 		t.Fatal("Cancel reported a job that is not running")
 	}
 	if err := f.engine.Run(context.Background(), job); !errors.Is(err, ErrJobCancelled) {
@@ -223,7 +223,7 @@ func TestCancelFinishedJobAndHostCancel(t *testing.T) {
 	if err := f.engine.Run(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
-	if f.engine.Cancel(job.ID) {
+	if f.engine.Cancel(job.ID, false) {
 		t.Error("Cancel reported a finished job as running")
 	}
 
@@ -236,5 +236,17 @@ func TestCancelFinishedJobAndHostCancel(t *testing.T) {
 	stored, _ := f.jobs.Get(context.Background(), job2.ID)
 	if stored.Status != types.JobStatusCancelled || !strings.Contains(stored.ErrorMessage, "stopped by the host") {
 		t.Errorf("stored job %q (%q), want stopped by the host", stored.Status, stored.ErrorMessage)
+	}
+}
+
+// Cancelling a job that is neither running here nor queued (a leftover from
+// a restart) leaves no mark behind.
+func TestCancelLeftoverLeavesNoMark(t *testing.T) {
+	f := newFixture(t, 1)
+	if f.engine.Cancel("leftover-job", false) {
+		t.Fatal("Cancel reported a leftover job as running")
+	}
+	if n := f.engine.pendingCancels(); n != 0 {
+		t.Errorf("%d pending cancel marks after cancelling a leftover", n)
 	}
 }

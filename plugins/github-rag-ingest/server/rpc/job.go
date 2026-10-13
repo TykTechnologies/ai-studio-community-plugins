@@ -154,7 +154,7 @@ func (h *Handler) CancelJob(payload []byte) ([]byte, error) {
 
 	// A job running in this process is stopped; the engine records it as
 	// cancelled when it stops (between files or batches).
-	if h.engine.Cancel(job.ID) {
+	if h.engine.Cancel(job.ID, job.Status == types.JobStatusQueued) {
 		return successResponse(map[string]interface{}{
 			"message": "job cancellation requested",
 		})
