@@ -55,14 +55,17 @@ type RulesListResponse struct {
 	Count int    `json:"count"`
 }
 
+// RuleStatsResponse describes a rule's limit and window. It carries no usage
+// figure: usage is counted per dimension key (app, user, ...) where requests
+// are enforced, on each gateway's KV or in Redis, so there is no single
+// rule-level number to report from here.
 type RuleStatsResponse struct {
-	RuleID       string            `json:"rule_id"`
-	RuleName     string            `json:"rule_name"`
-	LimitType    string            `json:"limit_type"`
-	LimitValue   int               `json:"limit_value"`
-	CurrentUsage int               `json:"current_usage"`
-	WindowReset  string            `json:"window_reset"`
-	Dimensions   map[string]string `json:"dimensions,omitempty"`
+	RuleID      string            `json:"rule_id"`
+	RuleName    string            `json:"rule_name"`
+	LimitType   string            `json:"limit_type"`
+	LimitValue  int               `json:"limit_value"`
+	WindowReset string            `json:"window_reset"`
+	Dimensions  map[string]string `json:"dimensions,omitempty"`
 }
 
 // --- KV key for the rules blob ---
@@ -302,6 +305,12 @@ func (p *RateLimiterPlugin) loadRuleSetFromKV() (*RuleSet, error) {
 // two administrators edit rules concurrently.
 func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
 	ctx := context.Background()
+
+	// The KV has no compare-and-swap, so the version check and the write are
+	// made atomic within this plugin process: of two saves based on the same
+	// version, one wins and the other gets ErrVersionConflict.
+	p.rulesSaveMu.Lock()
+	defer p.rulesSaveMu.Unlock()
 
 	// Re-read current version to detect concurrent modifications
 	currentData, err := p.store.Get(ctx, rulesKVKey)

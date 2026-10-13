@@ -427,6 +427,7 @@ func (s *failingStore) IncrementIfBelow(_ context.Context, _ string, _ int, _ ti
 func (s *failingStore) DecrementCounter(_ context.Context, _ string, _ time.Duration) (int, error) {
 	return 0, fmt.Errorf("storage unavailable")
 }
+func (s *failingStore) Close() error { return nil }
 
 func TestPostAuth_FailOpen_AllowsOnStorageError(t *testing.T) {
 	p := newTestPlugin([]Rule{{

@@ -27,7 +27,7 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "rate-limiter"
-	PluginVersion = "1.0.0"
+	PluginVersion = "1.1.1"
 
 	// stripedLockCount is the fixed size of the striped lock pool.
 	// Must be a power of 2 for efficient modulo via bitmask.
@@ -41,6 +41,7 @@ type RateLimiterPlugin struct {
 	config      *Config
 	store       Store
 	mu          sync.RWMutex
+	rulesSaveMu sync.Mutex                   // serialises saveRuleSetToKV's version check and write
 	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
 	rulesCache  *RuleSet
 	rulesTTL    time.Time
@@ -107,9 +108,14 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 	return nil
 }
 
-// Shutdown cleans up resources.
+// Shutdown releases the storage backend's connections.
 func (p *RateLimiterPlugin) Shutdown(ctx plugin_sdk.Context) error {
 	log.Printf("%s: shutting down", PluginName)
+	if p.store != nil {
+		if err := p.store.Close(); err != nil {
+			log.Printf("%s: closing %s store: %v", PluginName, p.config.StorageBackend, err)
+		}
+	}
 	return nil
 }
 
