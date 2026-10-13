@@ -4,18 +4,80 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// memKV is a concurrency-safe in-memory plugin_sdk.KVService.
+var errKVUnavailable = status.Error(codes.Unavailable, "kv unavailable")
+
+// An unreadable store is a storage error, not "no usage": fail_open decides.
+func TestPostAuth_UnreadableStoreFollowsFailOpen(t *testing.T) {
+	rule := Rule{
+		ID: "r1", Name: "outage", Dimensions: []string{"global"},
+		Limit: Limit{Type: "requests", Value: 10}, Action: "enforce", Enabled: true,
+	}
+	for _, failOpen := range []bool{true, false} {
+		kv := newMemKV()
+		kv.readErr = errKVUnavailable
+		p := newTestPlugin(nil, func(c *Config) { c.FailOpen = failOpen })
+		p.store = newKVStore(kv)
+		p.rulesCache = &RuleSet{Rules: []Rule{rule}}
+		p.rulesTTL = time.Now().Add(time.Hour)
+
+		resp, err := p.HandlePostAuth(testCtx(), testEnrichedRequest(1, 0, 0, "", "req-outage"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if failOpen && (resp.Block || resp.Headers["X-RateLimit-Error"] != "storage_unavailable") {
+			t.Errorf("fail_open=true: block=%v headers=%v, want allowed with X-RateLimit-Error", resp.Block, resp.Headers)
+		}
+		if !failOpen && (!resp.Block || resp.StatusCode != 503) {
+			t.Errorf("fail_open=false: block=%v status=%d, want 503", resp.Block, resp.StatusCode)
+		}
+	}
+}
+
+// A rules read that fails is not an empty rule set: enforcement keeps the
+// cached rules and an edit is refused instead of saving over unread rules.
+func TestUnreadableRulesAreNotEmptyRules(t *testing.T) {
+	kv := newMemKV()
+	p := newTestPlugin(nil)
+	p.store = newKVStore(kv)
+	seed := []Rule{{ID: "r0", Name: "seed", Limit: Limit{Type: "requests", Value: 5}}}
+	if err := p.saveRuleSetToKV(&RuleSet{Rules: seed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.loadRulesCached(); len(got) != 1 {
+		t.Fatalf("cached rules = %v", got)
+	}
+
+	kv.readErr = errKVUnavailable
+	p.invalidateRulesCache()
+	if got := p.loadRulesCached(); len(got) != 1 {
+		t.Errorf("rules during a KV outage = %v, want the cached rule kept", got)
+	}
+	if _, err := p.loadRuleSetFromKV(); err == nil {
+		t.Error("loadRuleSetFromKV hid the read error")
+	}
+	if err := p.saveRuleSetToKV(&RuleSet{Version: 1, Rules: nil}); err == nil {
+		t.Error("saveRuleSetToKV wrote without reading the current version")
+	}
+}
+
+// memKV is a concurrency-safe in-memory plugin_sdk.KVService. Missing keys
+// fail with gRPC NotFound, like the AI Studio and Microgateway KV services;
+// readErr, when set, fails every read (an outage or a denied scope).
 type memKV struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu      sync.Mutex
+	data    map[string][]byte
+	readErr error
 }
 
 func newMemKV() *memKV { return &memKV{data: map[string][]byte{}} }
@@ -23,9 +85,12 @@ func newMemKV() *memKV { return &memKV{data: map[string][]byte{}} }
 func (m *memKV) Read(_ context.Context, key string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
 	v, ok := m.data[key]
 	if !ok {
-		return nil, errors.New("not found")
+		return nil, fmt.Errorf("failed to read KV data: %w", status.Errorf(codes.NotFound, "key not found"))
 	}
 	return v, nil
 }

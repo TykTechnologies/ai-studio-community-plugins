@@ -288,8 +288,13 @@ func (p *RateLimiterPlugin) rpcGetRuleStats(payload []byte) (interface{}, error)
 func (p *RateLimiterPlugin) loadRuleSetFromKV() (*RuleSet, error) {
 	ctx := context.Background()
 	data, err := p.store.Get(ctx, rulesKVKey)
-	if err != nil {
+	if errors.Is(err, ErrKeyNotFound) {
 		return &RuleSet{Version: 0}, nil
+	}
+	if err != nil {
+		// Not an empty rule set: enforcement keeps its cached rules, and an
+		// edit must not save over rules it could not read.
+		return nil, fmt.Errorf("failed to read rules: %w", err)
 	}
 
 	var rs RuleSet
