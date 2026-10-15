@@ -90,7 +90,8 @@ Each repository can be configured with:
 > [Environment variables](#environment-variables)) so GitHub
 > PATs and SSH keys are encrypted with AES-256-GCM before being written to KV
 > storage. Without it, secrets are stored as plaintext JSON and a warning is
-> logged at startup. Secrets stored before enabling encryption remain
+> logged at startup (AI Studio shows plugin log lines only at
+> `LOG_LEVEL=debug`). Secrets stored before enabling encryption remain
 > readable; they are re-encrypted the next time they are saved. Keep the key
 > stable — changing it makes previously encrypted secrets unreadable.
 
@@ -135,6 +136,23 @@ host variables reach the plugin only when listed in `PLUGIN_ENV_PASSTHROUGH`
 
 For example: `PLUGIN_ENV_PASSTHROUGH=GITHUB_RAG_*,SSH_KNOWN_HOSTS`. Older
 AI Studio versions pass the whole environment, so no setting is needed there.
+
+#### Upgrading AI Studio to 2.3
+
+If you set `GITHUB_RAG_SECRET_ENCRYPTION_KEY` or `GITHUB_RAG_KNOWN_HOSTS` on
+the AI Studio host, add `PLUGIN_ENV_PASSTHROUGH=GITHUB_RAG_*` (or set
+`secret_encryption_key` and `known_hosts_path` in the plugin configuration)
+**before you upgrade**. Without the encryption key:
+
+- repositories whose PATs or SSH keys were stored encrypted fail to sync with
+  `secret is encrypted but no encryption key is configured`;
+- credentials saved from then on are stored **unencrypted**.
+
+Once the key reaches the plugin again, the encrypted credentials are readable
+again. Re-enter any credential saved while the key was missing so that it is
+stored encrypted. `ALLOW_INTERNAL_NETWORK_ACCESS` is not passed by default
+either: repositories on internal addresses are refused unless you pass it
+through.
 
 ## User Interface
 
