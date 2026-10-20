@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"regexp/syntax"
 	"sort"
@@ -67,6 +68,10 @@ const (
 	RoleAssistant = "assistant"
 	RoleSystem    = "system"
 )
+
+// refusedCredential is what the edge puts in a config value whose $SECRET/
+// reference it would not resolve.
+const refusedCredential = "refused-credential-reference"
 
 // Engine kinds.
 const (
@@ -461,6 +466,23 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Policies) > MaxPolicies {
 		add("policies: %d defined, at most %d allowed", len(c.Policies), MaxPolicies)
+	}
+	// An engine URL may carry credentials: errors name the key, never the
+	// value. A $SECRET/ reference (Studio) or a refused one (edge) is
+	// checked where it is resolved.
+	engineNames := make([]string, 0, len(c.Engines))
+	for name := range c.Engines {
+		engineNames = append(engineNames, name)
+	}
+	sort.Strings(engineNames)
+	for _, name := range engineNames {
+		raw := strings.TrimSpace(c.Engines[name].URL)
+		if raw == "" || strings.HasPrefix(raw, "$SECRET/") || raw == refusedCredential {
+			continue
+		}
+		if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("engine_%s_url: must be an http or https URL", name)
+		}
 	}
 
 	names := make([]string, 0, len(c.Policies))

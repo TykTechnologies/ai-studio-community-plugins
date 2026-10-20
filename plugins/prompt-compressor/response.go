@@ -36,6 +36,8 @@ func recordOutcome(rec pendingRecord) string {
 		return records.OutcomeBypassed
 	case OutcomeFailedOpen:
 		return records.OutcomeFailedOpen
+	case OutcomeFailedClosed:
+		return records.OutcomeFailedClosed
 	}
 	return records.OutcomeSkipped
 }

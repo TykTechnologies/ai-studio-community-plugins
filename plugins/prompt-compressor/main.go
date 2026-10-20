@@ -69,6 +69,8 @@ type PromptCompressorPlugin struct {
 	// appScopeMissing: the host refused the last App lookup (apps.read is
 	// not approved), so App traffic is forwarded uncompressed.
 	appScopeMissing atomic.Bool
+	// engines holds an *engine.Client per engine setting (engineFor).
+	engines sync.Map
 
 	// rec takes completed requests (response.go); nil is records.Nop.
 	rec records.Recorder

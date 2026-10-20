@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -212,8 +213,8 @@ func TestInvalidConfigs(t *testing.T) {
 		"tool override level":     {`{"policies": {"p": {"tool_overrides": {"Bash": {"level": 9}}}}}`, "Bash"},
 		"tool override field":     {`{"policies": {"p": {"tool_overrides": {"Bash": {"drop": true}}}}}`, "drop"},
 		"engine without url":      {`{"policies": {"p": {"engine": {"name": "h", "kind": "headroom"}}}}`, "engine_h_url"},
-		"engine kind":             {`{"engine_h_url": "x", "policies": {"p": {"engine": {"name": "h", "kind": "gpt"}}}}`, "engine.kind"},
-		"engine timeout":          {`{"engine_h_url": "x", "policies": {"p": {"engine": {"name": "h", "kind": "headroom", "timeout_ms": 999999}}}}`, "timeout_ms"},
+		"engine kind":             {`{"engine_h_url": "http://x", "policies": {"p": {"engine": {"name": "h", "kind": "gpt"}}}}`, "engine.kind"},
+		"engine timeout":          {`{"engine_h_url": "http://x", "policies": {"p": {"engine": {"name": "h", "kind": "headroom", "timeout_ms": 999999}}}}`, "timeout_ms"},
 		"policies not an object":  {`{"policies": ["safe"]}`, "policies"},
 		"several errors reported": {`{"mode": "on", "failure_mode": "maybe"}`, "failure_mode"},
 	}
@@ -321,7 +322,7 @@ func TestHashChangesWithEverySetting(t *testing.T) {
 		`{"level": 2, "roles": ["tool"], "tool_overrides": {"A": {"max_unit_tokens": 10}}, "protect_patterns": ["X-[0-9]+"], "engine": {"name": "h", "kind": "llmlingua2"}}`,
 	}
 	hashOf := func(policy string) string {
-		c := mustParse(t, `{"engine_h_url": "x", "policies": {"p": `+policy+`}}`)
+		c := mustParse(t, `{"engine_h_url": "http://x", "policies": {"p": `+policy+`}}`)
 		p, _ := c.Policy("p")
 		return p.Hash()
 	}
@@ -339,11 +340,32 @@ func TestHashChangesWithEverySetting(t *testing.T) {
 }
 
 func TestEngineKeysNeedAName(t *testing.T) {
-	c := mustParse(t, `{"engine_my_engine_url": "u", "engine_my_engine_token": "t"}`)
-	if got := c.Engines["my_engine"]; got.URL != "u" || got.Token != "t" {
+	c := mustParse(t, `{"engine_my_engine_url": "http://u", "engine_my_engine_token": "t"}`)
+	if got := c.Engines["my_engine"]; got.URL != "http://u" || got.Token != "t" {
 		t.Errorf("engines = %+v", c.Engines)
 	}
 	if _, err := ParseJSON([]byte(`{"engine__url": "u"}`)); err == nil {
 		t.Error("engine key without a name was accepted")
+	}
+}
+
+// An engine URL must be http or https; the error names the key, never the
+// value, which may carry credentials. Unresolved references are left to the
+// side that resolves them.
+func TestEngineURLValidation(t *testing.T) {
+	for _, raw := range []string{"ftp://user:pw-secret@engine.internal/x", "pw-secret", "https://", "//user:pw-secret@host"} {
+		_, err := ParseJSON([]byte(`{"engine_main_url": ` + strconv.Quote(raw) + `}`))
+		if err == nil {
+			t.Errorf("%q was accepted", raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "engine_main_url: must be an http or https URL") || strings.Contains(err.Error(), "pw-secret") {
+			t.Errorf("error %q", err)
+		}
+	}
+	for _, raw := range []string{"https://user:pw@engine.internal:8080/base", "http://127.0.0.1:9000", "$SECRET/engine_url", refusedCredential} {
+		if _, err := ParseJSON([]byte(`{"engine_main_url": ` + strconv.Quote(raw) + `}`)); err != nil {
+			t.Errorf("%q: %v", raw, err)
+		}
 	}
 }

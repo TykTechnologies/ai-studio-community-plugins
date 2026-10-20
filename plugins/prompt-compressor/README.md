@@ -99,8 +99,32 @@ hold the compression settings; bindings pick a policy per LLM or App.
   kept while a refresh fails. A client bypass is recorded with reason
   `client_bypass`.
 - **Engine credentials** are top-level keys, `engine_<name>_url` and
-  `engine_<name>_token`, so `$SECRET/` references work. External engines are
-  not supported yet.
+  `engine_<name>_token`, so `$SECRET/` references work (the edge resolves
+  them; a refused reference reads as no URL or no token). The URL must be
+  http or https; errors and logs name the setting, never its value, and log
+  only the engine's host. The token, when set, goes as `Authorization:
+  Bearer`; an unauthenticated localhost sidecar needs none.
+- **Engines:** a policy's `engine` (`name`, `kind`, `timeout_ms`) sends the
+  units it selected, after levels 1–3, to an external engine:
+  - `headroom`: `POST <url>/v1/compress` with `{"messages":[{"role","content"}],
+    "model"}`, answering `{"messages":[{"content"}]}`;
+  - `llmlingua2`: `POST <url>/compressPrompt` with `{"context":[text],
+    "rate":0.5,"force_tokens":[...]}`, answering `{"compressed_prompt"}`.
+  One call per leaf, up to 8 at a time, each within `timeout_ms`. System
+  prompts, tool definitions, the newest (protected) turns, masked and
+  deduplicated results are never sent, nor is anything on an LLM where
+  level 3 is capped. Protect-pattern matches go with each call (as
+  LLMLingua-2 force tokens) and an answer that drops one, or is not
+  shorter, is not used. Redirects are not followed. Every answer is
+  memoised by the text sent, the policy hash and the engine, in process and
+  then in the edge's KV (7 days), so a unit already sent compresses to the
+  same bytes on every later turn even when the engine is down or not
+  deterministic. KV is per edge: two edges may answer differently for the
+  same unit unless the engine is deterministic.
+- **failure_mode:** `open` (the default) forwards a unit the engine failed
+  on at levels 1–3 and memoises that, so a later success cannot rewrite
+  what the vendor has cached; `closed` refuses the request with a 502
+  (`failed_closed`), in enforce mode only. Both are counted.
 - **Policy hash:** every record carries the SHA-256 of the policy's effective
   settings and the strategy version, so a reviewer can tell which rules
   changed a request. Key order and settings left at their defaults don't

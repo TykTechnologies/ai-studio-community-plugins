@@ -17,6 +17,9 @@ const (
 	// OutcomeFailedOpen: the hook failed (a panic) and the request went on
 	// unchanged.
 	OutcomeFailedOpen = "failed_open"
+	// OutcomeFailedClosed: the external engine failed under failure_mode
+	// closed and the request was refused with a 502.
+	OutcomeFailedClosed = "failed_closed"
 )
 
 // pendingRecord is what the post-auth hook learned about a request, for the

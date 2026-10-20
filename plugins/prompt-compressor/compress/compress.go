@@ -39,6 +39,10 @@ const (
 	// OutcomeRejected: a rewrite failed its post-check, and the original
 	// body is returned.
 	OutcomeRejected Outcome = "rejected"
+	// OutcomeEngineFailed: the external engine failed under failure_mode
+	// closed; the original body is returned and the caller refuses the
+	// request.
+	OutcomeEngineFailed Outcome = "engine_failed"
 )
 
 // Reasons a body is skipped or rejected.
@@ -48,6 +52,7 @@ const (
 	ReasonUnsupportedFormat = "unsupported_format"
 	ReasonUnreadable        = "unreadable_body"
 	ReasonPostCheck         = "post_check_failed"
+	ReasonEngineFailed      = "engine_failed"
 )
 
 // DefaultMemoBytes bounds the memo of compressed leaves.
@@ -65,6 +70,12 @@ type Input struct {
 	// Model names the tokenizer for the token estimate; empty reads the
 	// body's "model".
 	Model string
+	// Engine, when set, sends selected units to the policy's external
+	// engine after levels 1–3 (engine.Client.Run). Units in protected turns,
+	// system prompts, tool definitions, masked and deduplicated units are
+	// never sent, nor is anything when CapLossy or native context
+	// management applies.
+	Engine EngineFunc
 	// CapLossy caps the level at 2: the LLM has request filters, which
 	// would screen the cut body instead of the client's, and the config
 	// does not allow lossy levels with them (lossy_with_request_filters).
@@ -115,6 +126,10 @@ type Report struct {
 	CacheSkipped int `json:"cache_skipped,omitempty"`
 	// RequestFiltersCapped: Input.CapLossy lowered the level to 2.
 	RequestFiltersCapped bool `json:"request_filters_capped,omitempty"`
+	// EngineUnits counts leaves sent to the engine (or found in its memo);
+	// EngineFailed those it failed on, forwarded at levels 1–3.
+	EngineUnits  int `json:"engine_units,omitempty"`
+	EngineFailed int `json:"engine_failed,omitempty"`
 
 	// Units is every unit's decisions, in body order, when Input.Trace.
 	Units []UnitTrace `json:"units,omitempty"`
@@ -207,7 +222,15 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	est := EstimatorFor(in.Format, rep.Model)
 	rep.Estimator = est.Name()
 
-	edits := c.edit(p, rep.PolicyHash, sel, est, &rep)
+	edits, fixed := c.edit(p, rep.PolicyHash, sel, est, &rep)
+	if in.Engine != nil && p.Engine != nil {
+		var err error
+		if edits, err = c.runEngine(in, p, sel, edits, fixed, est, &rep); err != nil {
+			rep.Outcome, rep.Reason = OutcomeEngineFailed, ReasonEngineFailed
+			rep.UnitsCompressed, rep.Strategies, rep.TokensBefore, rep.TokensAfter = 0, nil, 0, 0
+			return in.Body, rep
+		}
+	}
 	if len(edits) == 0 {
 		rep.Outcome = OutcomeUnchanged
 		return in.Body, rep
@@ -239,6 +262,7 @@ type selected struct {
 	level  int
 	budget int  // the size budget, tokens; 0 for none
 	mask   bool // level 3: an old tool result, replaced by a placeholder
+	engine bool // may go to the external engine
 	trace  int  // the unit's entry in Report.Units, when tracing
 }
 
@@ -322,7 +346,8 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 			}
 			budget = o.MaxUnitTokens
 		}
-		if p.ProtectRecentTurns > 0 && u.Turn > lastTurn-p.ProtectRecentTurns && level > 1 {
+		protected := p.ProtectRecentTurns > 0 && u.Turn > lastTurn-p.ProtectRecentTurns
+		if protected && level > 1 {
 			level = 1
 			capped = append(capped, TraceCapProtectedTurn)
 		}
@@ -349,15 +374,19 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 		if tr != nil {
 			tr.Selected = true
 		}
-		out = append(out, selected{unit: u, level: level, budget: budget, mask: mask, trace: len(rep.Units) - 1})
+		toEngine := !mask && !protected && !rep.RequestFiltersCapped && !rep.NativeContextManagement &&
+			role != "system" && role != "developer" && u.Kind != guardrails.KindToolDefinition
+		out = append(out, selected{unit: u, level: level, budget: budget, mask: mask, engine: toEngine, trace: len(rep.Units) - 1})
 	}
 	rep.UnitsSelected = len(out)
 	return out
 }
 
-// edit returns the leaf edits for the selected units.
-func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, est *Estimator, rep *Report) []segments.Edit {
+// edit returns the leaf edits for the selected units, and the paths of the
+// leaves masked or replaced by a reference (which the engine never gets).
+func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, est *Estimator, rep *Report) ([]segments.Edit, map[string]bool) {
 	var edits []segments.Edit
+	fixed := map[string]bool{}
 	seen := map[string]segments.Unit{} // tool output text -> first unit with it
 	keep := protectFunc(p)
 	for _, s := range sel {
@@ -369,6 +398,7 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		if s.mask {
 			if e, ok := c.mask(p, u, est, rep, tr); ok {
 				edits = append(edits, e...)
+				fixed[u.Leaves[0].Path] = true
 				continue
 			}
 		}
@@ -378,6 +408,7 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 				old := u.Leaves[0].Text
 				if len(ref) < len(old) {
 					edits = append(edits, segments.Edit{Path: u.Leaves[0].Path, Old: old, New: ref})
+					fixed[u.Leaves[0].Path] = true
 					rep.count(StrategyDedupe, len(old)-len(ref))
 					rep.TokensBefore += c.countTokens(est, old)
 					rep.TokensAfter += c.countTokens(est, ref)
@@ -415,8 +446,95 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 			rep.UnitsCompressed++
 		}
 	}
-	return edits
+	return edits, fixed
 }
+
+// runEngine sends the leaves of the units that may go to the engine, as
+// levels 1–3 left them, and takes each shorter answer. Protect-pattern
+// matches go with each job, and an answer that drops one is not taken
+// (engine.Client checks). A non-nil error is a failure under failure_mode
+// closed.
+func (c *Compressor) runEngine(in Input, p *config.Policy, sel []selected, edits []segments.Edit, fixed map[string]bool, est *Estimator, rep *Report) ([]segments.Edit, error) {
+	byPath := make(map[string]int, len(edits))
+	for i, e := range edits {
+		byPath[e.Path] = i
+	}
+	type target struct {
+		leaf segments.Segment
+		edit int // index in edits, or -1
+		unit int // index in sel
+	}
+	var jobs []EngineJob
+	var targets []target
+	res := p.ProtectRegexps()
+	for si, s := range sel {
+		if !s.engine {
+			continue
+		}
+		for _, leaf := range s.unit.Leaves {
+			if fixed[leaf.Path] {
+				continue
+			}
+			t := target{leaf: leaf, edit: -1, unit: si}
+			text := leaf.Text
+			if i, ok := byPath[leaf.Path]; ok {
+				t.edit, text = i, edits[i].New
+			}
+			if text == "" {
+				continue
+			}
+			var protect []string
+			for _, re := range res {
+				protect = append(protect, re.FindAllString(text, -1)...)
+			}
+			jobs = append(jobs, EngineJob{Role: s.unit.Role, Text: text, Protect: protect})
+			targets = append(targets, t)
+		}
+	}
+	if len(jobs) == 0 {
+		return edits, nil
+	}
+	results, err := in.Engine(rep.Model, jobs)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) != len(jobs) {
+		return nil, errEngineResults
+	}
+	strategy := "engine_" + p.Engine.Kind
+	changedUnit := map[int]bool{}
+	for _, t := range targets {
+		if t.edit >= 0 {
+			changedUnit[t.unit] = true
+		}
+	}
+	rep.EngineUnits += len(jobs)
+	for i, r := range results {
+		j, t := jobs[i], targets[i]
+		if r.Failed {
+			rep.EngineFailed++
+		}
+		if !r.Changed || len(r.Text) >= len(j.Text) || !validText(r.Text) {
+			continue
+		}
+		rep.count(strategy, len(j.Text)-len(r.Text))
+		if t.edit >= 0 {
+			rep.TokensAfter += c.countTokens(est, r.Text) - c.countTokens(est, j.Text)
+			edits[t.edit].New = r.Text
+			continue
+		}
+		edits = append(edits, segments.Edit{Path: t.leaf.Path, Old: t.leaf.Text, New: r.Text})
+		rep.TokensBefore += c.countTokens(est, t.leaf.Text)
+		rep.TokensAfter += c.countTokens(est, r.Text)
+		if !changedUnit[t.unit] {
+			changedUnit[t.unit] = true
+			rep.UnitsCompressed++
+		}
+	}
+	return edits, nil
+}
+
+var errEngineResults = errors.New("compress: engine returned the wrong number of results")
 
 // mask replaces an old tool result with a placeholder. Only a result held
 // in one leaf is masked: a structured result (a JSON tool result read leaf

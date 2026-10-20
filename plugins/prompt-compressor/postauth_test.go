@@ -33,6 +33,7 @@ type llmBroker struct {
 
 func (b *llmBroker) Gateway() plugin_sdk.GatewayServices { return b.gw }
 func (b *llmBroker) Logger() plugin_sdk.LogService       { return nil }
+func (b *llmBroker) KV() plugin_sdk.KVService            { return nil }
 
 // hookPlugin is a gateway plugin with configJSON and a request context for
 // an OpenAI LLM.

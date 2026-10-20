@@ -34,11 +34,15 @@ const (
 	OutcomeSkipped    = "skipped"     // nothing to do (policy off, format, size…)
 	OutcomeRejected   = "rejected"    // a rewrite failed its post-check
 	OutcomeFailedOpen = "failed_open" // an error or panic; the original was sent
+	// OutcomeFailedClosed: the engine failed under failure_mode closed and
+	// the request was refused.
+	OutcomeFailedClosed = "failed_closed"
 )
 
 var validOutcomes = map[string]bool{
 	OutcomeApplied: true, OutcomeAudit: true, OutcomeBypassed: true,
 	OutcomeSkipped: true, OutcomeRejected: true, OutcomeFailedOpen: true,
+	OutcomeFailedClosed: true,
 }
 
 // StrategyStats counts one strategy's work.

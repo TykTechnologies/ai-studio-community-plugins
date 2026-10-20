@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/engine"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	"github.com/TykTechnologies/midsommar/v2/pkg/requestformat"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
@@ -45,7 +48,7 @@ var (
 
 // hookCounters count what the post-auth hook did, for getStatus.
 type hookCounters struct {
-	seen, compressed, unchanged, skipped, rejected, bypassed, failedOpen atomic.Uint64
+	seen, compressed, unchanged, skipped, rejected, bypassed, failedOpen, failedClosed atomic.Uint64
 }
 
 func (c *hookCounters) count(outcome string) {
@@ -62,6 +65,8 @@ func (c *hookCounters) count(outcome string) {
 		c.bypassed.Add(1)
 	case OutcomeFailedOpen:
 		c.failedOpen.Add(1)
+	case OutcomeFailedClosed:
+		c.failedClosed.Add(1)
 	}
 }
 
@@ -69,7 +74,7 @@ func (c *hookCounters) snapshot() map[string]uint64 {
 	return map[string]uint64{
 		"seen": c.seen.Load(), "compressed": c.compressed.Load(), "unchanged": c.unchanged.Load(),
 		"skipped": c.skipped.Load(), "rejected": c.rejected.Load(), "bypassed": c.bypassed.Load(),
-		"failed_open": c.failedOpen.Load(),
+		"failed_open": c.failedOpen.Load(), "failed_closed": c.failedClosed.Load(),
 	}
 }
 
@@ -140,6 +145,9 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	// Request filters screen the body the plugin forwards, so lossy levels
 	// stay off where they may run, and where the plugin cannot tell.
 	capLossy := !cfg.LossyWithRequestFilters && (!llmKnown || llm.HasRequestFilters)
+	// failure_mode closed refuses a request only when it would have been
+	// sent compressed; audit mode never refuses one.
+	failClosed := cfg.FailureMode == config.FailClosed && cfg.Mode == config.ModeEnforce
 	start := time.Now()
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
@@ -147,9 +155,19 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		CapLossy:     capLossy,
+		Engine:       p.engineFor(ctx, cfg, res, failClosed),
 	})
 	rec.CompressMicros = time.Since(start).Microseconds()
 	rec.Outcome, rec.Report = string(rep.Outcome), rep
+	if rep.Outcome == compress.OutcomeEngineFailed {
+		rec.Outcome = OutcomeFailedClosed
+		p.counters.count(rec.Outcome)
+		// No upstream response follows, so the record completes now.
+		p.complete(rec, usage{}, false, false)
+		return &pb.PluginResponse{Block: true, StatusCode: http.StatusBadGateway,
+			Headers: map[string]string{"Content-Type": "application/json"},
+			Body:    []byte(`{"error":{"message":"request compression is unavailable","type":"compression_engine_unavailable"}}`)}, nil
+	}
 	p.counters.count(rec.Outcome)
 
 	if cfg.Mode == config.ModeEnforce && rep.Outcome == compress.OutcomeCompressed && len(out) > 0 {
@@ -159,6 +177,37 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	}
 	p.pending.put(rec)
 	return passThrough, nil
+}
+
+// engineFor returns the compressor's engine hook for a policy that names
+// an engine; nil otherwise. Clients, and so their memos, live across
+// requests, one per engine setting.
+func (p *PromptCompressorPlugin) engineFor(ctx plugin_sdk.Context, cfg *config.Config, res config.Resolution, failClosed bool) compress.EngineFunc {
+	if res.Policy == nil || res.Policy.Engine == nil {
+		return nil
+	}
+	ref := *res.Policy.Engine
+	creds := cfg.Engines[ref.Name]
+	key := engine.Key(ref, creds)
+	c, ok := p.engines.Load(key)
+	if !ok {
+		c, _ = p.engines.LoadOrStore(key, engine.New(ref, creds))
+	}
+	mode := config.FailOpen
+	if failClosed {
+		mode = config.FailClosed
+	}
+	var kv engine.KV
+	if ctx.Services != nil {
+		if s := ctx.Services.KV(); s != nil {
+			kv = s
+		}
+	}
+	base := ctx.Context
+	if base == nil {
+		base = context.Background()
+	}
+	return c.(*engine.Client).Run(base, kv, p.logger().Warn, res.Hash, mode)
 }
 
 // headerValue looks a header up whatever its case.
