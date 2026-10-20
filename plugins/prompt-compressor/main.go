@@ -58,10 +58,13 @@ type PromptCompressorPlugin struct {
 
 	// The request path (postauth.go): compressFn is the compressor's
 	// Compress (replaced in tests), pending holds what post_auth learned
-	// for the response hook, llms caches LLM endpoints.
+	// for the response hook, llms caches LLM endpoints and appMeta App
+	// metadata, both fetched in the background so a request never waits
+	// for the host.
 	compressFn func(compress.Input) ([]byte, compress.Report)
 	pending    *pendingCache
-	llms       *llmInfoCache
+	llms       *asyncLookup[uint32, llmInfo]
+	appMeta    *asyncLookup[uint32, string]
 	counters   hookCounters
 
 	// rec takes completed requests (response.go); nil is records.Nop.
@@ -91,7 +94,7 @@ func (p *PromptCompressorPlugin) SetRecorder(r records.Recorder) {
 
 // NewPromptCompressorPlugin creates a new plugin instance
 func NewPromptCompressorPlugin() *PromptCompressorPlugin {
-	return &PromptCompressorPlugin{
+	p := &PromptCompressorPlugin{
 		BasePlugin: plugin_sdk.NewBasePlugin(
 			PluginName,
 			PluginVersion,
@@ -99,9 +102,11 @@ func NewPromptCompressorPlugin() *PromptCompressorPlugin {
 		),
 		compressFn: compress.New(compress.Options{}).Compress,
 		pending:    newPendingCache(pendingTTL, pendingMaxSize),
-		llms:       newLLMInfoCache(fetchLLMInfo),
 		telemetry:  newTelemetry(),
 	}
+	p.llms = p.newLLMLookup()
+	p.appMeta = p.newAppMetadataLookup()
+	return p
 }
 
 // logger returns the SDK's levelled logger. Before Initialize, and in tests
@@ -149,7 +154,7 @@ func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap ma
 	}
 
 	cfg, err := loadConfig(configMap)
-	next := &pluginState{config: cfg, configErr: err, apps: config.NewAppPolicyCache(fetchAppMetadata)}
+	next := &pluginState{config: cfg, configErr: err, apps: config.NewAppPolicyCache(p.appMetadata)}
 	if prev := p.current.Load(); prev != nil && prev.apps != nil {
 		next.apps = prev.apps
 	}

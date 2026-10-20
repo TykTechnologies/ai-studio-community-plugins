@@ -95,6 +95,23 @@ func rpcValidateConfig(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{"valid": len(problems) == 0, "errors": problems})
 }
 
+// newAppMetadataLookup caches App metadata, fetched in the background.
+func (p *PromptCompressorPlugin) newAppMetadataLookup() *asyncLookup[uint32, string] {
+	return newAsyncLookup(config.DefaultAppPolicyTTL, config.DefaultAppPolicyErrorTTL, config.DefaultAppPolicyMax, func(appID uint32) (string, error) {
+		return fetchAppMetadata(withServices(p.backgroundContext()), appID)
+	})
+}
+
+// appMetadata is the AppPolicyCache fetcher: the App's metadata when it is
+// known, errLookupPending (no override, briefly cached) while it is
+// fetched. It waits for the host at most lookupWait.
+func (p *PromptCompressorPlugin) appMetadata(_ context.Context, appID uint32) (string, error) {
+	if md, ok := p.appMeta.getWait(appID, lookupWait); ok {
+		return md, nil
+	}
+	return "", errLookupPending
+}
+
 // fetchAppMetadata reads an App's metadata JSON through the host. It needs
 // the apps.read scope; until the admin approves it, the call fails and the
 // App has no override.

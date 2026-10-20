@@ -18,6 +18,10 @@ import (
 // a policy or raise a level.
 const BypassHeader = "X-Tyk-Compression"
 
+// lookupWait bounds how long a request waits for a host lookup (an LLM's
+// endpoint, an App's metadata) the plugin does not have yet.
+const lookupWait = 25 * time.Millisecond
+
 var (
 	errNoBroker           = errors.New("no service broker")
 	errUnexpectedResponse = errors.New("unexpected service response")
@@ -104,7 +108,8 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 
-	format := requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), p.llms.get(ctx, ctx.LLMID).Endpoint)
+	llm, _ := p.llms.getWait(ctx.LLMID, lookupWait)
+	format := requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), llm.Endpoint)
 	start := time.Now()
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
