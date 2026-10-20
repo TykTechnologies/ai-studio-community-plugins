@@ -13,6 +13,7 @@ import (
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
@@ -62,6 +63,26 @@ type PromptCompressorPlugin struct {
 	pending    *pendingCache
 	llms       *llmInfoCache
 	counters   hookCounters
+
+	// rec takes completed requests (response.go); nil is records.Nop.
+	rec records.Recorder
+}
+
+// recorder returns the recorder completed requests go to.
+func (p *PromptCompressorPlugin) recorder() records.Recorder {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.rec == nil {
+		return records.Nop{}
+	}
+	return p.rec
+}
+
+// SetRecorder sets where completed requests go.
+func (p *PromptCompressorPlugin) SetRecorder(r records.Recorder) {
+	p.mu.Lock()
+	p.rec = r
+	p.mu.Unlock()
 }
 
 // NewPromptCompressorPlugin creates a new plugin instance
@@ -152,23 +173,6 @@ func (p *PromptCompressorPlugin) OnSessionReady(ctx plugin_sdk.Context) {
 // OnSessionClosing implements plugin_sdk.SessionAware
 func (p *PromptCompressorPlugin) OnSessionClosing(ctx plugin_sdk.Context) {
 	p.logger().Debug("Session closing")
-}
-
-// OnBeforeWriteHeaders implements plugin_sdk.ResponseHandler. The host
-// replaces the whole header set when Modified is true, so a no-op leaves
-// Modified false.
-func (p *PromptCompressorPlugin) OnBeforeWriteHeaders(ctx plugin_sdk.Context, req *pb.HeadersRequest) (*pb.HeadersResponse, error) {
-	return &pb.HeadersResponse{Modified: false}, nil
-}
-
-// OnBeforeWrite implements plugin_sdk.ResponseHandler
-func (p *PromptCompressorPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseWriteRequest) (*pb.ResponseWriteResponse, error) {
-	return &pb.ResponseWriteResponse{Modified: false}, nil
-}
-
-// OnStreamComplete implements plugin_sdk.StreamCompleteHandler
-func (p *PromptCompressorPlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.StreamCompleteRequest) (*pb.StreamCompleteResponse, error) {
-	return &pb.StreamCompleteResponse{Handled: false}, nil
 }
 
 // GetManifest implements plugin_sdk.ManifestProvider

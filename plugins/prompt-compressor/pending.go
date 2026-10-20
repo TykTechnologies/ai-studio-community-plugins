@@ -37,6 +37,8 @@ type pendingRecord struct {
 	Report  compress.Report
 	// Forwarded: the compressed body went upstream (enforce mode).
 	Forwarded bool
+	// CompressMicros is the time the Compress call took.
+	CompressMicros int64
 }
 
 // Pending records live this long, or until the response hook takes them.
@@ -85,6 +87,21 @@ func (c *pendingCache) put(rec pendingRecord) {
 		c.order.Remove(front)
 		delete(c.entries, r.RequestID)
 	}
+}
+
+// peek returns the record for a request and leaves it.
+func (c *pendingCache) peek(requestID string) (pendingRecord, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.entries[requestID]
+	if !ok {
+		return pendingRecord{}, false
+	}
+	rec := *el.Value.(*pendingRecord)
+	if c.now().Sub(rec.Created) >= c.ttl {
+		return pendingRecord{}, false
+	}
+	return rec, true
 }
 
 // take returns and removes the record for a request.

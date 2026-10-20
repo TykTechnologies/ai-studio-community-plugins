@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
@@ -104,12 +105,14 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	}
 
 	format := requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), p.llms.get(ctx, ctx.LLMID).Endpoint)
+	start := time.Now()
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
 		Body:         r.GetBody(),
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 	})
+	rec.CompressMicros = time.Since(start).Microseconds()
 	rec.Outcome, rec.Report = string(rep.Outcome), rep
 	p.counters.count(rec.Outcome)
 

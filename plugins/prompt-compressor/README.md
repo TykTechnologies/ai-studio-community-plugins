@@ -18,7 +18,7 @@ Microgateway before they reach the vendor, starting with tool outputs.
 | Hook | Runtime | What it does |
 |------|---------|--------------|
 | `post_auth` | Microgateway | Compresses the request body (`enforce`) or measures what it would save (`audit`) |
-| `on_response` | Microgateway | Reads usage, including cache-read tokens, and records the savings |
+| `on_response` | Microgateway | Labels the response (`X-Tyk-Compression`: applied, audit, bypassed, skipped, rejected or failed_open; `X-Tyk-Compression-Tokens-Saved`, an estimate; `X-Tyk-Compression-Policy`, the policy's short hash), reads the usage including cache-read and cache-write tokens (buffered bodies, server-sent events and Bedrock event streams), and records the request. An OpenAI stream carries usage only with `stream_options.include_usage`; without it the record says the usage is missing |
 | `studio_ui` | Studio | Admin pages: policies, preview, savings dashboard |
 
 `post_auth` runs only on the gateway's `/llm/` endpoints. Studio's

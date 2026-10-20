@@ -93,6 +93,9 @@ type Report struct {
 	TokensBefore int    `json:"tokens_before"`
 	TokensAfter  int    `json:"tokens_after"`
 	Estimator    string `json:"estimator"`
+	// Model is the model the request names, for pricing at the edge. It is
+	// never serialised.
+	Model string `json:"-"`
 
 	// NativeContextManagement: the client asked the vendor to manage the
 	// context, so the level was capped at 1.
@@ -184,7 +187,8 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	rep.UnitsSeen = len(units)
 
 	sel := c.selectUnits(in, p, units, &rep)
-	est := EstimatorFor(in.Format, modelOf(in))
+	rep.Model = modelOf(in)
+	est := EstimatorFor(in.Format, rep.Model)
 	rep.Estimator = est.Name()
 
 	edits := c.edit(p, rep.PolicyHash, sel, est, &rep)
