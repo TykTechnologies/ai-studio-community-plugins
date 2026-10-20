@@ -97,9 +97,13 @@ written by hand are shown with the LLM they match.
   plugin's own configuration form, which needs plugin edit rights (and
   secrets read for `$SECRET/` references). Stored token values are masked on
   the page.
-- The page cannot tell which LLMs have request filters (the management API
-  does not expose them), so it notes on every level-3 policy that it is
-  skipped on such LLMs unless `lossy_with_request_filters` is set.
+- Level 3 and engines are skipped on LLMs with request filters unless
+  `lossy_with_request_filters` is set. The page marks the LLM bindings and
+  names the LLMs where that happens, from the host's LLM list
+  (`has_request_filters`, which says only whether an LLM has request
+  filters, not which). On a host too old to report it, the page shows a
+  general note on every level-3 policy instead, and computes LLM slugs the
+  way the gateway does.
 
 ## Service scopes
 

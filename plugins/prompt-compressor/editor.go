@@ -48,6 +48,33 @@ type llmOption struct {
 	Slug   string `json:"slug"`
 	Vendor string `json:"vendor"`
 	Active bool   `json:"active"`
+	// HasRequestFilters says whether the LLM has request filters (level 3
+	// and engines are then skipped unless lossy_with_request_filters).
+	// FiltersKnown is false on a host too old to report it.
+	HasRequestFilters bool `json:"has_request_filters"`
+	FiltersKnown      bool `json:"filters_known"`
+}
+
+// llmOptionFrom reads an LLM row. The slug and has_request_filters fields
+// are new in the host's LLMInfo, so they are read by name: the plugin then
+// builds against hosts with and without them. Without them the slug is
+// computed the way the gateway does today (slug.Make of the name), and the
+// filter state is unknown.
+func llmOptionFrom(l *studiopb.LLMInfo) llmOption {
+	o := llmOption{ID: l.GetId(), Name: l.GetName(), Vendor: l.GetVendor(), Active: l.GetActive()}
+	msg := l.ProtoReflect()
+	fields := msg.Descriptor().Fields()
+	if f := fields.ByName("slug"); f != nil {
+		o.Slug = msg.Get(f).String()
+	}
+	if f := fields.ByName("has_request_filters"); f != nil && o.Slug != "" {
+		o.HasRequestFilters = msg.Get(f).Bool()
+		o.FiltersKnown = true
+	}
+	if o.Slug == "" {
+		o.Slug = slug.Make(l.GetName())
+	}
+	return o
 }
 
 type appOption struct {
@@ -250,7 +277,7 @@ func listAllLLMs(ctx context.Context, api studioAPI) ([]llmOption, bool, error) 
 			return nil, false, err
 		}
 		for _, l := range rows {
-			out = append(out, llmOption{ID: l.GetId(), Name: l.GetName(), Slug: slug.Make(l.GetName()), Vendor: l.GetVendor(), Active: l.GetActive()})
+			out = append(out, llmOptionFrom(l))
 		}
 		if len(rows) < listPageSize || int64(len(out)) >= total {
 			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

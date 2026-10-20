@@ -272,6 +272,47 @@ class PromptCompressorPolicies extends HTMLElement {
     return key;
   }
 
+  _llmForKey(key) {
+    const llms = (this._view && this._view.llms) || [];
+    if (key.startsWith('llm_id:')) return llms.find((l) => l.id === Number(key.slice(7))) || null;
+    if (key.startsWith('llm:')) return llms.find((l) => l.slug === key.slice(4)) || null;
+    return null;
+  }
+
+  // _isLossy reports whether a policy runs level 3 or an engine, which the
+  // plugin skips on LLMs with request filters (unless the override is on).
+  _isLossy(name) {
+    const p = this._config.policies[name];
+    return !!p && ((p.level !== undefined && p.level >= 3) || !!p.engine);
+  }
+
+  // _llmPolicy is the policy an LLM gets from the LLM bindings and the
+  // default (App metadata and App bindings can still override it per App).
+  _llmPolicy(llm) {
+    const b = this._config.bindings;
+    return b[`llm_id:${llm.id}`] || b[`llm:${llm.slug}`] || this._config.default_policy || 'default';
+  }
+
+  // _bindingSkipsLossy reports whether an LLM binding names a lossy policy
+  // the plugin will skip there because the LLM has request filters.
+  _bindingSkipsLossy(key) {
+    if (this._config.lossy_with_request_filters) return false;
+    const llm = this._llmForKey(key);
+    return !!llm && llm.filters_known && llm.has_request_filters && this._isLossy(this._config.bindings[key]);
+  }
+
+  // _filterSkipNote explains where a lossy policy is skipped, or null.
+  _filterSkipNote(name) {
+    if (!this._isLossy(name) || this._config.lossy_with_request_filters) return null;
+    const llms = (this._view && this._view.llms) || [];
+    if (llms.some((l) => !l.filters_known)) {
+      return 'Level 3 and engines are skipped on LLMs with request filters, so the filters still see the original text.';
+    }
+    const skipped = llms.filter((l) => l.has_request_filters && this._llmPolicy(l) === name).map((l) => l.name);
+    if (skipped.length === 0) return null;
+    return `Level 3 and engines are skipped on ${skipped.join(', ')}: request filters screen the original text there.`;
+  }
+
   _addBinding(kind, id, policy) {
     if (!id) {
       this._setErrors([kind === 'llm' ? 'Pick an LLM.' : 'Pick or enter an App ID.']);
@@ -403,9 +444,8 @@ class PromptCompressorPolicies extends HTMLElement {
       for (const name of names) {
         const p = Object.assign(clone(POLICY_DEFAULTS), cfg.policies[name]);
         const notes = [];
-        if ((p.level >= 3 || p.engine) && !cfg.lossy_with_request_filters) {
-          notes.push('Level 3 and engines are skipped on LLMs with request filters, so the filters still see the original text.');
-        }
+        const skip = this._filterSkipNote(name);
+        if (skip) notes.push(skip);
         if (p.engine) notes.push('External engines are not supported yet; the engine setting is ignored.');
         if (p.tool_overrides && Object.keys(p.tool_overrides).length) notes.push(`${Object.keys(p.tool_overrides).length} tool override(s)`);
         body.appendChild(
@@ -558,7 +598,10 @@ class PromptCompressorPolicies extends HTMLElement {
       for (const key of keys) {
         body.appendChild(
           h('tr', { 'data-binding': key },
-            h('td', {}, this._bindingLabel(key), h('div', { className: 'muted' }, key)),
+            h('td', {}, this._bindingLabel(key), h('div', { className: 'muted' }, key),
+              this._bindingSkipsLossy(key)
+                ? h('div', { className: 'skip-marker', 'data-testid': 'pc-filter-skip' }, 'Level 3 and engines skipped: this LLM has request filters')
+                : null),
             h('td', {},
               h('select', {
                 disabled: readOnly,
@@ -575,7 +618,7 @@ class PromptCompressorPolicies extends HTMLElement {
     if (!readOnly) {
       const llmSelect = h('select', { 'data-testid': 'pc-bind-llm' },
         h('option', { value: '' }, 'Choose an LLM…'),
-        (view.llms || []).map((l) => h('option', { value: String(l.id) }, `${l.name} (${l.vendor}${l.active ? '' : ', inactive'})`)));
+        (view.llms || []).map((l) => h('option', { value: String(l.id) }, `${l.name} (${l.vendor}${l.active ? '' : ', inactive'}${l.has_request_filters ? ', request filters' : ''})`)));
       const llmPolicy = h('select', {}, policyNames.map((n) => h('option', { value: n }, n)));
       section.appendChild(
         h('div', { className: 'add-binding' }, 'Bind LLM', llmSelect, 'to', llmPolicy,
@@ -642,6 +685,7 @@ const STYLES = `
   th, td { text-align: left; padding: 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; font-size: 14px; }
   th { color: #6b7280; font-weight: 500; }
   .notes div { color: #92400e; font-size: 12px; }
+  .skip-marker { color: #92400e; font-size: 12px; margin-top: 2px; }
   .row-actions { white-space: nowrap; text-align: right; }
   button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; margin-right: 6px; }
   button:disabled { opacity: 0.5; cursor: default; }

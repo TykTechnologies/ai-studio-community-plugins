@@ -15,6 +15,7 @@ import (
 	"github.com/TykTechnologies/midsommar/v2/models"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	studiopb "github.com/TykTechnologies/midsommar/v2/proto/ai_studio_management"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // fakeStudio stands in for the Studio management API: the stored config,
@@ -129,6 +130,41 @@ func TestGetEditorListsEveryLLMAndApp(t *testing.T) {
 	}
 	if len(view.Problems) != 0 {
 		t.Errorf("valid stored config reported problems: %v", view.Problems)
+	}
+}
+
+// setLLMField sets an LLMInfo field by name, so the test builds against host
+// versions with and without it. It reports whether the field exists.
+func setLLMField(l *studiopb.LLMInfo, name string, v protoreflect.Value) bool {
+	f := l.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name(name))
+	if f == nil {
+		return false
+	}
+	l.ProtoReflect().Set(f, v)
+	return true
+}
+
+func TestLLMOptionUsesTheHostSlugAndFilterState(t *testing.T) {
+	// A host without the fields: the slug is computed, the filter state unknown
+	old := llmOptionFrom(&studiopb.LLMInfo{Id: 1, Name: "Claude Prod EU", Vendor: "anthropic"})
+	if old.Slug != "claude-prod-eu" || old.FiltersKnown || old.HasRequestFilters {
+		t.Errorf("without host fields: %+v", old)
+	}
+
+	withFilters := &studiopb.LLMInfo{Id: 2, Name: "Claude Prod EU"}
+	if !setLLMField(withFilters, "slug", protoreflect.ValueOfString("claude-prod-eu-2")) {
+		t.Skip("this host's LLMInfo has no slug field yet")
+	}
+	setLLMField(withFilters, "has_request_filters", protoreflect.ValueOfBool(true))
+	got := llmOptionFrom(withFilters)
+	if got.Slug != "claude-prod-eu-2" || !got.FiltersKnown || !got.HasRequestFilters {
+		t.Errorf("with host fields: %+v, want the host's slug and filters known and present", got)
+	}
+
+	none := &studiopb.LLMInfo{Id: 3, Name: "Plain"}
+	setLLMField(none, "slug", protoreflect.ValueOfString("plain"))
+	if got := llmOptionFrom(none); !got.FiltersKnown || got.HasRequestFilters {
+		t.Errorf("no filters: %+v", got)
 	}
 }
 
