@@ -9,6 +9,8 @@ replace github.com/TykTechnologies/midsommar/microgateway => ../../../microgatew
 require (
 	github.com/TykTechnologies/midsommar/v2 v2.0.0
 	github.com/gosimple/slug v1.13.1
+	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/pkoukk/tiktoken-go-loader v0.0.2
 	github.com/xeipuuv/gojsonschema v1.2.0
 )
 
@@ -32,7 +34,6 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
-	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/simonfxr/pubsub v0.0.5 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
