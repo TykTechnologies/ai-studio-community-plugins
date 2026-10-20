@@ -47,7 +47,10 @@ type Store struct {
 	// keep, whatever its batches say.
 	rowsPerHour   int
 	policyMarkers int
-	now           func() time.Time
+	// hourDocBytes is the size past which an hour document takes no new
+	// rows or names (KV values are capped at 5 MB).
+	hourDocBytes int
+	now          func() time.Time
 
 	mu    sync.Mutex
 	stats StoreStats
@@ -67,6 +70,9 @@ const (
 	// MaxPolicyMarkers bounds the policy markers; the least recently seen
 	// go first.
 	MaxPolicyMarkers = 500
+	// MaxHourDocBytes is an hour document's size budget, under the 5 MB KV
+	// value cap with room for one batch's growth in existing rows.
+	MaxHourDocBytes = 4 << 20
 	// maxClockSkew is how far ahead of Studio's clock an edge's hour may be.
 	maxClockSkew = time.Hour
 )
@@ -75,7 +81,7 @@ const (
 func NewStore(kv KV, notFound func(error) bool) *Store {
 	return &Store{
 		kv: kv, notFound: notFound, retention: DefaultRetention, batchIDsPerHour: maxBatchIDsPerHour,
-		rowsPerHour: MaxRowsPerHour, policyMarkers: MaxPolicyMarkers, now: time.Now,
+		rowsPerHour: MaxRowsPerHour, policyMarkers: MaxPolicyMarkers, hourDocBytes: MaxHourDocBytes, now: time.Now,
 	}
 }
 
@@ -215,8 +221,24 @@ func (s *Store) Stats() StoreStats {
 
 func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch string, deltas []*Delta) error {
 	key := hourKey(edge, hour)
-	doc := hourDoc{}
-	if _, err := s.read(ctx, key, &doc); err != nil {
+	raw, err := s.kv.Read(ctx, key)
+	if err != nil && !(s.notFound != nil && s.notFound(err)) {
+		return err
+	}
+	load := func() (hourDoc, error) {
+		doc := hourDoc{}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				return doc, fmt.Errorf("%s: %w", key, err)
+			}
+		}
+		if doc.Rows == nil {
+			doc.Rows = map[string]*Delta{}
+		}
+		return doc, nil
+	}
+	doc, err := load()
+	if err != nil {
 		return err
 	}
 	for _, id := range doc.Batches {
@@ -224,28 +246,61 @@ func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch st
 			return nil // already applied
 		}
 	}
-	if doc.Rows == nil {
-		doc.Rows = map[string]*Delta{}
+
+	// A document at its byte budget takes no new rows, strategy names or
+	// currencies: those fold into the overflow rows and the "other" names,
+	// so totals stay right and the document stops growing. A batch that
+	// would take it past the budget is merged again that way.
+	full := len(raw) >= s.hourDocBytes
+	folded := s.mergeRows(&doc, batch, deltas, full)
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	if !full && len(out) > s.hourDocBytes {
+		if doc, err = load(); err != nil {
+			return err
+		}
+		folded = s.mergeRows(&doc, batch, deltas, true)
+		if out, err = json.Marshal(doc); err != nil {
+			return err
+		}
+	}
+	s.stats.Folded += folded
+	_, err = s.kv.Write(ctx, key, out, nil)
+	return err
+}
+
+// mergeRows merges deltas into doc and records the batch. Past
+// rowsPerHour rows, or with full, new rows fold into an overflow row per
+// outcome; with full, merges add no new map keys either. It returns the
+// number of deltas folded.
+func (s *Store) mergeRows(doc *hourDoc, batch string, deltas []*Delta, full bool) int64 {
+	var folded int64
+	merge := func(dst, src *Delta) {
+		if full {
+			dst.mergeKnown(src)
+		} else {
+			dst.Merge(src)
+		}
 	}
 	for _, d := range deltas {
 		row := d.Row()
 		if cur := doc.Rows[row]; cur != nil {
-			cur.Merge(d)
+			merge(cur, d)
 			continue
 		}
-		// A full hour folds new rows into one overflow row per outcome, so
-		// totals stay right while the document stays bounded.
-		if len(doc.Rows) >= s.rowsPerHour {
-			s.stats.Folded++
+		if full || len(doc.Rows) >= s.rowsPerHour {
+			folded++
 			doc.Folded++
 			row = overflowRow(d.Outcome)
 			if cur := doc.Rows[row]; cur != nil {
-				cur.Merge(d)
+				merge(cur, d)
 				continue
 			}
 			cp := NewDelta(Key{Hour: d.Hour, Outcome: d.Outcome})
 			cp.Overflow = true
-			cp.Merge(d)
+			cp.mergeKnown(d)
 			cp.PolicyName, cp.Mode, cp.Level = "", "", 0
 			doc.Rows[row] = cp
 			continue
@@ -258,7 +313,7 @@ func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch st
 	if len(doc.Batches) > s.batchIDsPerHour {
 		doc.Batches = doc.Batches[len(doc.Batches)-s.batchIDsPerHour:]
 	}
-	return s.write(ctx, key, doc)
+	return folded
 }
 
 // indexHours adds hours to the edge's index and removes, with their

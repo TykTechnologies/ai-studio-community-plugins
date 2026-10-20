@@ -252,15 +252,9 @@ func (d *Delta) AddRequest(r Request, p Price, priced bool) {
 	d.TokensSaved += saved
 	if saved > 0 {
 		if priced {
-			if d.CostSaved == nil {
-				d.CostSaved = map[string]float64{}
-			}
-			d.CostSaved[p.Currency] += float64(saved) * p.Input
+			d.CostSaved = addCost(d.CostSaved, p.Currency, float64(saved)*p.Input, true)
 			if p.CacheRead > 0 {
-				if d.CostSavedAtCacheRead == nil {
-					d.CostSavedAtCacheRead = map[string]float64{}
-				}
-				d.CostSavedAtCacheRead[p.Currency] += float64(saved) * p.CacheRead
+				d.CostSavedAtCacheRead = addCost(d.CostSavedAtCacheRead, p.Currency, float64(saved)*p.CacheRead, true)
 			} else {
 				d.NoCacheReadPriceTokensSaved += saved
 			}
@@ -278,13 +272,7 @@ func (d *Delta) AddRequest(r Request, p Price, priced bool) {
 		d.Streaming++
 	}
 	for name, s := range r.Strategies {
-		if d.Strategies == nil {
-			d.Strategies = map[string]StrategyStats{}
-		}
-		cur := d.Strategies[name]
-		cur.Leaves += s.Leaves
-		cur.BytesSaved += s.BytesSaved
-		d.Strategies[name] = cur
+		d.Strategies = addStrategy(d.Strategies, name, s, true)
 	}
 	d.observeLatency(r.CompressMicros)
 }
@@ -298,8 +286,62 @@ func (d *Delta) observeLatency(micros int64) {
 	d.LatencyMicros += micros
 }
 
+// Bounds on a row's maps, whatever its deltas name: a strategy or currency
+// past the bound is added to OtherStrategy or OtherCurrency.
+const (
+	MaxStrategiesPerRow = 64
+	MaxCurrenciesPerRow = 8
+	OtherStrategy       = "other"
+	// OtherCurrency is ISO 4217's code for "no currency".
+	OtherCurrency = "XXX"
+)
+
+// addStrategy adds s under name. With allowNew false, a name the map does
+// not hold yet goes to OtherStrategy.
+func addStrategy(m map[string]StrategyStats, name string, s StrategyStats, allowNew bool) map[string]StrategyStats {
+	if m == nil {
+		m = map[string]StrategyStats{}
+	}
+	if _, ok := m[name]; !ok && name != OtherStrategy && (!allowNew || len(m) >= MaxStrategiesPerRow-1) {
+		name = OtherStrategy
+	}
+	cur := m[name]
+	cur.Leaves += s.Leaves
+	cur.BytesSaved += s.BytesSaved
+	m[name] = cur
+	return m
+}
+
+// addCost adds v under currency. With allowNew false, a currency the map
+// does not hold yet goes to OtherCurrency.
+func addCost(m map[string]float64, currency string, v float64, allowNew bool) map[string]float64 {
+	if m == nil {
+		m = map[string]float64{}
+	}
+	if !currencyCode.MatchString(currency) {
+		currency = OtherCurrency
+	}
+	if _, ok := m[currency]; !ok && currency != OtherCurrency && (!allowNew || len(m) >= MaxCurrenciesPerRow-1) {
+		currency = OtherCurrency
+	}
+	m[currency] += v
+	return m
+}
+
+var (
+	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
+	strategyName = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
+)
+
 // Merge adds o into d. The keys must match.
-func (d *Delta) Merge(o *Delta) {
+func (d *Delta) Merge(o *Delta) { d.merge(o, true) }
+
+// mergeKnown adds o into d without adding strategy or currency names d
+// does not hold: those go to OtherStrategy and OtherCurrency. Studio uses
+// it once an hour document is at its size budget.
+func (d *Delta) mergeKnown(o *Delta) { d.merge(o, false) }
+
+func (d *Delta) merge(o *Delta, allowNew bool) {
 	if o.PolicyName != "" {
 		d.PolicyName, d.Mode, d.Level = o.PolicyName, o.Mode, o.Level
 	}
@@ -313,17 +355,11 @@ func (d *Delta) Merge(o *Delta) {
 	d.TokensAfter += o.TokensAfter
 	d.TokensSaved += o.TokensSaved
 	for c, v := range o.CostSaved {
-		if d.CostSaved == nil {
-			d.CostSaved = map[string]float64{}
-		}
-		d.CostSaved[c] += v
+		d.CostSaved = addCost(d.CostSaved, c, v, allowNew)
 	}
 	d.UnpricedTokensSaved += o.UnpricedTokensSaved
 	for c, v := range o.CostSavedAtCacheRead {
-		if d.CostSavedAtCacheRead == nil {
-			d.CostSavedAtCacheRead = map[string]float64{}
-		}
-		d.CostSavedAtCacheRead[c] += v
+		d.CostSavedAtCacheRead = addCost(d.CostSavedAtCacheRead, c, v, allowNew)
 	}
 	d.NoCacheReadPriceTokensSaved += o.NoCacheReadPriceTokensSaved
 	d.InputTokens += o.InputTokens
@@ -332,13 +368,7 @@ func (d *Delta) Merge(o *Delta) {
 	d.UsageMissing += o.UsageMissing
 	d.Streaming += o.Streaming
 	for name, s := range o.Strategies {
-		if d.Strategies == nil {
-			d.Strategies = map[string]StrategyStats{}
-		}
-		cur := d.Strategies[name]
-		cur.Leaves += s.Leaves
-		cur.BytesSaved += s.BytesSaved
-		d.Strategies[name] = cur
+		d.Strategies = addStrategy(d.Strategies, name, s, allowNew)
 	}
 	if len(d.LatencyBuckets) != len(LatencyBoundsMicros)+1 {
 		d.LatencyBuckets = make([]int64, len(LatencyBoundsMicros)+1)
@@ -385,17 +415,17 @@ func (b *Batch) Validate() error {
 		if len(d.PolicyName) > 64 || len(d.Mode) > 16 {
 			return fmt.Errorf("delta %d: policy name or mode too long", i)
 		}
-		if len(d.Strategies) > 32 || len(d.CostSaved) > 4 || len(d.CostSavedAtCacheRead) > 4 || len(d.LatencyBuckets) > len(LatencyBoundsMicros)+1 {
+		if len(d.Strategies) > MaxStrategiesPerRow || len(d.CostSaved) > MaxCurrenciesPerRow || len(d.CostSavedAtCacheRead) > MaxCurrenciesPerRow || len(d.LatencyBuckets) > len(LatencyBoundsMicros)+1 {
 			return fmt.Errorf("delta %d: too many strategies, currencies or latency buckets", i)
 		}
 		for name, s := range d.Strategies {
-			if len(name) > 64 || s.Leaves < 0 || s.BytesSaved < 0 {
+			if !strategyName.MatchString(name) || s.Leaves < 0 || s.BytesSaved < 0 {
 				return fmt.Errorf("delta %d: bad strategy entry", i)
 			}
 		}
 		for _, costs := range []map[string]float64{d.CostSaved, d.CostSavedAtCacheRead} {
 			for c, v := range costs {
-				if len(c) > 8 || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+				if !currencyCode.MatchString(c) || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 					return fmt.Errorf("delta %d: bad cost entry", i)
 				}
 			}

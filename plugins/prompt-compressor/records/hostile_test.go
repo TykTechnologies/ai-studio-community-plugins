@@ -2,6 +2,7 @@ package records
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -158,6 +159,7 @@ func TestStoreStaysBoundedUnderRandomHostileBatches(t *testing.T) {
 	s.retention = 72 * time.Hour
 	s.rowsPerHour = 200
 	s.policyMarkers = 50
+	s.hourDocBytes = 64 << 10
 	ctx := context.Background()
 	rng := rand.New(rand.NewSource(49))
 	now := base
@@ -180,7 +182,17 @@ func TestStoreStaysBoundedUnderRandomHostileBatches(t *testing.T) {
 			default:
 				hour = cur - int64(rng.Intn(72))
 			}
-			deltas = append(deltas, deltaAt(hour, uint32(rng.Uint32()), hexOf(rng.Intn(1_000_000))))
+			d := deltaAt(hour, uint32(rng.Uint32()%2000), hexOf(rng.Intn(1_000_000)))
+			// Fresh strategy and currency names on every delta
+			d.Strategies = map[string]StrategyStats{}
+			for j := 0; j < 1+rng.Intn(MaxStrategiesPerRow); j++ {
+				d.Strategies[randomName(rng, "abcdefghijklmnopqrstuvwxyz0123456789_", 1+rng.Intn(40))] = StrategyStats{Leaves: 1, BytesSaved: 10}
+			}
+			d.CostSaved = map[string]float64{}
+			for j := 0; j < 1+rng.Intn(MaxCurrenciesPerRow); j++ {
+				d.CostSaved[randomName(rng, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 3)] = 0.01
+			}
+			deltas = append(deltas, d)
 		}
 		edge := fmt.Sprintf("edge-%d", rng.Intn(5))
 		if err := s.Apply(ctx, "", edge, batchOf(deltas...)); err != nil {
@@ -205,6 +217,16 @@ func TestStoreStaysBoundedUnderRandomHostileBatches(t *testing.T) {
 			if len(doc.Rows) > s.rowsPerHour+len(validOutcomes) {
 				t.Errorf("hour %d holds %d rows", h, len(doc.Rows))
 			}
+			for _, d := range doc.Rows {
+				if len(d.Strategies) > MaxStrategiesPerRow || len(d.CostSaved) > MaxCurrenciesPerRow {
+					t.Errorf("hour %d row holds %d strategies and %d currencies", h, len(d.Strategies), len(d.CostSaved))
+				}
+			}
+			raw, _ := kv.Read(ctx, hourKey(edge, h))
+			// The budget, plus one batch's "other" names in existing rows
+			if limit := s.hourDocBytes + (s.rowsPerHour+len(validOutcomes))*200; len(raw) > limit {
+				t.Errorf("hour %d document is %d bytes, bound %d", h, len(raw), limit)
+			}
 		}
 		if docs := kv.keys("pc:e:" + edge + ":h:"); len(docs) > len(held) {
 			t.Errorf("edge %d has %d hour documents for %d indexed hours", e, len(docs), len(held))
@@ -219,5 +241,104 @@ func TestStoreStaysBoundedUnderRandomHostileBatches(t *testing.T) {
 	_, _ = s.read(ctx, "pc:edges", &edges)
 	if len(edges.Edges) > 5 {
 		t.Errorf("%d edges indexed", len(edges.Edges))
+	}
+}
+
+func randomName(rng *rand.Rand, alphabet string, n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = alphabet[rng.Intn(len(alphabet))]
+	}
+	return string(b)
+}
+
+// A row merging fresh strategy and currency names from many batches keeps
+// at most MaxStrategiesPerRow and MaxCurrenciesPerRow, the rest under
+// "other" and "XXX", with nothing lost from the totals.
+func TestRowMapsAreBounded(t *testing.T) {
+	s, _ := newStore(base)
+	ctx := context.Background()
+	hour := HourOf(base)
+	rng := rand.New(rand.NewSource(1))
+	var leaves int64
+	var cost float64
+	for i := 0; i < 50; i++ {
+		d := deltaAt(hour, 1, hashA)
+		d.Strategies = map[string]StrategyStats{}
+		for j := 0; j < 32; j++ {
+			d.Strategies[randomName(rng, "abcdefghij", 12)] = StrategyStats{Leaves: 1}
+			leaves++
+		}
+		d.CostSaved = map[string]float64{randomName(rng, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 3): 1}
+		cost++
+		if err := s.Apply(ctx, "", "e", batchOf(d)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _, _ := s.Query(ctx, hour, hour)
+	if len(rows) != 1 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	r := rows[0]
+	var gotLeaves int64
+	for _, st := range r.Strategies {
+		gotLeaves += st.Leaves
+	}
+	var gotCost float64
+	for _, v := range r.CostSaved {
+		gotCost += v
+	}
+	if len(r.Strategies) > MaxStrategiesPerRow || r.Strategies[OtherStrategy].Leaves == 0 || gotLeaves != leaves {
+		t.Errorf("%d strategies, other %d, leaves %d of %d", len(r.Strategies), r.Strategies[OtherStrategy].Leaves, gotLeaves, leaves)
+	}
+	if len(r.CostSaved) > MaxCurrenciesPerRow || r.CostSaved[OtherCurrency] == 0 || gotCost != cost {
+		t.Errorf("%d currencies, other %v, cost %v of %v", len(r.CostSaved), r.CostSaved[OtherCurrency], gotCost, cost)
+	}
+
+	// Names outside the allowed shapes are refused by Validate
+	bad := batchOf(deltaAt(hour, 1, hashA))
+	bad.Deltas[0].Strategies = map[string]StrategyStats{"Not A Name": {Leaves: 1}}
+	if bad.Validate() == nil {
+		t.Error("a strategy name with spaces was accepted")
+	}
+	bad = batchOf(deltaAt(hour, 1, hashA))
+	bad.Deltas[0].CostSaved = map[string]float64{"usd": 1}
+	if bad.Validate() == nil {
+		t.Error("a lower-case currency was accepted")
+	}
+}
+
+// Once an hour document reaches its byte budget it takes no new rows or
+// names, and the totals keep adding up.
+func TestHourDocumentByteBudget(t *testing.T) {
+	s, kv := newStore(base)
+	s.hourDocBytes = 32 << 10
+	ctx := context.Background()
+	hour := HourOf(base)
+	var want int64
+	for i := 0; i < 400; i++ {
+		d := deltaAt(hour, uint32(i+1), hashA)
+		want += d.Requests
+		if err := s.Apply(ctx, "", "e", batchOf(d)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := kv.Read(ctx, hourKey(EdgeKey("", "e"), hour))
+	// Past the budget only the bounded batch-id list (35 bytes an id) and
+	// the overflow row still grow
+	doc := hourDoc{}
+	_ = json.Unmarshal(raw, &doc)
+	if limit := s.hourDocBytes + len(doc.Batches)*36 + 8<<10; len(raw) > limit {
+		t.Errorf("hour document is %d bytes with a %d budget (bound %d)", len(raw), s.hourDocBytes, limit)
+	}
+	if len(doc.Rows) >= 400 {
+		t.Errorf("%d rows: no row was folded at the budget", len(doc.Rows))
+	}
+	if s.Stats().Folded == 0 {
+		t.Error("nothing folded at the byte budget")
+	}
+	rows, _, _ := s.Query(ctx, hour, hour)
+	if requests, _ := total(rows); requests != want {
+		t.Errorf("%d requests kept of %d", requests, want)
 	}
 }
