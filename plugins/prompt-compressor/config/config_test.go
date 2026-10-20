@@ -189,7 +189,7 @@ func TestInvalidConfigs(t *testing.T) {
 		"zero body limit":         {`{"max_body_bytes": 0}`, "max_body_bytes"},
 		"cache drop above 1":      {`{"cache_drop_alert": 1.5}`, "cache_drop_alert"},
 		"cache drop not a number": {`{"cache_drop_alert": "x"}`, "cache_drop_alert"},
-		"unknown default policy":  {`{"default_policy": "nope"}`, `default_policy: no policy named "nope"`},
+		"unknown default policy":  {`{"default_policy": "nope"}`, "default_policy: names no defined policy"},
 		"unknown bound policy":    {`{"bindings": {"llm:a": "nope"}}`, `names unknown policy "nope"`},
 		"bad binding key":         {`{"bindings": {"team:1": "off"}}`, "must start with"},
 		"bad app id":              {`{"bindings": {"app:abc": "off"}}`, "App ID"},

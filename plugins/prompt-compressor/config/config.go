@@ -285,20 +285,24 @@ func parse(m map[string]string, strict bool) (*Config, error) {
 		case "default_policy":
 			c.DefaultPolicy = v
 		case "policies":
-			c.Policies, err = parsePolicies([]byte(v))
+			if err = mustBeObject(v); err == nil {
+				c.Policies, err = parsePolicies([]byte(v))
+			}
 		case "bindings":
 			c.Bindings = map[string]string{}
-			err = strictUnmarshal([]byte(v), &c.Bindings)
+			if err = mustBeObject(v); err == nil {
+				err = strictUnmarshal([]byte(v), &c.Bindings)
+			}
 		case "allow_client_bypass":
-			c.AllowClientBypass, err = strconv.ParseBool(v)
+			c.AllowClientBypass, err = parseBool(v)
 		case "failure_mode":
 			c.FailureMode = FailureMode(v)
 		case "lossy_with_request_filters":
-			c.LossyWithRequestFilters, err = strconv.ParseBool(v)
+			c.LossyWithRequestFilters, err = parseBool(v)
 		case "max_body_bytes":
 			c.MaxBodyBytes, err = parseInt(v)
 		case "cache_drop_alert":
-			c.CacheDropAlert, err = strconv.ParseFloat(v, 64)
+			c.CacheDropAlert, err = parseFloat(v)
 		default:
 			if sub := engineKeyPattern.FindStringSubmatch(k); sub != nil {
 				creds := c.Engines[sub[1]]
@@ -359,6 +363,10 @@ func ParseJSON(raw []byte) (*Config, error) {
 	return parse(m, true)
 }
 
+// Top-level values can be $SECRET/ references the host resolved, so an
+// error about one names the setting and the type it needs, never the
+// value: config errors are shown to every plugin reader.
+
 // parseInt reads an integer the host formatted with %v from a JSON number,
 // which can be in exponent form (1e+06).
 func parseInt(s string) (int, error) {
@@ -367,9 +375,35 @@ func parseInt(s string) (int, error) {
 	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil || f != math.Trunc(f) || math.Abs(f) > math.MaxInt32 {
-		return 0, fmt.Errorf("%q is not an integer", s)
+		return 0, errors.New("must be a whole number")
 	}
 	return int(f), nil
+}
+
+func parseBool(s string) (bool, error) {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return false, errors.New("must be true or false")
+	}
+	return b, nil
+}
+
+func parseFloat(s string) (float64, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, errors.New("must be a number")
+	}
+	return f, nil
+}
+
+// mustBeObject refuses a value that is not a JSON object before it is
+// decoded, so a decoding error cannot quote it.
+func mustBeObject(s string) error {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "{") {
+		return errors.New("must be an object")
+	}
+	return nil
 }
 
 func strictUnmarshal(raw []byte, v interface{}) error {
@@ -412,12 +446,12 @@ func (c *Config) Validate() error {
 	switch c.Mode {
 	case ModeOff, ModeAudit, ModeEnforce:
 	default:
-		add("mode: %q is not one of off, audit, enforce", c.Mode)
+		add("mode: must be one of off, audit, enforce")
 	}
 	switch c.FailureMode {
 	case FailOpen, FailClosed:
 	default:
-		add("failure_mode: %q is not one of open, closed", c.FailureMode)
+		add("failure_mode: must be open or closed")
 	}
 	if c.MaxBodyBytes <= 0 {
 		add("max_body_bytes: must be positive")
@@ -453,7 +487,7 @@ func (c *Config) Validate() error {
 	}
 
 	if _, ok := c.Policy(c.DefaultPolicy); !ok {
-		add("default_policy: no policy named %q", c.DefaultPolicy)
+		add("default_policy: names no defined policy (or default, or off)")
 	}
 
 	if len(c.Bindings) > MaxBindings {
