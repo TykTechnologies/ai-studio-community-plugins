@@ -117,7 +117,10 @@ func (p *PromptCompressorPlugin) rpcSaveConfig(api studioAPI, pluginID uint32, p
 	if err != nil {
 		return nil, err
 	}
-	next := unmaskTokens(req.Config, stored)
+	next, refused := editorMerge(req.Config, stored)
+	if len(refused) > 0 {
+		return map[string]interface{}{"saved": false, "errors": refused}, nil
+	}
 	raw, err := json.Marshal(next)
 	if err != nil {
 		return nil, fmt.Errorf("saveConfig: %w", err)
@@ -171,19 +174,72 @@ func maskTokens(cfg map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// unmaskTokens puts the stored value back for every token the editor sent
-// masked.
-func unmaskTokens(next, stored map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(next))
+// editorKeys are the top-level settings the policy editor owns. Every other
+// key, engine credentials above all, belongs to the host's plugin config
+// form, which needs plugin edit rights (and secrets read for $SECRET/
+// references). Otherwise a policies:write user could point
+// engine_<name>_url elsewhere while the stored token is kept, and every
+// edge would send that token and tool outputs there.
+var editorKeys = map[string]bool{
+	"mode":                       true,
+	"default_policy":             true,
+	"policies":                   true,
+	"bindings":                   true,
+	"allow_client_bypass":        true,
+	"failure_mode":               true,
+	"lossy_with_request_filters": true,
+	"max_body_bytes":             true,
+}
+
+// editorMerge builds the config to store: the editor's keys from next, every
+// other key exactly as stored. A request that changes, adds or removes any
+// other key is refused (refused lists why), so a client that tries is told
+// rather than silently overruled. next must carry those keys as getEditor
+// showed them, tokens masked.
+func editorMerge(next, stored map[string]interface{}) (map[string]interface{}, []string) {
+	shown := maskTokens(stored)
+	var refused []string
 	for k, v := range next {
-		if s, ok := v.(string); ok && s == maskedToken && engineTokenKey.MatchString(k) {
-			if prev, ok := stored[k]; ok {
-				v = prev
-			}
+		if editorKeys[k] {
+			continue
 		}
-		out[k] = v
+		prev, ok := shown[k]
+		switch {
+		case !ok:
+			refused = append(refused, fmt.Sprintf("%s: the policy editor cannot add this setting", k))
+		case !sameJSON(v, prev):
+			refused = append(refused, fmt.Sprintf("%s: the policy editor cannot change this setting", k))
+		}
 	}
-	return out
+	for k := range shown {
+		if _, ok := next[k]; !ok && !editorKeys[k] {
+			refused = append(refused, fmt.Sprintf("%s: the policy editor cannot remove this setting", k))
+		}
+	}
+	if len(refused) > 0 {
+		sort.Strings(refused)
+		refused = append(refused, "Engine credentials and other settings outside the policy editor are changed in the plugin's configuration form.")
+		return nil, refused
+	}
+	out := make(map[string]interface{}, len(next)+len(stored))
+	for k, v := range stored {
+		if !editorKeys[k] {
+			out[k] = v
+		}
+	}
+	for k, v := range next {
+		if editorKeys[k] {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// sameJSON compares two decoded JSON values by their encoding.
+func sameJSON(a, b interface{}) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
 func listAllLLMs(ctx context.Context, api studioAPI) ([]llmOption, bool, error) {

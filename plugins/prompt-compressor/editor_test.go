@@ -159,15 +159,14 @@ func TestSaveConfigRoundTrip(t *testing.T) {
 
 	// Create a policy, bind it, and save; the token comes back masked
 	cfg := map[string]interface{}{
-		"mode":               "enforce",
-		"policies":           map[string]interface{}{"agents": map[string]interface{}{"level": 2, "protect_patterns": []string{"[A-Z]+-[0-9]+"}}},
-		"bindings":           map[string]interface{}{"llm_id:5": "agents", "app:9": "off"},
-		"engine_h_url":       "$SECRET/u",
-		"engine_h_token":     maskedToken,
-		"_service_broker_id": 3,
+		"mode":           "enforce",
+		"policies":       map[string]interface{}{"agents": map[string]interface{}{"level": 2, "protect_patterns": []string{"[A-Z]+-[0-9]+"}}},
+		"bindings":       map[string]interface{}{"llm_id:5": "agents", "app:9": "off"},
+		"engine_h_url":   "$SECRET/u",
+		"engine_h_token": maskedToken,
 	}
 	var res saveResult
-	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg}, &res); err != nil || !res.Saved {
+	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg, "_service_broker_id": 3}, &res); err != nil || !res.Saved {
 		t.Fatalf("saveConfig = %+v, %v", res, err)
 	}
 	var stored map[string]interface{}
@@ -216,17 +215,105 @@ func TestSaveConfigRejectsInvalidConfigWithAMessage(t *testing.T) {
 		t.Errorf("an invalid config was stored: %v", studio.updates)
 	}
 
-	// The host refusing the update (a new $SECRET/ reference) is reported
-	studio.updateErr = errors.New("plugins may not add secret references to plugin configuration (keys: engine_h_token)")
+	// The host refusing the update is reported
+	studio.updateErr = errors.New("failed to update plugin config: database is locked")
 	var res saveResult
-	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": map[string]interface{}{"engine_h_token": "$SECRET/x"}}, &res); err != nil {
+	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": map[string]interface{}{"mode": "off"}}, &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Saved || len(res.Errors) != 1 || !strings.Contains(res.Errors[0], "secret references") {
+	if res.Saved || len(res.Errors) != 1 || !strings.Contains(res.Errors[0], "database is locked") {
 		t.Errorf("host refusal = %+v", res)
 	}
 	if err := callRPC(t, p, "saveConfig", map[string]interface{}{}, &res); err == nil {
 		t.Error("saveConfig without a config did not fail")
+	}
+}
+
+// eac.45: the editor owns only the policy keys. A policies:write user must
+// not repoint an engine URL and keep the stored token, nor add or remove
+// engine keys.
+func TestSaveConfigRefusesEngineAndOtherNonEditorKeys(t *testing.T) {
+	const stored = `{"mode": "audit", "engine_main_url": "http://10.0.0.5:8787", "engine_main_token": "$SECRET/ENGINE_TOKEN",
+	  "engine_z_url": "http://10.0.0.6:8787", "engine_z_token": "plaintext-z"}`
+	// What getEditor showed: the literal token masked, the reference as is
+	shown := func() map[string]interface{} {
+		return map[string]interface{}{
+			"mode": "audit", "engine_main_url": "http://10.0.0.5:8787", "engine_main_token": "$SECRET/ENGINE_TOKEN",
+			"engine_z_url": "http://10.0.0.6:8787", "engine_z_token": maskedToken,
+		}
+	}
+	cases := map[string]struct {
+		edit     func(c map[string]interface{})
+		wantText string
+	}{
+		"repoint url, masked token": {func(c map[string]interface{}) {
+			c["engine_z_url"] = "https://attacker.example"
+		}, "engine_z_url: the policy editor cannot change"},
+		"repoint url, kept reference": {func(c map[string]interface{}) {
+			c["engine_main_url"] = "https://attacker.example"
+		}, "engine_main_url: the policy editor cannot change"},
+		"replace a reference": {func(c map[string]interface{}) {
+			c["engine_main_token"] = "$SECRET/OTHER"
+		}, "engine_main_token: the policy editor cannot change"},
+		"unmask a token": {func(c map[string]interface{}) {
+			c["engine_z_token"] = "guess"
+		}, "engine_z_token: the policy editor cannot change"},
+		"add a literal key": {func(c map[string]interface{}) {
+			c["engine_y_url"] = "https://attacker.example"
+			c["engine_y_token"] = "literal"
+		}, "engine_y_token: the policy editor cannot add"},
+		"delete a key": {func(c map[string]interface{}) {
+			delete(c, "engine_z_url")
+		}, "engine_z_url: the policy editor cannot remove"},
+		"add another key": {func(c map[string]interface{}) {
+			c["log_text_samples"] = true
+		}, "log_text_samples: the policy editor cannot add"},
+	}
+	for name, tc := range cases {
+		studio := &fakeStudio{stored: stored}
+		p := editorPlugin(t, studio)
+		cfg := shown()
+		cfg["policies"] = map[string]interface{}{"agents": map[string]interface{}{"level": 2}}
+		tc.edit(cfg)
+		var res saveResult
+		if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg}, &res); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if res.Saved || !strings.Contains(strings.Join(res.Errors, "\n"), tc.wantText) {
+			t.Errorf("%s: saveConfig = %+v, want refused with %q", name, res, tc.wantText)
+		}
+		if len(studio.updates) != 0 || studio.stored != stored {
+			t.Errorf("%s: the stored config changed: %s", name, studio.stored)
+		}
+	}
+
+	// Unchanged, as shown: the policy change saves and every other key is
+	// stored exactly as it was, the literal token included
+	studio := &fakeStudio{stored: stored}
+	p := editorPlugin(t, studio)
+	cfg := shown()
+	cfg["mode"] = "enforce"
+	cfg["policies"] = map[string]interface{}{"agents": map[string]interface{}{"level": 2}}
+	var res saveResult
+	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg}, &res); err != nil || !res.Saved {
+		t.Fatalf("unchanged engine keys: %+v, %v", res, err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(studio.stored), &got); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]interface{}
+	_ = json.Unmarshal([]byte(stored), &want)
+	for k, v := range want {
+		if k == "mode" {
+			continue
+		}
+		if !sameJSON(got[k], v) {
+			t.Errorf("%s stored as %v, want %v", k, got[k], v)
+		}
+	}
+	if got["mode"] != "enforce" || got["policies"] == nil {
+		t.Errorf("the policy change was not saved: %v", got)
 	}
 }
 

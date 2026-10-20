@@ -48,6 +48,10 @@ hold the compression settings; bindings pick a policy per LLM or App.
 
 - **mode:** `off`, `audit` (the default: compute and record, forward the
   original) or `enforce`.
+- **allow_client_bypass** (default true) honours `X-Tyk-Compression: off`.
+  It is not a security control: bypass can only turn compression off, so the
+  vendor gets exactly the body the client sent, as without the plugin. The
+  header can never pick a policy or raise a level.
 - **Policies** start from the defaults (level 1, tool outputs only,
   `min_unit_tokens` 300, `protect_recent_turns` 1, `cache_mode`
   deterministic) and list only what they change. `off` is a reserved policy
@@ -83,9 +87,15 @@ written by hand are shown with the LLM they match.
 - Reading needs the plugin's **Compression policies read** permission,
   saving **Compression policies write** (`policies:read` / `policies:write`
   in the manifest's `rbac` block).
-- Stored engine tokens are masked in the page and kept when it saves.
-  Plugins may not add `$SECRET/` references, so add those in the plugin's own
-  configuration form.
+- The page owns only the policy settings (`mode`, `default_policy`,
+  `policies`, `bindings`, `allow_client_bypass`, `failure_mode`,
+  `lossy_with_request_filters`, `max_body_bytes`). Engine credentials and
+  any other key are stored exactly as they were, and a save that changes,
+  adds or removes one is refused: `policies:write` must not be enough to
+  point an engine URL elsewhere while keeping its token. Edit them in the
+  plugin's own configuration form, which needs plugin edit rights (and
+  secrets read for `$SECRET/` references). Stored token values are masked on
+  the page.
 - The page cannot tell which LLMs have request filters (the management API
   does not expose them), so it notes on every level-3 policy that it is
   skipped on such LLMs unless `lossy_with_request_filters` is set.
