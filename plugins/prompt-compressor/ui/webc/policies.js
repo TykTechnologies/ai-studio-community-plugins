@@ -60,6 +60,26 @@ function h(tag, props, ...children) {
   return el;
 }
 
+// statusWarnings reads what the plugin says is wrong right now (getStatus):
+// its warnings and a rejected configuration. A user who may not call
+// getStatus gets none.
+async function statusWarnings(api) {
+  try {
+    const status = await api.call('getStatus', {});
+    const out = [...(status.warnings || [])];
+    if (status.config_error) out.push(`Configuration invalid, compression is off: ${status.config_error}`);
+    return out;
+  } catch (error) {
+    return [];
+  }
+}
+
+function paintWarnings(warnings) {
+  if (!warnings || warnings.length === 0) return null;
+  return h('div', { className: 'note', role: 'status', 'data-testid': 'pc-status-warnings' },
+    warnings.map((w) => h('div', {}, '⚠ ', w)));
+}
+
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
@@ -104,6 +124,7 @@ class PromptCompressorPolicies extends HTMLElement {
   async _load() {
     this._busy = true;
     this._paint();
+    this._warnings = await statusWarnings(this.pluginAPI);
     try {
       const view = await this.pluginAPI.call('getEditor', {});
       this._view = view;
@@ -345,6 +366,8 @@ class PromptCompressorPolicies extends HTMLElement {
       page.appendChild(h('p', {}, 'Loading…'));
       return;
     }
+    const warnings = paintWarnings(this._warnings);
+    if (warnings) page.appendChild(warnings);
     page.appendChild(this._paintMessages());
     if (!this._config) return;
 

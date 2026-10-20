@@ -67,6 +67,20 @@ function fmtMoney(map) {
     .join(' + ');
 }
 
+// statusWarnings reads what the plugin says is wrong right now (getStatus):
+// its warnings and a rejected configuration. A user who may not call
+// getStatus gets none.
+async function statusWarnings(api) {
+  try {
+    const status = await api.call('getStatus', {});
+    const out = [...(status.warnings || [])];
+    if (status.config_error) out.push(`Configuration invalid, compression is off: ${status.config_error}`);
+    return out;
+  } catch (error) {
+    return [];
+  }
+}
+
 function share(cached, input) {
   return input > 0 ? fmtPct(cached / input) : '—';
 }
@@ -112,6 +126,7 @@ class PromptCompressorDashboard extends HTMLElement {
   }
 
   async _load() {
+    this._warnings = await statusWarnings(this.pluginAPI);
     try {
       const view = await this.pluginAPI.call('getSavings', { range_hours: this._range, app_id: this._appId, llm_id: this._llmId });
       this._view = view;
@@ -149,6 +164,10 @@ class PromptCompressorDashboard extends HTMLElement {
     const page = h('div', { className: 'page' });
     root.appendChild(page);
     page.appendChild(h('h1', {}, 'Compression savings'));
+    if (this._warnings && this._warnings.length) {
+      page.appendChild(h('div', { className: 'banner warning', role: 'status', 'data-testid': 'pc-status-warnings' },
+        this._warnings.map((w) => h('div', {}, h('span', { className: 'icon', 'aria-hidden': 'true' }, '⚠'), w))));
+    }
     page.appendChild(this._paintControls());
 
     if (this._error) page.appendChild(h('div', { className: 'error', role: 'alert' }, this._error));
