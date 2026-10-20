@@ -69,12 +69,14 @@ var registry = []reducer{
 	stackTraceReducer, repeatedReducer,
 }
 
-// registryFingerprint names every reducer and version, in order.
+// registryFingerprint names every reducer and version, in order, then the
+// JSON reducer (reducers_json.go) with its cut steps.
 func registryFingerprint() string {
-	parts := make([]string, len(registry))
+	parts := make([]string, len(registry), len(registry)+1)
 	for i, r := range registry {
 		parts[i] = r.name + "@" + strconv.Itoa(r.version)
 	}
+	parts = append(parts, fmt.Sprintf("%s@%d%v/d%d", jsonReducerName, jsonReducerVersion, jsonCuts, maxJSONReduceDepth))
 	return strings.Join(parts, ",")
 }
 

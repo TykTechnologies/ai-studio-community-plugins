@@ -222,8 +222,9 @@ func btoi(b bool) int {
 
 // selected is a unit to compress at a level.
 type selected struct {
-	unit  segments.Unit
-	level int
+	unit   segments.Unit
+	level  int
+	budget int // the tool's size budget, tokens; 0 for none
 }
 
 // selectUnits picks the units the policy compresses, with the level each
@@ -260,7 +261,7 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 		if !p.HasRole(role) {
 			continue
 		}
-		level := maxLevel
+		level, budget := maxLevel, 0
 		if o := p.ToolOverride(u.ToolName); u.Kind == guardrails.KindToolResult && o != nil {
 			if o.Exclude {
 				continue
@@ -268,6 +269,7 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 			if o.Level != nil {
 				level = min(*o.Level, maxLevel)
 			}
+			budget = o.MaxUnitTokens
 		}
 		if p.ProtectRecentTurns > 0 && u.Turn > lastTurn-p.ProtectRecentTurns {
 			level = min(level, 1)
@@ -279,7 +281,7 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 			rep.CacheSkipped++
 			continue
 		}
-		out = append(out, selected{unit: u, level: level})
+		out = append(out, selected{unit: u, level: level, budget: budget})
 	}
 	rep.UnitsSelected = len(out)
 	return out
@@ -310,7 +312,7 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		}
 		changed := false
 		for _, leaf := range u.Leaves {
-			v := c.compressLeaf(policyHash, pass{level: s.level, keep: keep}, leaf.Text)
+			v := c.compressLeaf(policyHash, pass{level: s.level, keep: keep, budget: s.budget}, leaf.Text)
 			if v.Same {
 				continue
 			}
@@ -347,11 +349,12 @@ func protectFunc(p *config.Policy) func(string) bool {
 }
 
 // compressLeaf runs a pass on one leaf, through the memo. The key holds the
-// effective level: the same text compresses differently at level 1 (a
-// protected recent turn) and level 2.
+// effective level and the tool's budget: the same text compresses
+// differently at level 1 (a protected recent turn) and level 2, and under
+// two tools' budgets.
 // A result that is not shorter, empty or not valid UTF-8 leaves it as is.
 func (c *Compressor) compressLeaf(policyHash string, ps pass, text string) memoValue {
-	key := newMemoKey(policyHash+"/L"+strconv.Itoa(ps.level), text)
+	key := newMemoKey(policyHash+"/L"+strconv.Itoa(ps.level)+"/B"+strconv.Itoa(ps.budget), text)
 	if v, ok := c.memo.get(key); ok {
 		return v
 	}

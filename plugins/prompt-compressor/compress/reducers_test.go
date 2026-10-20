@@ -191,8 +191,9 @@ func TestMarkerFormat(t *testing.T) {
 // that feeds every policy hash: change a reducer, bump both.
 func TestRegistryPinnedToStrategyVersion(t *testing.T) {
 	const pinned = "pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1," +
-		"terraform plan@1,kubectl@1,git diff@1,grep@1,listing@1,build log@1,stack trace@1,repeated lines@1"
-	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 3 {
+		"terraform plan@1,kubectl@1,git diff@1,grep@1,listing@1,build log@1,stack trace@1,repeated lines@1," +
+		"json@1[{5 20} {5 13} {3 9} {2 7} {1 5}]/d16"
+	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 4 {
 		t.Fatalf("registry %q at strategy version %d: update the pin here and bump config.StrategyVersion", got, config.StrategyVersion)
 	}
 }

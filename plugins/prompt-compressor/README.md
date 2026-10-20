@@ -128,8 +128,23 @@ plugin loading. The full schema is in `config.schema.json`.
   (folded with a count). Every reducer keeps the lines it keeps verbatim,
   and every line a `protect_patterns` regex matches; the log and listing
   reducers also keep every line that mentions an error, failure, panic,
-  exception or fatal. Text no reducer recognises (prose, code, JSON) gets
-  level 1 only.
+  exception or fatal. Text no reducer recognises (prose, code) gets level 1
+  only.
+- **Level 2, JSON:** an array of 20 items or more, at any depth of a JSON
+  tool output (also JSON inside a string), keeps its first and last 5 items,
+  every item whose members say it failed (`error`/`errors`/`exception` set,
+  `status`/`state`/`phase`/`result` naming a failure such as `Failed` or
+  `CrashLoopBackOff`, an HTTP `status` of 400 or more, a non-zero
+  `exit_code`, `success: false`), every item holding a numeric outlier
+  (modified z-score over 3.5) and every item a `protect_patterns` regex
+  matches. Each run of dropped items becomes one marker string, so the
+  output is still JSON; kept items are their input bytes, member order
+  included, and arrays inside a kept item stay whole.
+- **Size budgets:** `tool_overrides.<tool>.max_unit_tokens` (UTF-8 bytes / 4)
+  makes level 2 cut that tool's long JSON arrays harder until the output
+  fits: arrays of 13 items or more, then 5 items kept at each end, then 3, 2
+  and 1 (the floor). A budget the output already fits changes nothing, and
+  text reducers have no harder setting.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
@@ -148,6 +163,9 @@ failures kept; each later cut carries the number of lines it removed, or
 what it removed: `[tyk-compressed: previous line repeated 39 more times]`,
 `[tyk-compressed: 35 more matches in internal/store/ledger.go]`,
 `[tyk-compressed: 6 framework frames]`, `[tyk-compressed: 20 healthy rows]`.
+In JSON the markers are array items and count items:
+`"[tyk-compressed: json output, 12,559 → 5,346 tokens; 13 items cut]"`, then
+`"[tyk-compressed: 4 items]"`.
 
 ### Policies page
 

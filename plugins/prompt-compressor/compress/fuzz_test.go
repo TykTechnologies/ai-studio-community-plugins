@@ -44,6 +44,37 @@ func FuzzReduce(f *testing.F) {
 	})
 }
 
+// FuzzReduceJSON: the JSON reducer never panics, its output always parses
+// as JSON and is shorter, and every item it keeps is an input item.
+func FuzzReduceJSON(f *testing.F) {
+	for _, tc := range jsonCases {
+		f.Add(caseOutput(tc.kind, tc.variant, tc.size/4).Text, uint16(0))
+	}
+	f.Add(rowsJSON(30, map[int]string{9: `{"status":"failed"}`}), uint16(0))
+	f.Add(rowsJSON(12, nil), uint16(20))
+	f.Add(`{"a":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,9999999],"b":"\"[x]\""}`, uint16(3))
+	f.Fuzz(func(t *testing.T, text string, budget uint16) {
+		doc, ok := compactJSON(text)
+		if !ok {
+			return
+		}
+		out, cut := reduceJSON(doc, nil, int(budget))
+		if !cut {
+			if out != doc {
+				t.Fatal("nothing cut, changed the document")
+			}
+			return
+		}
+		if !json.Valid([]byte(out)) {
+			t.Fatalf("output is not JSON: %.200s", out)
+		}
+		if len(out) >= len(doc) {
+			t.Fatal("output is not shorter")
+		}
+		assertItemsVerbatim(t, doc, out)
+	})
+}
+
 // FuzzCompress drives selection, the strategies and Apply: Compress never
 // panics, never grows the body, returns the input itself unless it
 // compressed, and a compressed body reads in its format with its tool calls

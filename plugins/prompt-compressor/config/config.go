@@ -182,7 +182,9 @@ type ToolOverride struct {
 	Exclude bool `json:"exclude,omitempty"`
 	// Level, when set, replaces the policy's level for this tool's output.
 	Level *int `json:"level,omitempty"`
-	// MaxUnitTokens, when set, is this tool's size budget.
+	// MaxUnitTokens, when set, is this tool's size budget: level 2 cuts
+	// long JSON arrays harder, step by step, until the output fits or the
+	// reducer reaches its floor.
 	MaxUnitTokens int `json:"max_unit_tokens,omitempty"`
 }
 

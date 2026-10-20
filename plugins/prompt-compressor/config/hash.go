@@ -17,7 +17,9 @@ import (
 //	   pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1)
 //	3: level 2 log and listing reducers (terraform plan, kubectl, git diff,
 //	   grep, listing, build log, stack trace, repeated lines)
-const StrategyVersion = 3
+//	4: level 2 JSON array reducer (compress/reducers_json.go) and per-tool
+//	   size budgets
+const StrategyVersion = 4
 
 // Hash returns the policy hash carried on every savings record: the SHA-256
 // of the policy's canonical JSON (its effective settings, defaults filled

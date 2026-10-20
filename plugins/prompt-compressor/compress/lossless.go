@@ -41,11 +41,14 @@ func lossless(text string) (string, []step) {
 }
 
 // pass is one leaf's strategies at a level: level 1 the lossless ones,
-// level 2 those and a reducer (reducers.go). keep reports lines a reducer
-// must not drop (protect patterns).
+// level 2 those and a reducer (reducers.go, reducers_json.go). keep reports
+// lines and JSON items a reducer must not drop (protect patterns). budget,
+// when set, is the tool's size budget in tokens: the JSON reducer cuts
+// harder until the output fits.
 type pass struct {
-	level int
-	keep  func(string) bool
+	level  int
+	keep   func(string) bool
+	budget int
 }
 
 func (ps pass) run(text string, depth int) (string, []step) {
@@ -58,6 +61,12 @@ func (ps pass) run(text string, depth int) (string, []step) {
 			var inner []step
 			out, inner = ps.rewriteJSONStrings(out, depth+1)
 			steps = append(steps, inner...)
+		}
+		if ps.level >= 2 {
+			if r, ok := reduceJSON(out, ps.keep, ps.budget); ok {
+				steps = append(steps, step{reducerStrategy(jsonReducerName), len(out) - len(r)})
+				out = r
+			}
 		}
 		return out, steps
 	}
