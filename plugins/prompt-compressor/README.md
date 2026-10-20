@@ -161,6 +161,29 @@ written by hand are shown with the LLM they match.
   general note on every level-3 policy instead, and computes LLM slugs the
   way the gateway does.
 
+## Savings records
+
+Each edge merges its completed requests into hourly totals per App, LLM,
+policy version and outcome. Every minute, and on shutdown, it queues them
+for Studio with `SendToControl` (metadata `metric_type:
+prompt_compressor_savings`). A batch the edge cannot queue is kept for the
+next flush.
+
+- **Counts and ids only.** Records carry token, byte and unit counts,
+  strategy names, compression time and the vendor's usage counts. No prompt
+  or tool text leaves the edge. The model name is used to look up its price
+  at the edge and is not sent.
+- **Prices.** Saved tokens are priced at the model's input price (an upper
+  bound) and at its cache-read price, so the dashboard can show both next to
+  the cache-read share.
+- **Studio** merges the batches into hourly rollups in plugin KV, per edge
+  and hour. Redelivered batches change nothing. Data older than 90 days is
+  removed.
+- **Bounds.** Studio refuses hours more than an hour ahead, keeps at most
+  5,000 rows (and a 4 MB budget) per edge and hour, 64 strategy names and 8
+  currencies per row, and 500 policy markers. Anything past a bound is added
+  to an overflow row or an "other" entry, so totals stay right.
+
 ## Service scopes
 
 | Scope | Why |

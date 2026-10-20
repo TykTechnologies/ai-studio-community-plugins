@@ -66,6 +66,10 @@ type PromptCompressorPlugin struct {
 
 	// rec takes completed requests (response.go); nil is records.Nop.
 	rec records.Recorder
+
+	// telemetry sends savings records to Studio and keeps Studio's
+	// rollups (telemetry.go).
+	telemetry *telemetry
 }
 
 // recorder returns the recorder completed requests go to.
@@ -96,6 +100,7 @@ func NewPromptCompressorPlugin() *PromptCompressorPlugin {
 		compressFn: compress.New(compress.Options{}).Compress,
 		pending:    newPendingCache(pendingTTL, pendingMaxSize),
 		llms:       newLLMInfoCache(fetchLLMInfo),
+		telemetry:  newTelemetry(),
 	}
 }
 
@@ -155,19 +160,27 @@ func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap ma
 		p.logger().Warn("Ignoring unknown configuration keys", "keys", strings.Join(cfg.Ignored, ","))
 	}
 
+	p.initTelemetry(ctx)
+
 	p.logger().Info("Initialized", "runtime", ctx.Runtime, "version", PluginVersion, "mode", cfg.Mode)
 	return nil
 }
 
 // Shutdown implements plugin_sdk.Plugin. It is safe to call more than once.
+// It sends the savings records still held.
 func (p *PromptCompressorPlugin) Shutdown(ctx plugin_sdk.Context) error {
 	p.logger().Debug("Shutting down")
+	p.stopTelemetry()
 	return nil
 }
 
-// OnSessionReady implements plugin_sdk.SessionAware
+// OnSessionReady implements plugin_sdk.SessionAware. On an edge it starts
+// sending savings records, now that the broker is up.
 func (p *PromptCompressorPlugin) OnSessionReady(ctx plugin_sdk.Context) {
 	p.logger().Debug("Session broker active", "runtime", ctx.Runtime)
+	if ctx.Runtime == plugin_sdk.RuntimeGateway {
+		p.startTelemetry()
+	}
 }
 
 // OnSessionClosing implements plugin_sdk.SessionAware
