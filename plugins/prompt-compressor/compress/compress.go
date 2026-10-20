@@ -65,6 +65,10 @@ type Input struct {
 	// Model names the tokenizer for the token estimate; empty reads the
 	// body's "model".
 	Model string
+	// Trace fills Report.Units with every unit's decisions (trace.go), for
+	// the Studio preview. It never changes the body or the rest of the
+	// Report; the request path leaves it off.
+	Trace bool
 }
 
 // StrategyStats counts one strategy's work.
@@ -105,6 +109,9 @@ type Report struct {
 	ServerToolSkipped int `json:"server_tool_skipped,omitempty"`
 	// CacheSkipped counts units left alone under cache_mode skip_cached.
 	CacheSkipped int `json:"cache_skipped,omitempty"`
+
+	// Units is every unit's decisions, in body order, when Input.Trace.
+	Units []UnitTrace `json:"units,omitempty"`
 }
 
 // TokensSaved is the estimated saving.
@@ -225,6 +232,7 @@ type selected struct {
 	unit   segments.Unit
 	level  int
 	budget int // the tool's size budget, tokens; 0 for none
+	trace  int // the unit's entry in Report.Units, when tracing
 }
 
 // selectUnits picks the units the policy compresses, with the level each
@@ -247,41 +255,79 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 	}
 
 	var out []selected
-	for _, u := range units {
-		// A result the vendor produced is replayed to it as it was: the
-		// vendor may check it against encrypted or signed parts beside it.
-		if u.Undecodable || len(u.Leaves) == 0 || u.ServerTool {
-			rep.ServerToolSkipped += btoi(u.ServerTool)
-			continue
-		}
+	for i, u := range units {
 		role := u.Role
 		if u.Kind == guardrails.KindToolResult {
 			role = config.RoleTool
 		}
+		var tr *UnitTrace
+		if in.Trace {
+			rep.Units = append(rep.Units, UnitTrace{Index: i, Role: role, Kind: u.Kind, ToolName: u.ToolName, Turn: u.Turn, Tokens: selectionTokens(u.Text)})
+			tr = &rep.Units[len(rep.Units)-1]
+		}
+		skip := func(reason string) {
+			if tr != nil {
+				tr.Reason = reason
+			}
+		}
+		// A result the vendor produced is replayed to it as it was: the
+		// vendor may check it against encrypted or signed parts beside it.
+		switch {
+		case u.ServerTool:
+			rep.ServerToolSkipped++
+			skip(TraceServerTool)
+			continue
+		case u.Undecodable:
+			skip(TraceUndecodable)
+			continue
+		case len(u.Leaves) == 0:
+			skip(TraceNoText)
+			continue
+		}
 		if !p.HasRole(role) {
+			skip(TraceRole)
 			continue
 		}
 		level, budget := maxLevel, 0
+		var capped []string
+		if maxLevel < p.Level {
+			capped = append(capped, TraceCapNativeContext)
+		}
 		if o := p.ToolOverride(u.ToolName); u.Kind == guardrails.KindToolResult && o != nil {
 			if o.Exclude {
+				skip(TraceExcludedTool)
 				continue
 			}
-			if o.Level != nil {
-				level = min(*o.Level, maxLevel)
+			if o.Level != nil && *o.Level < level {
+				level = *o.Level
+				capped = append(capped, TraceCapToolOverride)
 			}
 			budget = o.MaxUnitTokens
 		}
-		if p.ProtectRecentTurns > 0 && u.Turn > lastTurn-p.ProtectRecentTurns {
-			level = min(level, 1)
+		if p.ProtectRecentTurns > 0 && u.Turn > lastTurn-p.ProtectRecentTurns && level > 1 {
+			level = 1
+			capped = append(capped, TraceCapProtectedTurn)
 		}
-		if level <= 0 || selectionTokens(u.Text) < p.MinUnitTokens {
+		if tr != nil {
+			tr.Level, tr.Capped, tr.Budget = level, capped, budget
+		}
+		if level <= 0 {
+			skip(TraceLevel0)
+			continue
+		}
+		if selectionTokens(u.Text) < p.MinUnitTokens {
+			skip(TraceBelowMinTokens)
 			continue
 		}
 		if cached != nil && u.Cached(*cached) {
 			rep.CacheSkipped++
+			skip(TraceCached)
 			continue
 		}
-		out = append(out, selected{unit: u, level: level, budget: budget})
+		if tr != nil {
+			tr.Selected = true
+		}
+		out = append(out, selected{unit: u, level: level, budget: budget, trace: len(rep.Units) - 1})
 	}
 	rep.UnitsSelected = len(out)
 	return out
@@ -294,6 +340,10 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 	keep := protectFunc(p)
 	for _, s := range sel {
 		u := s.unit
+		var tr *UnitTrace
+		if rep.Units != nil {
+			tr = &rep.Units[s.trace]
+		}
 		if p.DedupeReferences && u.Kind == guardrails.KindToolResult && len(u.Leaves) == 1 {
 			if first, ok := seen[u.Text]; ok {
 				ref := dedupeReference(first.ToolName, first.ToolCallID)
@@ -304,6 +354,12 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 					rep.TokensBefore += c.countTokens(est, old)
 					rep.TokensAfter += c.countTokens(est, ref)
 					rep.UnitsCompressed++
+					if tr != nil {
+						tr.Changed, tr.Dedupe, tr.Strategies = true, true, []string{StrategyDedupe}
+						tr.Leaves = []LeafTrace{{Path: u.Leaves[0].Path, Before: old, After: ref}}
+						tr.BytesBefore, tr.BytesAfter = len(old), len(ref)
+						tr.TokensBefore, tr.TokensAfter = c.countTokens(est, old), c.countTokens(est, ref)
+					}
 					continue
 				}
 			} else {
@@ -313,6 +369,9 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		changed := false
 		for _, leaf := range u.Leaves {
 			v := c.compressLeaf(policyHash, pass{level: s.level, keep: keep, budget: s.budget}, leaf.Text)
+			if tr != nil {
+				tr.addLeaf(c, est, leaf, v)
+			}
 			if v.Same {
 				continue
 			}
