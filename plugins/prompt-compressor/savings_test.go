@@ -84,6 +84,18 @@ func TestCacheAdjustedNeedsPricesAndUsage(t *testing.T) {
 	}
 }
 
+func TestReasonsReachTheView(t *testing.T) {
+	h := int64(500000)
+	a := row(h, 1, 3, hashOld, records.OutcomeSkipped, 4, 0, 0, 0)
+	a.Reasons = map[string]int64{"app_scope_missing": 3, "body_too_large": 1}
+	b := row(h, 2, 3, hashOld, records.OutcomeSkipped, 2, 0, 0, 0)
+	b.Reasons = map[string]int64{"app_scope_missing": 2}
+	v := summarise([]*records.Delta{a, b}, nil, h, h, savingsQuery{}, 0, nil, nil)
+	if v.ByReason["app_scope_missing"] != 5 || v.ByReason["body_too_large"] != 1 {
+		t.Errorf("by reason = %v", v.ByReason)
+	}
+}
+
 func TestEmptyAndAuditOnly(t *testing.T) {
 	v := summarise(nil, nil, 1, 24, savingsQuery{}, 0.25, nil, nil)
 	if !v.Empty || v.AuditOnly || v.Totals.Requests != 0 || v.Series == nil || v.ByApp == nil || v.Alerts == nil {

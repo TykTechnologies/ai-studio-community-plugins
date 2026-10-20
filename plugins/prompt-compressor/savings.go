@@ -113,10 +113,12 @@ type cacheAlert struct {
 }
 
 type savingsView struct {
-	From       int64                            `json:"from"`
-	To         int64                            `json:"to"`
-	Totals     savingsTotals                    `json:"totals"`
-	ByOutcome  map[string]int64                 `json:"by_outcome"`
+	From      int64            `json:"from"`
+	To        int64            `json:"to"`
+	Totals    savingsTotals    `json:"totals"`
+	ByOutcome map[string]int64 `json:"by_outcome"`
+	// ByReason counts requests by skip or reject reason.
+	ByReason   map[string]int64                 `json:"by_reason"`
 	Series     []hourPoint                      `json:"series"`
 	ByApp      []groupRow                       `json:"by_app"`
 	ByLLM      []groupRow                       `json:"by_llm"`
@@ -147,7 +149,7 @@ type savingsView struct {
 // LLM ids to names.
 func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to int64, q savingsQuery, threshold float64, appNames, llmNames map[uint32]string) *savingsView {
 	v := &savingsView{
-		From: from, To: to, ByOutcome: map[string]int64{}, Strategies: map[string]records.StrategyStats{},
+		From: from, To: to, ByOutcome: map[string]int64{}, ByReason: map[string]int64{}, Strategies: map[string]records.StrategyStats{},
 		Series: []hourPoint{}, ByApp: []groupRow{}, ByLLM: []groupRow{}, Markers: []markerView{}, Alerts: []cacheAlert{},
 		AlertThreshold: threshold,
 	}
@@ -197,6 +199,9 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 
 		t.Requests += d.Requests
 		v.ByOutcome[d.Outcome] += d.Requests
+		for name, n := range d.Reasons {
+			v.ByReason[name] += n
+		}
 		t.InputTokens += d.InputTokens
 		t.CacheReadTokens += d.CacheReadTokens
 		t.UsageMissing += d.UsageMissing

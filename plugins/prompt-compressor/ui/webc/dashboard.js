@@ -170,6 +170,16 @@ class PromptCompressorDashboard extends HTMLElement {
       );
       return;
     }
+    const scopeMissing = (v.by_reason || {}).app_scope_missing || 0;
+    if (scopeMissing > 0) {
+      page.appendChild(
+        h('div', { className: 'banner warning', role: 'alert', 'data-testid': 'pc-app-scope-missing' },
+          h('span', { className: 'icon', 'aria-hidden': 'true' }, '⚠'),
+          h('strong', {}, 'App policies are not applied. '),
+          `${fmtInt(scopeMissing)} requests could not read their App's prompt_compressor.policy override, because the plugin's apps.read scope is not approved. `,
+          'Approve the plugin\'s scopes on the Plugins page; until then those requests use the LLM bindings and the default policy.'),
+      );
+    }
     if (v.partial) {
       page.appendChild(
         h('div', { className: 'banner info', 'data-testid': 'pc-partial' },
@@ -192,6 +202,7 @@ class PromptCompressorDashboard extends HTMLElement {
     page.appendChild(this._paintGroups('By App', v.by_app, 'App', 'pc-by-app'));
     page.appendChild(this._paintGroups('By LLM', v.by_llm, 'LLM', 'pc-by-llm'));
     page.appendChild(this._paintStrategies(v.strategies));
+    page.appendChild(this._paintReasons(v.by_reason));
     if (v.overflow_excluded > 0) {
       page.appendChild(h('p', { className: 'muted' }, `${fmtInt(v.overflow_excluded)} requests in overflow rows cannot be attributed to an App or LLM and are left out of this filter.`));
     }
@@ -417,6 +428,24 @@ class PromptCompressorDashboard extends HTMLElement {
         h('td', { className: 'num' }, fmtInt(g.projected_tokens_saved)),
         h('td', { className: 'num' }, fmtMoney(g.cost_at_input)),
         h('td', { className: 'num' }, share(g.cache_read_tokens, g.input_tokens))));
+    }
+    table.appendChild(body);
+    section.appendChild(table);
+    return section;
+  }
+
+  _paintReasons(reasons) {
+    const section = h('section', {}, h('h2', {}, 'Not compressed, by reason'));
+    const entries = Object.entries(reasons || {}).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) {
+      section.appendChild(h('p', { className: 'muted' }, 'Every request in this range was compressed or had nothing to compress.'));
+      return section;
+    }
+    const table = h('table', { 'data-testid': 'pc-reasons' },
+      h('thead', {}, h('tr', {}, ['Reason', 'Requests'].map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
+    const body = h('tbody');
+    for (const [name, n] of entries) {
+      body.appendChild(h('tr', {}, h('td', {}, h('code', {}, name)), h('td', { className: 'num' }, fmtInt(n))));
     }
     table.appendChild(body);
     section.appendChild(table);

@@ -212,6 +212,9 @@ type Delta struct {
 	Streaming        int64 `json:"streaming"`
 
 	Strategies map[string]StrategyStats `json:"strategies,omitempty"`
+	// Reasons counts requests by skip or reject reason (body_too_large,
+	// client_bypass, app_scope_missing…), at most MaxReasonsPerRow names.
+	Reasons map[string]int64 `json:"reasons,omitempty"`
 	// LatencyBuckets counts Compress times per LatencyBoundsMicros bucket
 	// (len(LatencyBoundsMicros)+1 entries).
 	LatencyBuckets []int64 `json:"latency_buckets"`
@@ -274,7 +277,28 @@ func (d *Delta) AddRequest(r Request, p Price, priced bool) {
 	for name, s := range r.Strategies {
 		d.Strategies = addStrategy(d.Strategies, name, s, true)
 	}
+	if r.Reason != "" {
+		d.Reasons = addReason(d.Reasons, r.Reason, 1, true)
+	}
 	d.observeLatency(r.CompressMicros)
+}
+
+// MaxReasonsPerRow bounds a row's reason names; further names add to
+// OtherStrategy ("other").
+const MaxReasonsPerRow = 16
+
+func addReason(m map[string]int64, name string, n int64, allowNew bool) map[string]int64 {
+	if m == nil {
+		m = map[string]int64{}
+	}
+	if !strategyName.MatchString(name) {
+		name = OtherStrategy
+	}
+	if _, ok := m[name]; !ok && name != OtherStrategy && (!allowNew || len(m) >= MaxReasonsPerRow-1) {
+		name = OtherStrategy
+	}
+	m[name] += n
+	return m
 }
 
 func (d *Delta) observeLatency(micros int64) {
@@ -370,6 +394,9 @@ func (d *Delta) merge(o *Delta, allowNew bool) {
 	for name, s := range o.Strategies {
 		d.Strategies = addStrategy(d.Strategies, name, s, allowNew)
 	}
+	for name, n := range o.Reasons {
+		d.Reasons = addReason(d.Reasons, name, n, allowNew)
+	}
 	if len(d.LatencyBuckets) != len(LatencyBoundsMicros)+1 {
 		d.LatencyBuckets = make([]int64, len(LatencyBoundsMicros)+1)
 	}
@@ -421,6 +448,14 @@ func (b *Batch) Validate() error {
 		for name, s := range d.Strategies {
 			if !strategyName.MatchString(name) || s.Leaves < 0 || s.BytesSaved < 0 {
 				return fmt.Errorf("delta %d: bad strategy entry", i)
+			}
+		}
+		if len(d.Reasons) > MaxReasonsPerRow {
+			return fmt.Errorf("delta %d: too many reasons", i)
+		}
+		for name, n := range d.Reasons {
+			if !strategyName.MatchString(name) || n < 0 {
+				return fmt.Errorf("delta %d: bad reason entry", i)
 			}
 		}
 		for _, costs := range []map[string]float64{d.CostSaved, d.CostSavedAtCacheRead} {
