@@ -416,6 +416,54 @@ func TestResponsesModelItemsUntouched(t *testing.T) {
 	}
 }
 
+// Tool results the vendor produced are never selected; the client's own are.
+func TestServerToolResultsNotSelected(t *testing.T) {
+	noisy := strings.Repeat("result line   \n\n\n", 100)
+	for _, tc := range []struct {
+		format string
+		body   map[string]any
+		client string // text of the one client tool result
+	}{
+		{"anthropic", map[string]any{"messages": []any{
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "server_tool_use", "id": "s1", "name": "web_search", "input": map[string]any{}},
+				map[string]any{"type": "web_search_tool_result", "tool_use_id": "s1", "content": []any{map[string]any{"type": "web_search_result", "title": noisy, "url": "u", "encrypted_content": "E"}}},
+				map[string]any{"type": "server_tool_use", "id": "s2", "name": "code_execution", "input": map[string]any{}},
+				map[string]any{"type": "code_execution_tool_result", "tool_use_id": "s2", "content": map[string]any{"type": "code_execution_result", "stdout": noisy}},
+				map[string]any{"type": "mcp_tool_use", "id": "m1", "name": "x", "server_name": "s", "input": map[string]any{}},
+				map[string]any{"type": "mcp_tool_result", "tool_use_id": "m1", "content": []any{map[string]any{"type": "text", "text": noisy}}},
+				map[string]any{"type": "tool_use", "id": "c1", "name": "shell", "input": map[string]any{}},
+			}},
+			map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "c1", "content": noisy + "client"}}},
+		}}, noisy + "client"},
+		{"openai_responses", map[string]any{"input": []any{
+			map[string]any{"type": "file_search_call", "id": "fs", "queries": []any{"q"}, "results": []any{map[string]any{"text": noisy}}},
+			map[string]any{"type": "code_interpreter_call", "id": "ci", "code": "x", "outputs": []any{map[string]any{"type": "logs", "logs": noisy}}},
+			map[string]any{"type": "function_call", "name": "shell", "call_id": "c1", "arguments": "{}"},
+			map[string]any{"type": "function_call_output", "call_id": "c1", "output": noisy + "client"},
+		}}, noisy + "client"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			body := mustJSON(t, tc.body)
+			p := config.DefaultPolicy()
+			p.ProtectRecentTurns = 0
+			out, rep := New(Options{}).Compress(Input{Format: tc.format, Body: body, Policy: p})
+			if rep.Outcome != OutcomeCompressed || rep.UnitsCompressed != 1 || rep.ServerToolSkipped == 0 {
+				t.Fatalf("report %+v", rep)
+			}
+			units, _ := segments.ExtractUnits(tc.format, out)
+			for _, u := range units {
+				if u.ServerTool && u.Text != noisy && !strings.Contains(u.Text, noisy) {
+					t.Errorf("server tool result %s was rewritten: %q", u.ToolCallID, u.Text)
+				}
+				if !u.ServerTool && u.Kind == "tool_result" && u.Text == tc.client {
+					t.Error("the client tool result was not compressed")
+				}
+			}
+		})
+	}
+}
+
 // The post-check rejects a rewrite that breaks the body, returning the
 // original.
 func TestPostCheckRejects(t *testing.T) {

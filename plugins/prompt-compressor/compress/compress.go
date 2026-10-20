@@ -100,6 +100,8 @@ type Report struct {
 	// NativeContextManagement: the client asked the vendor to manage the
 	// context, so the level was capped at 1.
 	NativeContextManagement bool `json:"native_context_management,omitempty"`
+	// ServerToolSkipped counts vendor-produced tool results left alone.
+	ServerToolSkipped int `json:"server_tool_skipped,omitempty"`
 	// CacheSkipped counts units left alone under cache_mode skip_cached.
 	CacheSkipped int `json:"cache_skipped,omitempty"`
 }
@@ -210,6 +212,13 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	return out, rep
 }
 
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // selected is a unit to compress at a level.
 type selected struct {
 	unit  segments.Unit
@@ -237,7 +246,10 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 
 	var out []selected
 	for _, u := range units {
-		if u.Undecodable || len(u.Leaves) == 0 {
+		// A result the vendor produced is replayed to it as it was: the
+		// vendor may check it against encrypted or signed parts beside it.
+		if u.Undecodable || len(u.Leaves) == 0 || u.ServerTool {
+			rep.ServerToolSkipped += btoi(u.ServerTool)
 			continue
 		}
 		role := u.Role
