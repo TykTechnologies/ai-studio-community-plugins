@@ -669,6 +669,17 @@ class PromptCompressorPolicies extends HTMLElement {
           onChange: (e) => { cfg.max_body_bytes = intOr(e.target.value, 4194304); this._paint(); },
         }),
         h('span', { className: 'muted' }, 'Larger bodies pass through uncompressed.')),
+      h('label', { className: 'field' }, 'Cache-drop warning (fraction)',
+        h('input', {
+          type: 'number', min: 0, max: 1, step: 0.05, disabled: readOnly,
+          value: String(cfg.cache_drop_alert === undefined ? 0.25 : cfg.cache_drop_alert),
+          onChange: (e) => {
+            const x = Number.parseFloat(e.target.value);
+            cfg.cache_drop_alert = Number.isFinite(x) ? x : 0.25;
+            this._paint();
+          },
+        }),
+        h('span', { className: 'muted' }, 'The dashboard warns when the cache-read share falls by more than this fraction within an hour of a policy change. 0 turns it off.')),
       h('p', { className: 'muted' }, 'Engine credentials (engine_<name>_url and engine_<name>_token) are kept as they are. Add $SECRET/ references in the plugin\'s configuration form: plugins may not add them.'));
   }
 }

@@ -100,6 +100,7 @@ const (
 	MaxEngineTimeoutMs    = 60000
 	DefaultEngineTimeout  = 2000
 	DefaultMaxBodyBytes   = 4 << 20
+	DefaultCacheDropAlert = 0.25
 	MaxPolicyNameLen      = 64
 	maxRegexpInstructions = 5000
 )
@@ -123,6 +124,10 @@ type Config struct {
 	// MaxBodyBytes skips bodies larger than this. Limits are by size, never
 	// by time, so load never changes the output.
 	MaxBodyBytes int `json:"max_body_bytes"`
+	// CacheDropAlert is the fall in the cache-read share, as a fraction of
+	// the share before, that makes the dashboard warn within an hour of a
+	// policy change. 0 turns the warning off.
+	CacheDropAlert float64 `json:"cache_drop_alert"`
 
 	// Engines holds the engine credentials from the top-level
 	// engine_<name>_url and engine_<name>_token keys, by name. They sit at
@@ -199,6 +204,7 @@ func Default() *Config {
 		AllowClientBypass: true,
 		FailureMode:       FailOpen,
 		MaxBodyBytes:      DefaultMaxBodyBytes,
+		CacheDropAlert:    DefaultCacheDropAlert,
 		Engines:           map[string]EngineCredentials{},
 	}
 }
@@ -289,6 +295,8 @@ func parse(m map[string]string, strict bool) (*Config, error) {
 			c.LossyWithRequestFilters, err = strconv.ParseBool(v)
 		case "max_body_bytes":
 			c.MaxBodyBytes, err = parseInt(v)
+		case "cache_drop_alert":
+			c.CacheDropAlert, err = strconv.ParseFloat(v, 64)
 		default:
 			if sub := engineKeyPattern.FindStringSubmatch(k); sub != nil {
 				creds := c.Engines[sub[1]]
@@ -411,6 +419,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxBodyBytes <= 0 {
 		add("max_body_bytes: must be positive")
+	}
+	if !(c.CacheDropAlert >= 0 && c.CacheDropAlert <= 1) {
+		add("cache_drop_alert: must be between 0 and 1")
 	}
 	if len(c.Policies) > MaxPolicies {
 		add("policies: %d defined, at most %d allowed", len(c.Policies), MaxPolicies)

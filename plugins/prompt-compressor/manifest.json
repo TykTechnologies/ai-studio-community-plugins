@@ -51,13 +51,20 @@
         "label": "Compression policies",
         "description": "Read or change the compression mode, policies and their bindings to LLMs and Apps.",
         "actions": ["read", "write"]
+      },
+      {
+        "key": "savings",
+        "label": "Compression savings",
+        "description": "See the savings dashboard: tokens and estimated cost saved, cache-read share and policy changes, by App and LLM.",
+        "actions": ["read"]
       }
     ],
     "rpc_methods": {
       "getStatus": "read",
       "validateConfig": "policies:read",
       "getEditor": "policies:read",
-      "saveConfig": "policies:write"
+      "saveConfig": "policies:write",
+      "getSavings": "savings:read"
     }
   },
   "compat": {

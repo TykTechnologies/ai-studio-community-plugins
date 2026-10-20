@@ -32,6 +32,9 @@ type telemetry struct {
 
 	priceMu sync.Mutex
 	prices  map[string]cachedPrice
+
+	// names caches App and LLM names for the savings dashboard (Studio).
+	names nameCache
 }
 
 type cachedPrice struct {

@@ -216,6 +216,7 @@ var editorKeys = map[string]bool{
 	"failure_mode":               true,
 	"lossy_with_request_filters": true,
 	"max_body_bytes":             true,
+	"cache_drop_alert":           true,
 }
 
 // editorMerge builds the config to store: the editor's keys from next, every

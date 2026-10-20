@@ -66,6 +66,14 @@
       "description": "Bodies larger than this pass through uncompressed. Limits are by size, never by time, so load never changes the output.",
       "minimum": 1,
       "default": 4194304
+    },
+    "cache_drop_alert": {
+      "type": "number",
+      "title": "Cache-drop warning",
+      "description": "The dashboard warns when the cache-read share falls by more than this fraction (0.25 is a quarter of its value before) within an hour of a policy change. 0 turns the warning off.",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.25
     }
   },
   "patternProperties": {
