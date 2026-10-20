@@ -84,6 +84,17 @@ func TestCacheAdjustedNeedsPricesAndUsage(t *testing.T) {
 	}
 }
 
+func TestFailedClosedTotal(t *testing.T) {
+	h := int64(500000)
+	v := summarise([]*records.Delta{
+		row(h, 1, 3, hashOld, records.OutcomeFailedClosed, 3, 0, 0, 0),
+		row(h, 1, 3, hashOld, records.OutcomeFailedOpen, 2, 0, 0, 0),
+	}, nil, h, h, savingsQuery{}, 0, nil, nil)
+	if v.Totals.FailedClosed != 3 || v.Totals.FailedOpen != 2 {
+		t.Errorf("failed closed/open = %d/%d, want 3/2", v.Totals.FailedClosed, v.Totals.FailedOpen)
+	}
+}
+
 func TestReasonsReachTheView(t *testing.T) {
 	h := int64(500000)
 	a := row(h, 1, 3, hashOld, records.OutcomeSkipped, 4, 0, 0, 0)

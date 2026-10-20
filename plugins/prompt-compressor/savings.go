@@ -71,6 +71,9 @@ type savingsTotals struct {
 
 	Rejected   int64 `json:"rejected"`
 	FailedOpen int64 `json:"failed_open"`
+	// FailedClosed counts requests refused with a 502 because the engine
+	// failed under failure_mode closed.
+	FailedClosed int64 `json:"failed_closed"`
 	// Added latency of the Compress call, as the upper bound of the
 	// histogram bucket holding the percentile; -1 is above the last bound.
 	LatencyP50Micros int64 `json:"latency_p50_micros"`
@@ -214,6 +217,8 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 			t.Rejected += d.Requests
 		case records.OutcomeFailedOpen:
 			t.FailedOpen += d.Requests
+		case records.OutcomeFailedClosed:
+			t.FailedClosed += d.Requests
 		}
 		for i, n := range d.LatencyBuckets {
 			if i < len(latency) {

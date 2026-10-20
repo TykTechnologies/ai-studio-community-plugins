@@ -278,6 +278,9 @@ class PromptCompressorDashboard extends HTMLElement {
       tile('Added latency', `${fmtMicros(t.latency_p50_micros)} p50`, `${fmtMicros(t.latency_p95_micros)} p95 (compression time)`, 'pc-latency'),
       tile('Rejected / failed open', `${fmtInt(t.rejected)} / ${fmtInt(t.failed_open)}`, 'Forwarded unchanged: a rewrite failed its check, or the plugin hit an error', 'pc-failures'),
     );
+    if (t.failed_closed > 0) {
+      tiles.push(tile('Refused (engine failed, closed)', fmtInt(t.failed_closed), 'Answered 502: the external engine failed and failure_mode is closed', 'pc-failed-closed'));
+    }
     return h('div', { className: 'tiles' }, tiles);
   }
 
