@@ -79,7 +79,7 @@
   "patternProperties": {
     "^engine_[a-z0-9]+(_[a-z0-9]+)*_(url|token)$": {
       "type": "string",
-      "description": "Engine credentials, engine_<name>_url and engine_<name>_token. Use a $SECRET/ reference. External engines are not supported yet: the settings are accepted and not used."
+      "description": "Engine credentials, engine_<name>_url and engine_<name>_token, for a policy's external engine. Use a $SECRET/ reference."
     }
   },
   "additionalProperties": false,
@@ -177,7 +177,7 @@
         "engine": {
           "type": "object",
           "title": "External engine",
-          "description": "Not supported yet: accepted and not used. Credentials come from engine_<name>_url and engine_<name>_token.",
+          "description": "Sends selected units to an external engine (Headroom /v1/compress or LLMLingua-2) after levels 1–3; failure_mode decides what an engine failure does. Credentials come from engine_<name>_url and engine_<name>_token.",
           "properties": {
             "name": { "type": "string", "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$", "maxLength": 64 },
             "kind": { "type": "string", "enum": ["headroom", "llmlingua2"] },

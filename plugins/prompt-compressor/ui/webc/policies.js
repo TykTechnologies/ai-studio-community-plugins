@@ -469,7 +469,7 @@ class PromptCompressorPolicies extends HTMLElement {
         const notes = [];
         const skip = this._filterSkipNote(name);
         if (skip) notes.push(skip);
-        if (p.engine) notes.push('External engines are not supported yet; the engine setting is ignored.');
+        if (p.engine) notes.push(`External engine ${p.engine.name} (${p.engine.kind}) runs after levels 1–3; an engine failure follows the failure mode (${cfg.failure_mode || 'open'}).`);
         if (p.tool_overrides && Object.keys(p.tool_overrides).length) notes.push(`${Object.keys(p.tool_overrides).length} tool override(s)`);
         body.appendChild(
           h('tr', { 'data-policy': name },
@@ -555,7 +555,7 @@ class PromptCompressorPolicies extends HTMLElement {
     );
     form.appendChild(this._paintToolOverrides(p));
     if (p.engine) {
-      form.appendChild(h('div', { className: 'note' }, `This policy names external engine "${p.engine.name}". Engines are not supported yet and the setting is kept as it is.`));
+      form.appendChild(h('div', { className: 'note' }, `This policy sends selected units to external engine "${p.engine.name}" after levels 1–3. Its credentials are set in the plugin's configuration form; the engine setting is kept as it is here.`));
     }
     form.appendChild(
       h('div', { className: 'actions' },
