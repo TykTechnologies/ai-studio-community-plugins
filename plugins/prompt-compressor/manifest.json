@@ -39,6 +39,16 @@
               "tag": "prompt-compressor-policies",
               "entry": "/ui/webc/policies.js"
             }
+          },
+          {
+            "type": "route",
+            "path": "/admin/prompt-compressor/preview",
+            "title": "Preview",
+            "mount": {
+              "kind": "webc",
+              "tag": "prompt-compressor-preview",
+              "entry": "/ui/webc/preview.js"
+            }
           }
         ]
       }
@@ -57,6 +67,12 @@
         "label": "Compression savings",
         "description": "See the savings dashboard: tokens and estimated cost saved, cache-read share and policy changes, by App and LLM.",
         "actions": ["read"]
+      },
+      {
+        "key": "preview",
+        "label": "Compression preview",
+        "description": "Run the compressor over a pasted or uploaded request body and see its output and decisions. Inputs are not stored.",
+        "actions": ["read", "execute"]
       }
     ],
     "rpc_methods": {
@@ -64,7 +80,9 @@
       "validateConfig": "policies:read",
       "getEditor": "policies:read",
       "saveConfig": "policies:write",
-      "getSavings": "savings:read"
+      "getSavings": "savings:read",
+      "preview": "preview:execute",
+      "getPreviewOptions": "preview:execute"
     }
   },
   "compat": {
@@ -77,6 +95,7 @@
   "assets": [
     "/assets/icon.svg",
     "/ui/webc/dashboard.js",
-    "/ui/webc/policies.js"
+    "/ui/webc/policies.js",
+    "/ui/webc/preview.js"
   ]
 }

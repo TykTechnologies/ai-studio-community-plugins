@@ -276,6 +276,10 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 		return json.Marshal(res)
 	case "getSavings":
 		return p.rpcGetSavings(payload)
+	case "preview":
+		return p.rpcPreview(payload)
+	case "getPreviewOptions":
+		return p.rpcPreviewOptions()
 	default:
 		return nil, fmt.Errorf("unknown RPC method: %s", method)
 	}
