@@ -153,7 +153,7 @@ func TestPolicyMarkersAndCacheDropAlert(t *testing.T) {
 	rows = append(rows, row(h, 1, 3, hashNew, records.OutcomeApplied, 10, 300, 1000, 200))
 	markers := []records.PolicyMarker{{Hash: hashOld, FirstSeen: h - 300}, {Hash: hashNew, FirstSeen: h, Name: "max", Level: 3}}
 
-	v := summarise(rows, markers, h-2, h+1, savingsQuery{}, 0.25, nil, nil)
+	v := summarise(rows, markers, h-2, h+3, savingsQuery{}, 0.25, nil, nil)
 	if len(v.Markers) != 1 || v.Markers[0].Hour != h || v.Markers[0].ShortHash != hashNew[:12] || v.Markers[0].Name != "max" {
 		t.Errorf("markers = %+v", v.Markers)
 	}
@@ -164,11 +164,60 @@ func TestPolicyMarkersAndCacheDropAlert(t *testing.T) {
 	if v.Totals.Requests != 30 {
 		t.Errorf("requests %d, want 30 (hours h-2..h)", v.Totals.Requests)
 	}
-	if q := summarise(rows, markers, h-2, h+1, savingsQuery{}, 0, nil, nil); len(q.Alerts) != 0 {
+	if q := summarise(rows, markers, h-2, h+3, savingsQuery{}, 0, nil, nil); len(q.Alerts) != 0 {
 		t.Error("an alert with the warning turned off")
 	}
-	if q := summarise(rows, markers, h-2, h+1, savingsQuery{}, 0.9, nil, nil); len(q.Alerts) != 0 {
+	if q := summarise(rows, markers, h-2, h+3, savingsQuery{}, 0.9, nil, nil); len(q.Alerts) != 0 {
 		t.Error("a 67% drop alerted at a 90% threshold")
+	}
+}
+
+// tests' dev-stack findings on eac.21: a filtered view shows only its own
+// policy changes, and a cache drop is judged on complete hours with enough
+// requests.
+func TestMarkersFollowTheFilterAndAlertsWaitForCompleteHours(t *testing.T) {
+	h := int64(500000)
+	var rows []*records.Delta
+	for i := int64(1); i <= 6; i++ {
+		rows = append(rows, row(h-i, 1, 3, hashOld, records.OutcomeApplied, 10, 100, 1000, 800))
+		rows = append(rows, row(h-i, 2, 3, hashOld, records.OutcomeApplied, 10, 100, 1000, 800))
+	}
+	// App 2 moves to a new policy and its cache share falls; App 1 does not
+	rows = append(rows, row(h, 1, 3, hashOld, records.OutcomeApplied, 10, 100, 1000, 800))
+	rows = append(rows, row(h, 2, 3, hashNew, records.OutcomeApplied, 10, 300, 1000, 100))
+	markers := []records.PolicyMarker{{Hash: hashNew, FirstSeen: h, Name: "app2-policy", Level: 2}}
+
+	filter := func(app uint32) []*records.Delta {
+		var out []*records.Delta
+		for _, d := range rows {
+			if d.AppID == app {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
+	one := summarise(filter(1), markers, h-2, h+3, savingsQuery{AppID: 1}, 0.25, nil, nil)
+	if len(one.Markers) != 0 || len(one.Alerts) != 0 {
+		t.Errorf("App 1 view shows App 2's change: markers %+v, alerts %+v", one.Markers, one.Alerts)
+	}
+	two := summarise(filter(2), markers, h-2, h+3, savingsQuery{AppID: 2}, 0.25, nil, nil)
+	if len(two.Markers) != 1 || len(two.Alerts) != 1 {
+		t.Errorf("App 2 view: markers %+v, alerts %+v; want its own change and drop", two.Markers, two.Alerts)
+	}
+
+	// The change is in the current hour: not judged yet
+	if now := summarise(filter(2), markers, h-2, h, savingsQuery{AppID: 2}, 0.25, nil, nil); len(now.Alerts) != 0 {
+		t.Errorf("an alert on a running hour: %+v", now.Alerts)
+	}
+	if next := summarise(filter(2), markers, h-2, h+1, savingsQuery{AppID: 2}, 0.25, nil, nil); len(next.Alerts) != 0 {
+		t.Errorf("an alert before the second hour is over: %+v", next.Alerts)
+	}
+
+	// A few requests after the change are not enough
+	few := filter(2)
+	few[len(few)-1] = row(h, 2, 3, hashNew, records.OutcomeApplied, 3, 300, 1000, 100)
+	if v := summarise(few, markers, h-2, h+3, savingsQuery{AppID: 2}, 0.25, nil, nil); len(v.Alerts) != 0 {
+		t.Errorf("an alert from 3 requests: %+v", v.Alerts)
 	}
 }
 

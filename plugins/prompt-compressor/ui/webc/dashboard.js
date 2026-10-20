@@ -84,6 +84,7 @@ class PromptCompressorDashboard extends HTMLElement {
     this._timer = null;
     this._appChoices = [];
     this._llmChoices = [];
+    this._choicesRange = 0;
   }
 
   connectedCallback() {
@@ -115,10 +116,15 @@ class PromptCompressorDashboard extends HTMLElement {
       const view = await this.pluginAPI.call('getSavings', { range_hours: this._range, app_id: this._appId, llm_id: this._llmId });
       this._view = view;
       this._error = '';
-      // Filter choices come from the unfiltered view, so they do not
-      // shrink to the one picked
-      if (!this._appId) this._appChoices = (view.by_app || []).filter((g) => !g.overflow);
-      if (!this._llmId) this._llmChoices = (view.by_llm || []).filter((g) => !g.overflow);
+      // Filter choices come from the unfiltered view of the range, so they
+      // neither shrink to the one picked nor miss Apps a new range adds
+      let all = view;
+      if ((this._appId || this._llmId) && this._choicesRange !== this._range) {
+        all = await this.pluginAPI.call('getSavings', { range_hours: this._range });
+      }
+      if (!this._appId || all !== view) this._appChoices = (all.by_app || []).filter((g) => !g.overflow);
+      if (!this._llmId || all !== view) this._llmChoices = (all.by_llm || []).filter((g) => !g.overflow);
+      if ((!this._appId && !this._llmId) || all !== view) this._choicesRange = this._range;
     } catch (error) {
       this._error = 'Failed to load savings: ' + (error && error.message ? error.message : error);
     } finally {

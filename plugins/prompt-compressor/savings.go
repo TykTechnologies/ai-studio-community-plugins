@@ -159,6 +159,7 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 	adjustedOK := true
 	latency := make([]int64, len(records.LatencyBoundsMicros)+1)
 	series := map[int64]*hourPoint{}
+	usedHashes := map[string]bool{}
 	apps, llms := map[uint32]*groupRow{}, map[uint32]*groupRow{}
 
 	group := func(m map[uint32]*groupRow, id uint32, names map[uint32]string, overflow bool) *groupRow {
@@ -192,6 +193,9 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 		p.CacheReadTokens += d.CacheReadTokens
 		if d.Hour < from {
 			continue
+		}
+		if d.PolicyHash != "" {
+			usedHashes[d.PolicyHash] = true
 		}
 
 		applied := d.Outcome == records.OutcomeApplied
@@ -294,7 +298,10 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 	v.ByApp, v.ByLLM = sortedGroups(apps), sortedGroups(llms)
 
 	for _, m := range markers {
-		if m.FirstSeen < from || m.FirstSeen > to {
+		// A marker belongs to the view only if its policy served a request
+		// the view counts: with an App or LLM filter, another App's policy
+		// change is not this App's
+		if m.FirstSeen < from || m.FirstSeen > to || !usedHashes[m.Hash] {
 			continue
 		}
 		short := m.Hash
@@ -307,7 +314,7 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 	// An hourly series feeds the alert check itself; a bucketed one leaves
 	// it to the caller, which reads the hours around each marker
 	if q.bucket <= 1 {
-		v.Alerts = alertsFor(markers, from, to, series, threshold)
+		v.Alerts = alertsFor(v.Markers, to, series, threshold)
 	}
 	return v
 }
@@ -316,44 +323,55 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 // drop (each reads its own few hours).
 const maxAlertMarkers = 20
 
-// alertsFor checks each policy change in from..to: the cache-read share in
-// the two hours from it against the alertBeforeHours before it, in an
-// hourly series.
-func alertsFor(markers []records.PolicyMarker, from, to int64, hourly map[int64]*hourPoint, threshold float64) []cacheAlert {
+// alertsFor checks each policy change shown: the cache-read share in the
+// two hours from it against the alertBeforeHours before it, in an hourly
+// series. now is the current, still running hour: a change whose two
+// hours are not both over is not judged yet, and each window needs
+// minAlertRequests requests, so a handful of requests cannot raise it.
+func alertsFor(markers []markerView, now int64, hourly map[int64]*hourPoint, threshold float64) []cacheAlert {
 	alerts := []cacheAlert{}
 	if threshold <= 0 {
 		return alerts
 	}
 	for _, m := range markers {
-		if m.FirstSeen < from || m.FirstSeen > to {
+		if m.Hour+1 >= now {
 			continue
 		}
-		before := windowShare(hourly, m.FirstSeen-alertBeforeHours, m.FirstSeen-1)
-		after := windowShare(hourly, m.FirstSeen, m.FirstSeen+1)
-		if before.ok && after.ok && before.share > 0 && after.share < before.share*(1-threshold) {
-			alerts = append(alerts, cacheAlert{Hour: m.FirstSeen, Policy: m.Name, Before: before.share, After: after.share})
+		before := windowShare(hourly, m.Hour-alertBeforeHours, m.Hour-1)
+		after := windowShare(hourly, m.Hour, m.Hour+1)
+		if !before.ok || !after.ok || before.requests < minAlertRequests || after.requests < minAlertRequests {
+			continue
+		}
+		if before.share > 0 && after.share < before.share*(1-threshold) {
+			alerts = append(alerts, cacheAlert{Hour: m.Hour, Policy: m.Name, Before: before.share, After: after.share})
 		}
 	}
 	return alerts
 }
 
+// minAlertRequests is the fewest requests a window needs for the
+// cache-drop comparison.
+const minAlertRequests = 10
+
 type shareResult struct {
-	share float64
-	ok    bool
+	share    float64
+	requests int64
+	ok       bool
 }
 
 func windowShare(series map[int64]*hourPoint, from, to int64) shareResult {
-	var input, cached int64
+	var input, cached, requests int64
 	for h := from; h <= to; h++ {
 		if p := series[h]; p != nil {
 			input += p.InputTokens
 			cached += p.CacheReadTokens
+			requests += p.Requests
 		}
 	}
 	if input == 0 {
-		return shareResult{}
+		return shareResult{requests: requests}
 	}
-	return shareResult{share: float64(cached) / float64(input), ok: true}
+	return shareResult{share: float64(cached) / float64(input), requests: requests, ok: true}
 }
 
 func percentile(buckets []int64, q float64) int64 {
@@ -486,13 +504,13 @@ func (p *PromptCompressorPlugin) querySavings(store *records.Store, q savingsQue
 		// Read the hours around each policy change for the alert check
 		hourly := map[int64]*hourPoint{}
 		checked := 0
-		for _, m := range res.Markers {
-			if m.FirstSeen < from || m.FirstSeen > to || checked >= maxAlertMarkers {
+		for _, m := range view.Markers {
+			if m.Hour+1 >= to || checked >= maxAlertMarkers {
 				continue
 			}
 			checked++
 			win, err := store.QueryWith(ctx, records.QueryOptions{
-				From: m.FirstSeen - alertBeforeHours, To: m.FirstSeen + 1, AppID: q.AppID, LLMID: q.LLMID,
+				From: m.Hour - alertBeforeHours, To: m.Hour + 1, AppID: q.AppID, LLMID: q.LLMID,
 				MaxBytes: records.DefaultQueryBytes / maxAlertMarkers,
 			})
 			if err != nil {
@@ -504,11 +522,12 @@ func (p *PromptCompressorPlugin) querySavings(store *records.Store, q savingsQue
 					pt = &hourPoint{Hour: d.Hour}
 					hourly[d.Hour] = pt
 				}
+				pt.Requests += d.Requests
 				pt.InputTokens += d.InputTokens
 				pt.CacheReadTokens += d.CacheReadTokens
 			}
 		}
-		view.Alerts = alertsFor(res.Markers, from, to, hourly, threshold)
+		view.Alerts = alertsFor(view.Markers, to, hourly, threshold)
 	}
 	return json.Marshal(view)
 }

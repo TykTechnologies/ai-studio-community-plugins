@@ -88,7 +88,9 @@ func TestBucketedViewKeepsTheCacheDropAlert(t *testing.T) {
 		r := savingsRecord(1, 1000, 600, records.OutcomeApplied)
 		r.At = time.Unix(hour*3600+60, 0)
 		r.PolicyHash, r.InputTokens, r.CacheReadTokens = hash, 1000, cached
-		agg.Add(r)
+		for i := 0; i < 10; i++ {
+			agg.Add(r)
+		}
 		for _, b := range agg.Flush() {
 			if err := store.Apply(ctx, "", "edge-1", b); err != nil {
 				t.Fatal(err)
@@ -120,8 +122,8 @@ func TestBucketedViewKeepsTheCacheDropAlert(t *testing.T) {
 			t.Errorf("series point %d not on a 6-hour bucket", p.Hour)
 		}
 	}
-	if v.Totals.Requests != 11 || v.Totals.TokensSaved != 11*400 {
-		t.Errorf("totals %d requests / %d saved, want 11 / %d", v.Totals.Requests, v.Totals.TokensSaved, 11*400)
+	if v.Totals.Requests != 110 || v.Totals.TokensSaved != 110*400 {
+		t.Errorf("totals %d requests / %d saved, want 110 / %d", v.Totals.Requests, v.Totals.TokensSaved, 110*400)
 	}
 	if len(v.Alerts) != 1 || v.Alerts[0].Hour != change {
 		t.Errorf("alerts = %+v, want the drop at %d", v.Alerts, change)
