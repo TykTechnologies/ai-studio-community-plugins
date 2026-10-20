@@ -181,9 +181,9 @@ class PromptCompressorDashboard extends HTMLElement {
       page.appendChild(
         h('div', { className: 'banner warning', role: 'alert', 'data-testid': 'pc-app-scope-missing' },
           h('span', { className: 'icon', 'aria-hidden': 'true' }, '⚠'),
-          h('strong', {}, 'App policies are not applied. '),
-          `${fmtInt(scopeMissing)} requests could not read their App's prompt_compressor.policy override, because the plugin's apps.read scope is not approved. `,
-          'Approve the plugin\'s scopes on the Plugins page; until then those requests use the LLM bindings and the default policy.'),
+          h('strong', {}, 'App traffic is not compressed. '),
+          `${fmtInt(scopeMissing)} requests were forwarded uncompressed because the plugin could not read their App's settings: its apps.read scope is not approved. `,
+          'Approve the plugin\'s scopes on the Plugins page.'),
       );
     }
     if (v.partial) {
