@@ -163,6 +163,11 @@ func TestLLMOptionUsesTheHostSlugAndFilterState(t *testing.T) {
 
 	none := &studiopb.LLMInfo{Id: 3, Name: "Plain"}
 	setLLMField(none, "slug", protoreflect.ValueOfString("plain"))
+	if got := llmOptionFrom(none); got.FiltersKnown {
+		t.Errorf("filters reported known without the field: %+v", got)
+	}
+	// A host that knows the field always sets it, false included.
+	setLLMField(none, "has_request_filters", protoreflect.ValueOfBool(false))
 	if got := llmOptionFrom(none); !got.FiltersKnown || got.HasRequestFilters {
 		t.Errorf("no filters: %+v", got)
 	}

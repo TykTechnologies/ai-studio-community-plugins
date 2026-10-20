@@ -12,7 +12,9 @@ import (
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
+	studiopb "github.com/TykTechnologies/midsommar/v2/proto/ai_studio_management"
 	mgmtpb "github.com/TykTechnologies/midsommar/v2/proto/microgateway_management"
+	"google.golang.org/protobuf/proto"
 )
 
 // llmGateway answers GetLLM with an endpoint, on top of fakeGateway.
@@ -20,10 +22,15 @@ type llmGateway struct {
 	*fakeGateway
 	endpoint string
 	filtered bool // the LLM has request filters
+	oldHost  bool // the host predates has_request_filters and leaves it out
 }
 
 func (g *llmGateway) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
-	return &mgmtpb.GetLLMResponse{Llm: &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: g.filtered}}, nil
+	info := &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: proto.Bool(g.filtered)}
+	if g.oldHost {
+		info.HasRequestFilters = nil
+	}
+	return &mgmtpb.GetLLMResponse{Llm: info}, nil
 }
 
 type llmBroker struct {
@@ -210,17 +217,20 @@ func TestRequestFilterGuard(t *testing.T) {
 		name     string
 		cfg      string
 		filtered bool
+		oldHost  bool
 		prime    bool
 		capped   bool
 	}{
-		{"filtered", level3 + `}`, true, true, true},
-		{"unfiltered", level3 + `}`, false, true, false},
-		{"unknown LLM", level3 + `}`, false, false, true},
-		{"filtered, allowed", level3 + `,"lossy_with_request_filters":true}`, true, true, false},
+		{"filtered", level3 + `}`, true, false, true, true},
+		{"unfiltered", level3 + `}`, false, false, true, false},
+		{"unknown LLM", level3 + `}`, false, false, false, true},
+		{"old host", level3 + `}`, false, true, true, true},
+		{"filtered, allowed", level3 + `,"lossy_with_request_filters":true}`, true, false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, ctx := hookPlugin(t, tc.cfg)
 			ctx.Services.(*llmBroker).gw.filtered = tc.filtered
+			ctx.Services.(*llmBroker).gw.oldHost = tc.oldHost
 			if tc.prime {
 				p.llms.get(ctx.LLMID)
 				p.llms.inflight.Wait()
@@ -234,6 +244,45 @@ func TestRequestFilterGuard(t *testing.T) {
 				t.Errorf("capped %v, want %v (record %+v)", rec.Report.RequestFiltersCapped, tc.capped, rec.Report)
 			}
 		})
+	}
+}
+
+// studioLLMs answers Studio's GetLLM, with or without has_request_filters.
+type studioLLMs struct {
+	plugin_sdk.StudioServices
+	filters *bool
+}
+
+func (s studioLLMs) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
+	return &studiopb.GetLLMResponse{Llm: &studiopb.LLMInfo{Id: llmID, ApiEndpoint: "https://api.openai.com/v1", HasRequestFilters: s.filters}}, nil
+}
+
+type studioBroker struct {
+	plugin_sdk.ServiceBroker
+	studio studioLLMs
+}
+
+func (b studioBroker) Studio() plugin_sdk.StudioServices { return b.studio }
+
+// On both runtimes an LLMInfo without has_request_filters (an older host)
+// reads as filtered, so lossy levels stay capped.
+func TestLLMInfoFromOlderHosts(t *testing.T) {
+	for _, tc := range []struct {
+		filters *bool
+		want    bool
+	}{{nil, true}, {proto.Bool(true), true}, {proto.Bool(false), false}} {
+		studio, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeStudio, Services: studioBroker{studio: studioLLMs{filters: tc.filters}}}, 4)
+		if err != nil || studio.HasRequestFilters != tc.want || studio.Endpoint == "" {
+			t.Errorf("Studio %v: %+v, %v", tc.filters, studio, err)
+		}
+		gw := &llmGateway{fakeGateway: &fakeGateway{}, endpoint: "e", oldHost: tc.filters == nil}
+		if tc.filters != nil {
+			gw.filtered = *tc.filters
+		}
+		edge, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}}, 4)
+		if err != nil || edge.HasRequestFilters != tc.want {
+			t.Errorf("edge %v: %+v, %v", tc.filters, edge, err)
+		}
 	}
 }
 

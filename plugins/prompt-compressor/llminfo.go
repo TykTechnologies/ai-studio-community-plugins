@@ -68,7 +68,7 @@ func fetchLLMInfo(ctx plugin_sdk.Context, llmID uint32) (llmInfo, error) {
 		if !ok {
 			return llmInfo{}, errUnexpectedResponse
 		}
-		return llmInfo{Endpoint: r.GetLlm().GetApiEndpoint(), HasRequestFilters: r.GetLlm().GetHasRequestFilters()}, nil
+		return llmInfo{Endpoint: r.GetLlm().GetApiEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters)}, nil
 	}
 	gw := ctx.Services.Gateway()
 	if gw == nil {
@@ -82,5 +82,12 @@ func fetchLLMInfo(ctx plugin_sdk.Context, llmID uint32) (llmInfo, error) {
 	if !ok {
 		return llmInfo{}, errUnexpectedResponse
 	}
-	return llmInfo{Endpoint: r.GetLlm().GetEndpoint(), HasRequestFilters: r.GetLlm().GetHasRequestFilters()}, nil
+	return llmInfo{Endpoint: r.GetLlm().GetEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters)}, nil
+}
+
+// mayHaveFilters reads has_request_filters. Hosts that know it always set
+// it; a host too old to report it leaves it out, and its LLMs are taken to
+// have filters, so lossy levels stay capped there.
+func mayHaveFilters(v *bool) bool {
+	return v == nil || *v
 }

@@ -183,11 +183,13 @@ plugin loading. The full schema is in `config.schema.json`.
   placeholder (`[tyk-compressed: shell output, 12,345 tokens, masked after 8
   turns]`); the masking boundary moves only when it would mask at least
   `mask_step_tokens` more, so each move, which rewrites the cached prefix
-  once, buys a large saving. Results held in several leaves (structured JSON
-  tool results) are not masked. Level 3 is capped at 2 on LLMs with request
+  once, buys a large saving. Masking replaces the whole result and ignores
+  `protect_patterns`. Results held in several leaves (structured JSON tool
+  results) are not masked. Level 3 is capped at 2 on LLMs with request
   filters, and on LLMs the plugin has not looked up yet, unless
   `lossy_with_request_filters` is set (see below); the edge reports request
-  filters from Studio 2.3 on.
+  filters from Studio 2.3 on, and older hosts are treated as unknown, so
+  level 3 stays capped there.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses

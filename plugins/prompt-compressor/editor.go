@@ -58,8 +58,9 @@ type llmOption struct {
 // llmOptionFrom reads an LLM row. The slug and has_request_filters fields
 // are new in the host's LLMInfo, so they are read by name: the plugin then
 // builds against hosts with and without them. Without them the slug is
-// computed the way the gateway does today (slug.Make of the name), and the
-// filter state is unknown.
+// computed the way the gateway does today (slug.Make of the name). The
+// filter state is known only when the host set the field (it is optional,
+// so an older host's LLMInfo has none).
 func llmOptionFrom(l *studiopb.LLMInfo) llmOption {
 	o := llmOption{ID: l.GetId(), Name: l.GetName(), Vendor: l.GetVendor(), Active: l.GetActive()}
 	msg := l.ProtoReflect()
@@ -67,7 +68,7 @@ func llmOptionFrom(l *studiopb.LLMInfo) llmOption {
 	if f := fields.ByName("slug"); f != nil {
 		o.Slug = msg.Get(f).String()
 	}
-	if f := fields.ByName("has_request_filters"); f != nil && o.Slug != "" {
+	if f := fields.ByName("has_request_filters"); f != nil && msg.Has(f) {
 		o.HasRequestFilters = msg.Get(f).Bool()
 		o.FiltersKnown = true
 	}
