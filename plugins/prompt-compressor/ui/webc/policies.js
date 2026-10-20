@@ -427,7 +427,7 @@ class PromptCompressorPolicies extends HTMLElement {
     );
     form.appendChild(
       h('label', { className: 'field' }, 'Level',
-        h('select', { onChange: (e) => { p.level = Number(e.target.value); repaint(); } },
+        h('select', { 'data-testid': 'pc-policy-level', onChange: (e) => { p.level = Number(e.target.value); repaint(); } },
           LEVELS.map((l) => h('option', { value: String(l.value), selected: p.level === l.value }, l.label)))),
     );
     form.appendChild(
@@ -467,7 +467,7 @@ class PromptCompressorPolicies extends HTMLElement {
     form.appendChild(
       h('label', { className: 'field' }, 'Protect patterns (one regular expression per line)',
         h('textarea', {
-          rows: 3, value: (p.protect_patterns || []).join('\n'),
+          rows: 3, value: (p.protect_patterns || []).join('\n'), 'data-testid': 'pc-protect-patterns',
           onChange: (e) => { p.protect_patterns = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); },
         }),
         h('span', { className: 'muted' }, 'Text matching these (ticket IDs, account numbers) is never removed by lossy levels. RE2 syntax.')),
