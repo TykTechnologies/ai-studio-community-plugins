@@ -1,0 +1,53 @@
+{
+  "id": "com.tyk.prompt-compressor",
+  "version": "0.1.0",
+  "name": "Prompt Compressor",
+  "description": "Shrinks LLM request bodies on the Microgateway before they reach the vendor, starting with tool outputs. Output is deterministic per policy so the provider's prompt cache keeps hitting, savings are measured next to the cache-read share, and every failure passes the request through unchanged.",
+  "capabilities": {
+    "hooks": ["studio_ui", "post_auth", "on_response"],
+    "primary_hook": "post_auth"
+  },
+  "permissions": {
+    "services": ["kv.readwrite", "control.send", "pricing.read", "apps.read"],
+    "ui": ["sidebar.register", "route.register"],
+    "rpc": ["call"],
+    "routes": ["GET:/plugin/com.tyk.prompt-compressor/rpc/*"]
+  },
+  "ui": {
+    "slots": [
+      {
+        "slot": "sidebar.section",
+        "label": "Prompt Compressor",
+        "icon": "/assets/icon.svg",
+        "items": [
+          {
+            "type": "route",
+            "path": "/admin/prompt-compressor/dashboard",
+            "title": "Dashboard",
+            "mount": {
+              "kind": "webc",
+              "tag": "prompt-compressor-dashboard",
+              "entry": "/ui/webc/dashboard.js"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "rbac": {
+    "rpc_methods": {
+      "getStatus": "read"
+    }
+  },
+  "compat": {
+    "min_gateway_version": "1.0.0",
+    "min_studio_version": "2.2.1"
+  },
+  "security": {
+    "csp": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  },
+  "assets": [
+    "/assets/icon.svg",
+    "/ui/webc/dashboard.js"
+  ]
+}
