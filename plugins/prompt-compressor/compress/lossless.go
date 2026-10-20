@@ -37,10 +37,18 @@ const maxJSONStringDepth = 3
 // text strategies; any other text has ANSI codes, carriage-return frames and
 // redundant whitespace removed. Saved bytes are counted on the decoded text.
 func lossless(text string) (string, []step) {
-	return losslessDepth(text, 0)
+	return pass{level: 1}.run(text, 0)
 }
 
-func losslessDepth(text string, depth int) (string, []step) {
+// pass is one leaf's strategies at a level: level 1 the lossless ones,
+// level 2 those and a reducer (reducers.go). keep reports lines a reducer
+// must not drop (protect patterns).
+type pass struct {
+	level int
+	keep  func(string) bool
+}
+
+func (ps pass) run(text string, depth int) (string, []step) {
 	if out, ok := compactJSON(text); ok {
 		var steps []step
 		if out != text {
@@ -48,7 +56,7 @@ func losslessDepth(text string, depth int) (string, []step) {
 		}
 		if depth < maxJSONStringDepth {
 			var inner []step
-			out, inner = rewriteJSONStrings(out, depth+1)
+			out, inner = ps.rewriteJSONStrings(out, depth+1)
 			steps = append(steps, inner...)
 		}
 		return out, steps
@@ -67,7 +75,19 @@ func losslessDepth(text string, depth int) (string, []step) {
 			text = out
 		}
 	}
+	if ps.level >= 2 {
+		if out, name := reduce(text, ps.keep); name != "" {
+			steps = append(steps, step{reducerStrategy(name), len(text) - len(out)})
+			text = out
+		}
+	}
 	return text, steps
+}
+
+// reducerStrategy is the reported strategy name of a reducer:
+// "reduce_go_test" for "go test".
+func reducerStrategy(name string) string {
+	return "reduce_" + strings.ReplaceAll(name, " ", "_")
 }
 
 // compactJSON removes insignificant whitespace from text when all of it is
@@ -86,10 +106,10 @@ func compactJSON(text string) (string, bool) {
 	return buf.String(), true
 }
 
-// rewriteJSONStrings applies losslessDepth to each string value (not key) of
+// rewriteJSONStrings applies the pass to each string value (not key) of
 // a compact JSON document. A value is replaced only when its new encoding is
 // shorter; others keep their bytes, escapes and all.
-func rewriteJSONStrings(doc string, depth int) (string, []step) {
+func (ps pass) rewriteJSONStrings(doc string, depth int) (string, []step) {
 	var b strings.Builder
 	var steps []step
 	last := 0
@@ -115,7 +135,7 @@ func rewriteJSONStrings(doc string, depth int) (string, []step) {
 		}
 		var s string
 		if json.Unmarshal([]byte(doc[i:end]), &s) == nil {
-			if out, st := losslessDepth(s, depth); len(st) > 0 && out != s && validText(out) {
+			if out, st := ps.run(s, depth); len(st) > 0 && out != s && validText(out) {
 				if enc := encodeJSONString(out); len(enc) < end-i {
 					if b.Len() == 0 {
 						b.Grow(len(doc))

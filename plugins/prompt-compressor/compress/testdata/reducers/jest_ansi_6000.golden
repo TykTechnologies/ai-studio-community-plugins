@@ -1,0 +1,121 @@
+
+> ledger-web@0.42.0 test
+> jest --ci --colors
+
+[tyk-compressed: jest output, 1,339 → 985 tokens; 4 failures kept]
+ FAIL  src/pages/Statements.test.tsx (2.225 s)
+  ● Statements › renders totals with currency
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     76 |   it("renders totals with currency", async () => {
+     77 |     const { result } = renderHook(() => useStatements());
+    > 78 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/pages/Statements.test.tsx:78:37)
+      at Promise.then.completed (node_modules/node:internal/process/task_queues:137:22)
+      at _callCircusTest (node_modules/jest-circus/build/run.js:284:26)
+      at _callCircusTest (node_modules/jest-circus/build/utils.js:200:17)
+
+[tyk-compressed: 1 line]
+ FAIL  src/hooks/useLedger.test.ts (2.969 s)
+  ● useLedger › keeps sort order after refetch
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     161 |   it("keeps sort order after refetch", async () => {
+     162 |     const { result } = renderHook(() => useuseLedger());
+    > 163 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/hooks/useLedger.test.ts:163:25)
+      at _callCircusTest (node_modules/node:internal/process/task_queues:116:37)
+      at Promise.then.completed (node_modules/jest-circus/build/utils.js:396:21)
+      at new Promise (<anonymous>) (node_modules/jest-circus/build/run.js:188:12)
+
+[tyk-compressed: 28 lines]
+ FAIL  src/components/AccountPicker.test.tsx (7.679 s)
+  ● AccountPicker › disables submit while pending
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     138 |   it("disables submit while pending", async () => {
+     139 |     const { result } = renderHook(() => useAccountPicker());
+    > 140 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/components/AccountPicker.test.tsx:140:16)
+      at processTicksAndRejections (node_modules/jest-circus/build/utils.js:313:8)
+      at _callCircusTest (node_modules/jest-circus/build/utils.js:154:38)
+      at callAsyncCircusFn (node_modules/node:internal/process/task_queues:303:9)
+
+[tyk-compressed: 16 lines]
+ FAIL  src/hooks/useLedger.1.test.ts (3.715 s)
+  ● useLedger.1 › renders totals with currency
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     106 |   it("renders totals with currency", async () => {
+     107 |     const { result } = renderHook(() => useuseLedger.1());
+    > 108 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/hooks/useLedger.1.test.ts:108:19)
+      at new Promise (<anonymous>) (node_modules/jest-circus/build/run.js:353:37)
+      at Promise.then.completed (node_modules/jest-circus/build/utils.js:223:5)
+      at new Promise (<anonymous>) (node_modules/jest-circus/build/run.js:185:11)
+
+  ● Console
+
+    console.warn
+      Warning: An update to AccountPicker inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+Test Suites: 4 failed, 10 passed, 14 total
+Tests:       4 failed, 122 passed, 126 total
+Snapshots:   5 passed, 12 total
+Time:        35.458 s
+Ran all test suites.

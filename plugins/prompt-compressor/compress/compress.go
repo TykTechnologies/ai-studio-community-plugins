@@ -17,6 +17,7 @@ package compress
 import (
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
@@ -288,6 +289,7 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, est *Estimator, rep *Report) []segments.Edit {
 	var edits []segments.Edit
 	seen := map[string]segments.Unit{} // tool output text -> first unit with it
+	keep := protectFunc(p)
 	for _, s := range sel {
 		u := s.unit
 		if p.DedupeReferences && u.Kind == guardrails.KindToolResult && len(u.Leaves) == 1 {
@@ -308,7 +310,7 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		}
 		changed := false
 		for _, leaf := range u.Leaves {
-			v := c.compressLeaf(policyHash, leaf.Text)
+			v := c.compressLeaf(policyHash, pass{level: s.level, keep: keep}, leaf.Text)
 			if v.Same {
 				continue
 			}
@@ -327,14 +329,33 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 	return edits
 }
 
-// compressLeaf runs the level-1 strategies on one leaf, through the memo.
+// protectFunc reports lines a policy's protect patterns match; nil when it
+// has none.
+func protectFunc(p *config.Policy) func(string) bool {
+	res := p.ProtectRegexps()
+	if len(res) == 0 {
+		return nil
+	}
+	return func(line string) bool {
+		for _, re := range res {
+			if re.MatchString(line) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// compressLeaf runs a pass on one leaf, through the memo. The key holds the
+// effective level: the same text compresses differently at level 1 (a
+// protected recent turn) and level 2.
 // A result that is not shorter, empty or not valid UTF-8 leaves it as is.
-func (c *Compressor) compressLeaf(policyHash, text string) memoValue {
-	key := newMemoKey(policyHash, text)
+func (c *Compressor) compressLeaf(policyHash string, ps pass, text string) memoValue {
+	key := newMemoKey(policyHash+"/L"+strconv.Itoa(ps.level), text)
 	if v, ok := c.memo.get(key); ok {
 		return v
 	}
-	out, steps := lossless(text)
+	out, steps := ps.run(text, 0)
 	v := memoValue{Same: true}
 	if len(steps) > 0 && len(out) < len(text) && validText(out) {
 		v = memoValue{Text: out, Steps: steps}

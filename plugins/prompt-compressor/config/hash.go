@@ -11,7 +11,11 @@ import (
 // StrategyVersion is the version of the compression strategies. Bump it
 // whenever a strategy's output changes for the same input, so every policy
 // hash changes with it and records show which rules changed a request.
-const StrategyVersion = 1
+//
+//	1: level 1 (lossless) strategies
+//	2: level 2 test-runner reducers (compress/reducers.go registry
+//	   pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1)
+const StrategyVersion = 2
 
 // Hash returns the policy hash carried on every savings record: the SHA-256
 // of the policy's canonical JSON (its effective settings, defaults filled

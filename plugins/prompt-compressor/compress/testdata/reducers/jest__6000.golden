@@ -1,0 +1,96 @@
+
+> ledger-web@0.42.0 test
+> jest --ci --colors
+
+[tyk-compressed: jest output, 1,713 → 802 tokens; 3 failures kept]
+ FAIL  src/components/RefundDialog.test.tsx (3.680 s)
+  ● RefundDialog › renders totals with currency
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     91 |   it("renders totals with currency", async () => {
+     92 |     const { result } = renderHook(() => useRefundDialog());
+    > 93 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/components/RefundDialog.test.tsx:93:18)
+      at _callCircusTest (node_modules/node:internal/process/task_queues:316:19)
+      at new Promise (<anonymous>) (node_modules/node:internal/process/task_queues:237:31)
+
+[tyk-compressed: 124 lines]
+ FAIL  src/utils/dates.1.test.ts (8.761 s)
+  ● dates.1 › keeps sort order after refetch
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     161 |   it("keeps sort order after refetch", async () => {
+     162 |     const { result } = renderHook(() => usedates.1());
+    > 163 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/utils/dates.1.test.ts:163:14)
+      at Promise.then.completed (node_modules/jest-circus/build/utils.js:276:18)
+      at processTicksAndRejections (node_modules/jest-circus/build/run.js:195:22)
+      at Promise.then.completed (node_modules/node:internal/process/task_queues:185:30)
+      at callAsyncCircusFn (node_modules/node:internal/process/task_queues:165:40)
+      at new Promise (<anonymous>) (node_modules/jest-circus/build/utils.js:223:19)
+
+ FAIL  src/components/Pagination.1.test.tsx (3.798 s)
+  ● Pagination.1 › keeps sort order after refetch
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Object {
+    -   "total": "€1,234.50",
+    +   "total": "€1,234.5",
+        "currency": "EUR",
+      }
+
+     89 |   it("keeps sort order after refetch", async () => {
+     90 |     const { result } = renderHook(() => usePagination.1());
+    > 91 |     expect(result.current).toEqual(expected);
+         |                            ^
+
+      at Object.<anonymous> (src/components/Pagination.1.test.tsx:91:25)
+      at callAsyncCircusFn (node_modules/node:internal/process/task_queues:375:27)
+      at _callCircusTest (node_modules/node:internal/process/task_queues:346:33)
+      at processTicksAndRejections (node_modules/jest-circus/build/run.js:126:38)
+
+  ● Console
+
+    console.warn
+      Warning: An update to InvoiceTable inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+Test Suites: 3 failed, 17 passed, 20 total
+Tests:       3 failed, 170 passed, 173 total
+Snapshots:   6 passed, 12 total
+Time:        55.273 s
+Ran all test suites.

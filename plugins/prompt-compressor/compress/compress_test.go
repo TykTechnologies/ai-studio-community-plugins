@@ -211,39 +211,81 @@ func TestDeterministicAcrossProcesses(t *testing.T) {
 // compressed conversation, less its newest message, is the start of turn
 // k+1's, element for element and byte for byte. That is what keeps the
 // provider's prompt cache hitting.
+//
+// At level 2 the newest turn is protected (level 1) and is reduced once a
+// newer turn follows, so the comparison stops before turn k's newest turn:
+// everything older is byte-identical.
 func TestSessionsCacheStable(t *testing.T) {
-	c := New(Options{})
-	for _, s := range loadCorpus(t).Sessions {
-		if s.History != "full" || !segments.Supports(s.Format) {
-			continue
-		}
-		t.Run(s.Name, func(t *testing.T) {
-			var prev []json.RawMessage
-			saved := 0
-			for k, body := range s.Bodies() {
-				out, rep := c.Compress(Input{Format: s.Format, Body: body, Policy: config.DefaultPolicy()})
-				if rep.Outcome == OutcomeRejected || rep.Outcome == OutcomeSkipped {
-					t.Fatalf("turn %d: %s (%s)", k, rep.Outcome, rep.Reason)
-				}
-				saved += rep.TokensSaved()
-				cur := conversation(t, s.Format, out)
-				if prev != nil {
-					if len(cur) < len(prev) {
-						t.Fatalf("turn %d has fewer messages than turn %d", k, k-1)
+	for _, level := range []int{1, 2} {
+		reduced := 0
+		c := New(Options{})
+		p := config.DefaultPolicy()
+		p.Level = level
+		for _, s := range loadCorpus(t).Sessions {
+			if s.History != "full" || !segments.Supports(s.Format) {
+				continue
+			}
+			t.Run(fmt.Sprintf("level %d %s", level, s.Name), func(t *testing.T) {
+				var prev []json.RawMessage
+				prevNewest := 0
+				saved := 0
+				for k, body := range s.Bodies() {
+					out, rep := c.Compress(Input{Format: s.Format, Body: body, Policy: p})
+					if rep.Outcome == OutcomeRejected || rep.Outcome == OutcomeSkipped {
+						t.Fatalf("turn %d: %s (%s)", k, rep.Outcome, rep.Reason)
 					}
-					for i := 0; i < len(prev)-1; i++ {
-						if !bytes.Equal(prev[i], cur[i]) {
-							t.Fatalf("turn %d: message %d differs from turn %d's:\n%s\nvs\n%s", k, i, k-1, prev[i], cur[i])
+					saved += rep.TokensSaved()
+					cur := conversation(t, s.Format, out)
+					if prev != nil {
+						if len(cur) < len(prev) {
+							t.Fatalf("turn %d has fewer messages than turn %d", k, k-1)
+						}
+						for i := 0; i < prevNewest; i++ {
+							if !bytes.Equal(prev[i], cur[i]) {
+								t.Fatalf("turn %d: message %d differs from turn %d's:\n%s\nvs\n%s", k, i, k-1, prev[i], cur[i])
+							}
+						}
+					}
+					prev, prevNewest = cur, len(cur)-1
+					if level >= 2 {
+						prevNewest = newestTurnStart(t, s.Format, out, len(cur))
+					}
+					for name := range rep.Strategies {
+						if strings.HasPrefix(name, "reduce_") {
+							reduced++
 						}
 					}
 				}
-				prev = cur
-			}
-			if saved == 0 {
-				t.Error("the session saved nothing")
-			}
-		})
+				if saved == 0 {
+					t.Error("the session saved nothing")
+				}
+			})
+		}
+		if level >= 2 && reduced == 0 {
+			t.Error("no session output was reduced at level 2")
+		}
 	}
+}
+
+// newestTurnStart is the index of the first message of the body's newest
+// turn (what the client sent since the model last spoke); n when unknown.
+func newestTurnStart(t *testing.T, format string, body []byte, n int) int {
+	t.Helper()
+	units, err := segments.ExtractUnits(format, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := 0
+	for _, u := range units {
+		last = max(last, u.Turn)
+	}
+	start := n
+	for _, u := range units {
+		if u.Turn == last && u.Role != "assistant" && u.Message >= 0 {
+			start = min(start, u.Message)
+		}
+	}
+	return start
 }
 
 // conversation returns the raw elements of the body's conversation array.

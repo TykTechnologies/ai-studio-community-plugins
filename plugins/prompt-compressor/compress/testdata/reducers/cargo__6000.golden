@@ -1,0 +1,64 @@
+[tyk-compressed: cargo test output, 1,998 → 586 tokens; 3 failures kept]
+warning: unused variable: `tmp`
+  --> src/amount.rs:391:13
+   |
+391 |         let tmp = cursor.next_token()?;
+   |             ^^^ help: if this is intentional, prefix it with an underscore: `_tmp`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `rec`
+  --> src/mt940.rs:126:13
+   |
+126 |         let rec = cursor.next_token()?;
+   |             ^^^ help: if this is intentional, prefix it with an underscore: `_rec`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `ledger-parser` (lib test) generated 4 warnings (run `cargo fix --lib -p ledger-parser --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 46.87s
+     Running unittests src/lib.rs (target/debug/deps/ledger_parser-cfcc774456982ed0)
+
+running 108 tests
+[tyk-compressed: 36 lines]
+test csv_reader::tests::multi_currency_34 ... FAILED
+[tyk-compressed: 4 lines]
+test csv_reader::tests::zero_amount_88 ... FAILED
+[tyk-compressed: 15 lines]
+test lexer::tests::multi_currency_101 ... FAILED
+[tyk-compressed: 50 lines]
+
+failures:
+
+---- csv_reader::tests::multi_currency_34 stdout ----
+
+thread 'csv_reader::tests::multi_currency_34' panicked at src/csv_reader.rs:250:9:
+assertion `left == right` failed
+  left: Amount { minor: 123450, scale: 2, currency: "EUR" }
+ right: Amount { minor: 12345, scale: 1, currency: "EUR" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- csv_reader::tests::zero_amount_88 stdout ----
+
+thread 'csv_reader::tests::zero_amount_88' panicked at src/csv_reader.rs:568:9:
+assertion `left == right` failed
+  left: Amount { minor: 123450, scale: 2, currency: "EUR" }
+ right: Amount { minor: 12345, scale: 1, currency: "EUR" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- lexer::tests::multi_currency_101 stdout ----
+
+thread 'lexer::tests::multi_currency_101' panicked at src/lexer.rs:266:9:
+assertion `left == right` failed
+  left: Amount { minor: 123450, scale: 2, currency: "EUR" }
+ right: Amount { minor: 12345, scale: 1, currency: "EUR" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+failures:
+    csv_reader::tests::multi_currency_34
+    csv_reader::tests::zero_amount_88
+    lexer::tests::multi_currency_101
+
+test result: FAILED. 105 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+error: test failed, to rerun pass `--lib`

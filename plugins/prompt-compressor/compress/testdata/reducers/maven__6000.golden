@@ -1,0 +1,57 @@
+[INFO] Scanning for projects...
+[INFO]
+[INFO] ------------------< com.example.acme.ledger:ledger-reports >------------------
+[INFO] Building ledger-reports 2.14.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[tyk-compressed: maven output, 2,194 → 857 tokens; 1 failure kept]
+[INFO]
+[INFO] --- resources:3.3.1:resources (default-resources) @ ledger-reports ---
+[INFO] Copying 4 resources from src/main/resources to target/classes
+[INFO]
+[INFO] --- compiler:3.13.0:compile (default-compile) @ ledger-reports ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 133 source files with javac [debug release 21] to target/classes
+[WARNING] /home/dev/src/ledger/reports/src/main/java/com/example/acme/ledger/CurrencyConverter.java:[43,50] redundant cast to java.math.BigDecimal
+[WARNING] /home/dev/src/ledger/reports/src/main/java/com/example/acme/ledger/StatementService.java:[27,52] redundant cast to java.math.BigDecimal
+[WARNING] /home/dev/src/ledger/reports/src/main/java/com/example/acme/ledger/TenantResolver.java:[188,38] [deprecation] getAmount() in Entry has been deprecated and marked for removal
+[WARNING] /home/dev/src/ledger/reports/src/main/java/com/example/acme/ledger/LedgerRepository.java:[30,30] unchecked conversion
+[INFO]
+[INFO] --- surefire:3.2.5:test (default-test) @ ledger-reports ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO]
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[tyk-compressed: 1 line]
+[ERROR] Tests run: 3, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 2.383 s <<< FAILURE! -- in com.example.acme.ledger.StatementServiceTest
+[ERROR] com.example.acme.ledger.StatementServiceTest.closesPeriodWithPendingEntries -- Time elapsed: 0.041 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <CLOSED> but was: <PENDING>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1156)
+	at com.example.acme.ledger.StatementServiceTest.closesPeriodWithPendingEntries(StatementServiceTest.java:116)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[tyk-compressed: 14 lines]
+[INFO]
+[INFO] Results:
+[INFO]
+[ERROR] Failures:
+[ERROR]   StatementServiceTest.closesPeriodWithPendingEntries:73 expected: <CLOSED> but was: <PENDING>
+[INFO]
+[ERROR] Tests run: 117, Failures: 1, Errors: 0, Skipped: 0
+[INFO]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  03:39 min
+[INFO] Finished at: 2026-09-14T09:49:10+02:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project ledger-reports: There are test failures.
+[ERROR]
+[ERROR] Please refer to /home/dev/src/ledger/reports/target/surefire-reports for the individual test results.
+[ERROR] -> [Help 1]

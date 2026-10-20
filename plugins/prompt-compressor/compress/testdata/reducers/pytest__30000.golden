@@ -1,0 +1,262 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.6, pytest-8.3.3, pluggy-1.5.0 -- /home/dev/src/ledger/worker/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/dev/src/ledger/worker
+configfile: pyproject.toml
+plugins: asyncio-0.24.0, cov-5.0.0, xdist-3.6.1, mock-3.14.0
+asyncio: mode=Mode.STRICT, default_loop_scope=function
+collected 6396 items
+
+[tyk-compressed: pytest output, 7,968 → 4,201 tokens; 32 failures kept]
+
+=================================== FAILURES ===================================
+____________________ test_rates_cache_expiry ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f3bf91c5e45>
+batch = Batch(id='bat_yy6io9n873qu', tenant='t_7z4ucbzv', entries=[Entry(amount=Decimal('679.71'), currency='EUR', ref='INV-45035')])
+
+    def test_rates_cache_expiry(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_webhooks.py:233: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:74 no candidate for ref INV-90029 in window 2026-09-09..2026-09-18
+WARNING  ledger_worker.reconcile:reconcile.py:130 no candidate for ref INV-16926 in window 2026-09-05..2026-09-13
+WARNING  ledger_worker.reconcile:reconcile.py:86 no candidate for ref INV-97202 in window 2026-09-02..2026-09-12
+WARNING  ledger_worker.reconcile:reconcile.py:207 no candidate for ref INV-36821 in window 2026-09-09..2026-09-11
+
+____________________ test_ingest_skips_duplicates ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7fc2d68a83e2>
+batch = Batch(id='bat_swkhi8agb2ig', tenant='t_fqpb3z9f', entries=[Entry(amount=Decimal('345.64'), currency='EUR', ref='INV-14566')])
+
+    def test_ingest_skips_duplicates(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/integration/test_queue.py:350: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:197 no candidate for ref INV-68296 in window 2026-09-07..2026-09-18
+WARNING  ledger_worker.reconcile:reconcile.py:93 no candidate for ref INV-92887 in window 2026-09-02..2026-09-19
+WARNING  ledger_worker.reconcile:reconcile.py:193 no candidate for ref INV-43438 in window 2026-09-04..2026-09-11
+
+____________________ test_rates_cache_expiry ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f958179f10f>
+batch = Batch(id='bat_azdzbp9jr9jv', tenant='t_i4c9box6', entries=[Entry(amount=Decimal('352.33'), currency='EUR', ref='INV-25588')])
+
+    def test_rates_cache_expiry(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_reconcile.py:242: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:79 no candidate for ref INV-95695 in window 2026-09-09..2026-09-13
+WARNING  ledger_worker.reconcile:reconcile.py:200 no candidate for ref INV-79468 in window 2026-09-03..2026-09-14
+
+____________________ test_refund_exceeds_charge ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f8aae315af2>
+batch = Batch(id='bat_94v8f013wxv9', tenant='t_czhphnv3', entries=[Entry(amount=Decimal('175.63'), currency='EUR', ref='INV-75504')])
+
+    def test_refund_exceeds_charge(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_export_1.py:189: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:163 no candidate for ref INV-68378 in window 2026-09-05..2026-09-11
+WARNING  ledger_worker.reconcile:reconcile.py:115 no candidate for ref INV-61061 in window 2026-09-02..2026-09-10
+
+____________________ test_ingest_skips_duplicates ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7fbed39f4dd6>
+batch = Batch(id='bat_c8mym6rid474', tenant='t_yve1rrj1', entries=[Entry(amount=Decimal('817.93'), currency='EUR', ref='INV-23515')])
+
+    def test_ingest_skips_duplicates(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/integration/test_queue_2.py:32: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:100 no candidate for ref INV-91569 in window 2026-09-02..2026-09-16
+WARNING  ledger_worker.reconcile:reconcile.py:195 no candidate for ref INV-68272 in window 2026-09-08..2026-09-10
+WARNING  ledger_worker.reconcile:reconcile.py:157 no candidate for ref INV-64919 in window 2026-09-09..2026-09-17
+WARNING  ledger_worker.reconcile:reconcile.py:120 no candidate for ref INV-15244 in window 2026-09-07..2026-09-16
+
+____________________ test_empty_batch_is_noop ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f9f4e40ee3b>
+batch = Batch(id='bat_l5bcqkx21ntn', tenant='t_q82s17se', entries=[Entry(amount=Decimal('659.14'), currency='EUR', ref='INV-63498')])
+
+    def test_empty_batch_is_noop(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_reconcile_2.py:333: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:170 no candidate for ref INV-15745 in window 2026-09-01..2026-09-19
+WARNING  ledger_worker.reconcile:reconcile.py:198 no candidate for ref INV-17812 in window 2026-09-03..2026-09-16
+WARNING  ledger_worker.reconcile:reconcile.py:83 no candidate for ref INV-22488 in window 2026-09-09..2026-09-18
+WARNING  ledger_worker.reconcile:reconcile.py:198 no candidate for ref INV-90712 in window 2026-09-03..2026-09-13
+
+____________________ test_rates_cache_expiry ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f219179b110>
+batch = Batch(id='bat_lpa9n3v2izg7', tenant='t_rglbzjxn', entries=[Entry(amount=Decimal('531.74'), currency='EUR', ref='INV-41208')])
+
+    def test_rates_cache_expiry(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/unit/test_parser_3.py:357: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:109 no candidate for ref INV-10402 in window 2026-09-08..2026-09-17
+WARNING  ledger_worker.reconcile:reconcile.py:206 no candidate for ref INV-41056 in window 2026-09-08..2026-09-17
+WARNING  ledger_worker.reconcile:reconcile.py:62 no candidate for ref INV-58390 in window 2026-09-03..2026-09-11
+
+____________________ test_store_upsert_conflict ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7fa17ae0b1e6>
+batch = Batch(id='bat_9099gzpb42fi', tenant='t_5s8oxgm7', entries=[Entry(amount=Decimal('252.02'), currency='EUR', ref='INV-32586')])
+
+    def test_store_upsert_conflict(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_export_3.py:224: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:208 no candidate for ref INV-31708 in window 2026-09-04..2026-09-10
+WARNING  ledger_worker.reconcile:reconcile.py:43 no candidate for ref INV-68170 in window 2026-09-08..2026-09-10
+WARNING  ledger_worker.reconcile:reconcile.py:132 no candidate for ref INV-14067 in window 2026-09-03..2026-09-11
+
+____________________ test_rates_cache_expiry ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7f3af3d12dbe>
+batch = Batch(id='bat_xg225rrikmg1', tenant='t_cbcvhe4y', entries=[Entry(amount=Decimal('480.51'), currency='EUR', ref='INV-35079')])
+
+    def test_rates_cache_expiry(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_export_3.py:200: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:210 no candidate for ref INV-25400 in window 2026-09-04..2026-09-15
+WARNING  ledger_worker.reconcile:reconcile.py:71 no candidate for ref INV-76142 in window 2026-09-03..2026-09-10
+WARNING  ledger_worker.reconcile:reconcile.py:147 no candidate for ref INV-77889 in window 2026-09-08..2026-09-17
+WARNING  ledger_worker.reconcile:reconcile.py:86 no candidate for ref INV-16028 in window 2026-09-07..2026-09-17
+
+____________________ test_rollup_by_day ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7ffbf3368417>
+batch = Batch(id='bat_i3fky8ox7yq9', tenant='t_vuflfep1', entries=[Entry(amount=Decimal('464.10'), currency='EUR', ref='INV-75979')])
+
+    def test_rollup_by_day(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/test_ingest_4.py:76: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:58 no candidate for ref INV-12762 in window 2026-09-09..2026-09-10
+WARNING  ledger_worker.reconcile:reconcile.py:192 no candidate for ref INV-37686 in window 2026-09-03..2026-09-19
+WARNING  ledger_worker.reconcile:reconcile.py:142 no candidate for ref INV-15349 in window 2026-09-06..2026-09-18
+WARNING  ledger_worker.reconcile:reconcile.py:220 no candidate for ref INV-10708 in window 2026-09-09..2026-09-13
+
+____________________ test_reconcile_matches_by_reference ____________________
+
+store = <ledger_worker.store.MemoryStore object at 0x7fafd9dc4753>
+batch = Batch(id='bat_mevw3l09nbqv', tenant='t_17man8hr', entries=[Entry(amount=Decimal('470.49'), currency='EUR', ref='INV-37230')])
+
+    def test_reconcile_matches_by_reference(store, batch):
+        result = reconcile(store, batch, strategy="reference")
+>       assert result.matched == len(batch.entries)
+E       AssertionError: assert 0 == 1
+E        +  where 0 = ReconcileResult(matched=0, unmatched=1, skipped=0).matched
+E        +  and   1 = len([Entry(...)])
+
+tests/unit/test_rates_4.py:355: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  ledger_worker.reconcile:reconcile.py:74 no candidate for ref INV-50973 in window 2026-09-07..2026-09-17
+WARNING  ledger_worker.reconcile:reconcile.py:212 no candidate for ref INV-31137 in window 2026-09-02..2026-09-11
+WARNING  ledger_worker.reconcile:reconcile.py:91 no candidate for ref INV-92638 in window 2026-09-04..2026-09-18
+WARNING  ledger_worker.reconcile:reconcile.py:167 no candidate for ref INV-25943 in window 2026-09-01..2026-09-16
+
+=============================== warnings summary ===============================
+tests/unit/test_rates.py::test_rounding_half_even
+  /home/dev/src/ledger/worker/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:3764: SAWarning: Object of type <Entry> not in session, add operation along 'Batch.entries' will not proceed
+    warnings.warn(
+
+tests/unit/test_rates.py::test_ingest_skips_duplicates
+  /home/dev/src/ledger/worker/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:2940: SAWarning: Object of type <Entry> not in session, add operation along 'Batch.entries' will not proceed
+    warnings.warn(
+
+tests/test_reconcile.py::test_export_csv_header
+  /home/dev/src/ledger/worker/.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:3907: SAWarning: Object of type <Entry> not in session, add operation along 'Batch.entries' will not proceed
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_webhooks.py::test_rates_cache_expiry - AssertionError: assert 0 == 1
+FAILED tests/integration/test_queue.py::test_ingest_skips_duplicates - AssertionError: assert 0 == 1
+FAILED tests/test_reconcile.py::test_rates_cache_expiry - AssertionError: assert 0 == 1
+FAILED tests/test_export_1.py::test_refund_exceeds_charge - AssertionError: assert 0 == 1
+FAILED tests/integration/test_queue_2.py::test_ingest_skips_duplicates - AssertionError: assert 0 == 1
+FAILED tests/test_reconcile_2.py::test_empty_batch_is_noop - AssertionError: assert 0 == 1
+FAILED tests/unit/test_parser_3.py::test_rates_cache_expiry - AssertionError: assert 0 == 1
+FAILED tests/test_export_3.py::test_store_upsert_conflict - AssertionError: assert 0 == 1
+FAILED tests/test_export_3.py::test_rates_cache_expiry - AssertionError: assert 0 == 1
+FAILED tests/test_ingest_4.py::test_rollup_by_day - AssertionError: assert 0 == 1
+FAILED tests/unit/test_rates_4.py::test_reconcile_matches_by_reference - AssertionError: assert 0 == 1
+FAILED tests/unit/test_rates_4.py::test_rounding_half_even - AssertionError: assert 0 == 1
+FAILED tests/test_currency_5.py::test_reconcile_matches_by_reference - AssertionError: assert 0 == 1
+FAILED tests/unit/test_rates_5.py::test_rounding_half_even - AssertionError: assert 0 == 1
+FAILED tests/test_export_6.py::test_reconcile_matches_by_reference - AssertionError: assert 0 == 1
+FAILED tests/unit/test_parser_7.py::test_refund_exceeds_charge - AssertionError: assert 0 == 1
+FAILED tests/test_ingest_9.py::test_rates_cache_expiry - AssertionError: assert 0 == 1
+FAILED tests/test_rollup_10.py::test_webhook_signature_header - AssertionError: assert 0 == 1
+FAILED tests/unit/test_rates_10.py::test_rollup_by_day - AssertionError: assert 0 == 1
+FAILED tests/unit/test_rates_11.py::test_ingest_skips_duplicates - AssertionError: assert 0 == 1
+FAILED tests/integration/test_store_12.py::test_rollup_by_day - AssertionError: assert 0 == 1
+FAILED tests/test_currency_12.py::test_queue_visibility_timeout - AssertionError: assert 0 == 1
+FAILED tests/test_webhooks_13.py::test_ingest_skips_duplicates - AssertionError: assert 0 == 1
+FAILED tests/integration/test_store_13.py::test_store_upsert_conflict - AssertionError: assert 0 == 1
+FAILED tests/test_reconcile_13.py::test_reconcile_matches_by_reference - AssertionError: assert 0 == 1
+FAILED tests/integration/test_queue_14.py::test_queue_visibility_timeout - AssertionError: assert 0 == 1
+FAILED tests/unit/test_parser_14.py::test_rounding_half_even - AssertionError: assert 0 == 1
+FAILED tests/integration/test_store_15.py::test_export_csv_header - AssertionError: assert 0 == 1
+FAILED tests/test_ingest_16.py::test_rollup_by_day - AssertionError: assert 0 == 1
+FAILED tests/integration/test_store_16.py::test_export_csv_header - AssertionError: assert 0 == 1
+FAILED tests/test_currency_16.py::test_export_csv_header - AssertionError: assert 0 == 1
+FAILED tests/integration/test_store_17.py::test_empty_batch_is_noop - AssertionError: assert 0 == 1
+============ 32 failed, 6147 passed, 217 skipped, 3 warnings in 28.80s ============

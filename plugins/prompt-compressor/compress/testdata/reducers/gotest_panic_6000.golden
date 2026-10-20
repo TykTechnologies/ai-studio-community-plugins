@@ -1,0 +1,56 @@
+[tyk-compressed: go test output, 1,551 → 646 tokens; 1 failure kept]
+--- FAIL: TestAccount_Settle (0.00s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered]
+	panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x18 pc=0x945560]
+
+goroutine 49 [running]:
+testing.tRunner.func1.2({0x104d1e0a0, 0x105331c50})
+	/usr/local/go/src/testing/testing.go:1734 +0x1ac
+testing.tRunner.func1()
+	/usr/local/go/src/testing/testing.go:1737 +0x334
+panic({0x104d1e0a0?, 0x105331c50?})
+	/usr/local/go/src/runtime/panic.go:792 +0x124
+git.example.com/acme/ledger/internal/queue.(*Account).Settle(0x0, {0x14000126f00, 0x3, 0x4})
+	/home/dev/src/ledger/internal/queue/account.go:169 +0x1c
+git.example.com/acme/ledger/internal/queue.TestAccount_Settle(0x14000103a00)
+	/home/dev/src/ledger/internal/queue/account_test.go:39 +0x5c
+testing.tRunner(0x14000103a00, 0x104e0f2a8)
+	/usr/local/go/src/testing/testing.go:1792 +0xe4
+created by testing.(*T).Run in goroutine 1
+	/usr/local/go/src/testing/testing.go:1851 +0x374
+
+goroutine 19 [select]:
+git.example.com/acme/ledger/internal/queue.(*Worker).loop(0x140001a2779)
+	/home/dev/src/ledger/internal/queue/worker.go:107 +0x80c
+created by git.example.com/acme/ledger/internal/queue.Start in goroutine 17
+	/home/dev/src/ledger/internal/queue/worker.go:35 +0x538
+
+goroutine 16 [select]:
+git.example.com/acme/ledger/internal/queue.(*Worker).loop(0x140001a223c)
+	/home/dev/src/ledger/internal/queue/worker.go:88 +0x96e
+created by git.example.com/acme/ledger/internal/queue.Start in goroutine 16
+	/home/dev/src/ledger/internal/queue/worker.go:32 +0x2d3
+
+goroutine 8 [select]:
+git.example.com/acme/ledger/internal/queue.(*Worker).loop(0x140001a2f6a)
+	/home/dev/src/ledger/internal/queue/worker.go:199 +0x170
+created by git.example.com/acme/ledger/internal/queue.Start in goroutine 1
+	/home/dev/src/ledger/internal/queue/worker.go:49 +0x029
+
+goroutine 6 [select]:
+git.example.com/acme/ledger/internal/queue.(*Worker).loop(0x140001a2f9f)
+	/home/dev/src/ledger/internal/queue/worker.go:146 +0xa98
+created by git.example.com/acme/ledger/internal/queue.Start in goroutine 15
+	/home/dev/src/ledger/internal/queue/worker.go:26 +0x2e1
+
+goroutine 8 [select]:
+git.example.com/acme/ledger/internal/queue.(*Worker).loop(0x140001a2240)
+	/home/dev/src/ledger/internal/queue/worker.go:190 +0x767
+created by git.example.com/acme/ledger/internal/queue.Start in goroutine 8
+	/home/dev/src/ledger/internal/queue/worker.go:39 +0xfa5
+FAIL	git.example.com/acme/ledger/internal/queue	0.669s
+[tyk-compressed: 24 lines]
+PASS
+ok  	git.example.com/acme/ledger/internal/billing	0.720s
+FAIL

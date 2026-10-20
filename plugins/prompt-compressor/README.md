@@ -102,6 +102,35 @@ hold the compression settings; bindings pick a policy per LLM or App.
 An invalid config is logged and turns compression off; it never stops the
 plugin loading. The full schema is in `config.schema.json`.
 
+### Levels
+
+- **Level 1 (lossless):** JSON documents are compacted on the bytes (key
+  order, duplicate keys, number spelling and escapes kept) and their string
+  values get the text strategies; text loses ANSI escape codes, carriage-return
+  progress frames (rendered as a terminal shows them), trailing whitespace and
+  runs of blank lines.
+- **Level 2:** level 1, then a reducer when the text is a test runner's
+  output: pytest, jest, go test, cargo test, Maven (surefire) or Gradle. A
+  reducer drops passing tests, progress, downloads and up-to-date tasks and
+  keeps every failure with its message and location, the totals, and every
+  line a `protect_patterns` regex matches. Text no reducer recognises (prose,
+  code, JSON) gets level 1 only.
+- `protect_recent_turns` keeps the newest turns at level 1.
+- Tool results the vendor produced (Anthropic web search, web fetch, code
+  execution and MCP connector results; Google code execution; the Responses
+  built-in tools) are never rewritten, nor is anything the model wrote.
+
+A reducer's cut leaves an inline marker, in a fixed format:
+
+```
+[tyk-compressed: pytest output, 18,400 → 1,150 tokens; 3 failures kept]
+[tyk-compressed: 12 lines]
+```
+
+The first cut in an output carries the reducer, the size before and after
+(UTF-8 bytes / 4, so it depends only on the text) and the failures kept;
+each later cut in the same output carries the number of lines it removed.
+
 ### Policies page
 
 Admin > Prompt Compressor > Policies edits the mode, the policies and their
