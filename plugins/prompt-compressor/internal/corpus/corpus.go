@@ -36,6 +36,13 @@ func Dir() string {
 	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "corpus")
 }
 
+// NewEntry wraps a request body that is not part of the corpus (a captured
+// body a customer replays) as an entry the corpus tools accept. It expects
+// extraction; tools skip it when the format has no extractor.
+func NewEntry(name, format, path string, body []byte) Entry {
+	return Entry{Name: name, Format: format, Path: path, Expect: ExpectExtract, ToolPairing: "unknown", body: body}
+}
+
 // Body returns the entry's request body, byte for byte.
 func (e Entry) Body() []byte { return e.body }
 
