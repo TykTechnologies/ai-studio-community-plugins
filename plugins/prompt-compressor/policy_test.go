@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	mgmtpb "github.com/TykTechnologies/midsommar/v2/proto/microgateway_management"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeBroker is a service broker with only what the policy lookup uses.
@@ -24,16 +27,32 @@ func (b *fakeBroker) Logger() plugin_sdk.LogService       { return nil }
 type fakeGateway struct {
 	plugin_sdk.GatewayServices
 	calls    atomic.Int32
+	mu       sync.Mutex
 	metadata map[uint32]string
 }
 
+// appNotFound is an App ID fakeGateway does not have.
+const appNotFound = 404
+
 func (g *fakeGateway) GetApp(ctx context.Context, appID uint32) (interface{}, error) {
 	g.calls.Add(1)
+	if appID == appNotFound {
+		return nil, status.Error(codes.NotFound, "app not found")
+	}
+	g.mu.Lock()
 	md, ok := g.metadata[appID]
-	if !ok {
-		return nil, errors.New("rpc error: code = PermissionDenied desc = scope apps.read not granted")
+	g.mu.Unlock()
+	if !ok || md == "" {
+		return nil, status.Error(codes.PermissionDenied, "insufficient scope: apps.read")
 	}
 	return &mgmtpb.GetAppResponse{App: &mgmtpb.AppInfo{Id: appID, Metadata: md}}, nil
+}
+
+// setMetadata changes an App's metadata; "" makes GetApp fail.
+func (g *fakeGateway) setMetadata(appID uint32, md string) {
+	g.mu.Lock()
+	g.metadata[appID] = md
+	g.mu.Unlock()
 }
 
 const testConfig = `{
@@ -108,27 +127,30 @@ func TestResolvePolicyReadsAppMetadata(t *testing.T) {
 		1: `{"prompt_compressor.policy": "off"}`,
 		2: `{"prompt_compressor": {"policy": "max"}}`,
 		3: `{}`,
+		9: `{}`,
 	}}
 	p, base := gatewayPlugin(t, testConfig, gw)
 	cases := []struct {
 		app        uint32
 		llmSlug    string
+		wantKnown  bool
 		wantPolicy string
 		wantSource config.Source
 	}{
-		{1, "claude", "off", config.SourceAppMetadata},
-		{2, "claude", "max", config.SourceAppMetadata},
-		{3, "claude", "agents", config.SourceLLMBinding},
-		{9, "claude", "max", config.SourceAppBinding},    // GetApp fails: bindings still apply
-		{10, "gpt", "default", config.SourceDefault},     // GetApp fails, nothing bound
-		{0, "claude", "agents", config.SourceLLMBinding}, // no App: no lookup
+		{1, "claude", true, "off", config.SourceAppMetadata},
+		{2, "claude", true, "max", config.SourceAppMetadata},
+		{3, "claude", true, "agents", config.SourceLLMBinding},
+		{9, "claude", true, "max", config.SourceAppBinding},
+		{10, "gpt", false, "", ""},                                  // GetApp fails: the App may have opted out
+		{appNotFound, "gpt", true, "default", config.SourceDefault}, // the host has no such App
+		{0, "claude", true, "agents", config.SourceLLMBinding},      // no App: no lookup
 	}
 	for _, tc := range cases {
 		ctx := base
 		ctx.AppID, ctx.LLMSlug, ctx.LLMID = tc.app, tc.llmSlug, 4
-		r := p.resolvePolicy(ctx)
-		if r.Name != tc.wantPolicy || r.Source != tc.wantSource {
-			t.Errorf("App %d: %s from %s, want %s from %s", tc.app, r.Name, r.Source, tc.wantPolicy, tc.wantSource)
+		r, known := p.resolvePolicy(ctx)
+		if known != tc.wantKnown || r.Name != tc.wantPolicy || r.Source != tc.wantSource {
+			t.Errorf("App %d: %s from %s (known %v), want %s from %s (known %v)", tc.app, r.Name, r.Source, known, tc.wantPolicy, tc.wantSource, tc.wantKnown)
 		}
 	}
 	before := gw.calls.Load()
@@ -140,14 +162,43 @@ func TestResolvePolicyReadsAppMetadata(t *testing.T) {
 	}
 }
 
+// Once an App's opt-out is known it holds while refreshes fail.
+func TestResolvePolicyKeepsAStaleOptOut(t *testing.T) {
+	gw := &fakeGateway{metadata: map[uint32]string{1: `{"prompt_compressor.policy": "off"}`}}
+	p, ctx := gatewayPlugin(t, testConfig, gw)
+	now := time.Now()
+	var mu sync.Mutex
+	p.appMeta.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	ctx.AppID, ctx.LLMSlug = 1, "claude"
+	if r, known := p.resolvePolicy(ctx); !known || r.Name != "off" {
+		t.Fatalf("got %s (known %v)", r.Name, known)
+	}
+	gw.setMetadata(1, "")
+	mu.Lock()
+	now = now.Add(time.Hour)
+	mu.Unlock()
+	for i := 0; i < 2; i++ {
+		if r, known := p.resolvePolicy(ctx); !known || r.Name != "off" {
+			t.Errorf("refresh %d: got %s (known %v), want the stale off", i, r.Name, known)
+		}
+		p.appMeta.inflight.Wait()
+	}
+	if gw.calls.Load() < 2 {
+		t.Error("the stale value was not refreshed")
+	}
+}
+
 func TestResolvePolicyWithoutServices(t *testing.T) {
 	p := NewPromptCompressorPlugin()
 	if err := p.Initialize(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway}, hostConfig(t, testConfig)); err != nil {
 		t.Fatal(err)
 	}
-	r := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, AppID: 5, LLMSlug: "claude"})
-	if r.Name != "agents" {
-		t.Errorf("without a broker resolved %s, want the llm binding", r.Name)
+	if _, known := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, AppID: 5, LLMSlug: "claude"}); known {
+		t.Error("without a broker an App's policy was known")
+	}
+	r, known := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, LLMSlug: "claude"})
+	if !known || r.Name != "agents" {
+		t.Errorf("without a broker or App resolved %s, want the llm binding", r.Name)
 	}
 }
 

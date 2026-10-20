@@ -90,7 +90,8 @@ func TestPostAuthModes(t *testing.T) {
 				t.Fatalf("response %+v", resp)
 			}
 			if tc.modified {
-				want, _ := compress.New(compress.Options{}).Compress(compress.Input{Format: "openai", Body: body, Policy: p.resolvePolicy(ctx).Policy})
+				res, _ := p.resolvePolicy(ctx)
+				want, _ := compress.New(compress.Options{}).Compress(compress.Input{Format: "openai", Body: body, Policy: res.Policy})
 				if !bytes.Equal(resp.Body, want) || len(resp.Body) >= len(body) {
 					t.Fatal("enforce did not forward the compress output")
 				}

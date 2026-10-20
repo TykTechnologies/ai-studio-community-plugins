@@ -141,8 +141,9 @@ func (g *hangingGateway) GetApp(ctx context.Context, appID uint32) (interface{},
 }
 
 // A host that never answers costs a request the lookup wait, not the
-// broker's retries: the request is still compressed, by the vendor's
-// format and the plugin's own policy.
+// broker's retries. Without an App the request is still compressed, by the
+// vendor's format and the plugin's own policy; an App's request is
+// forwarded unchanged, since the App may have opted out.
 func TestPostAuthDoesNotWaitForAHungHost(t *testing.T) {
 	p, ctx := hookPlugin(t, `{"mode":"enforce"}`)
 	gw := &hangingGateway{llmGateway: ctx.Services.(*llmBroker).gw, release: make(chan struct{})}
@@ -151,20 +152,32 @@ func TestPostAuthDoesNotWaitForAHungHost(t *testing.T) {
 	p.mu.Lock()
 	p.services = ctx.Services
 	p.mu.Unlock()
-	ctx.AppID = 1
 
 	// The first request also loads the tokenizer, which takes about a
-	// second under -race; the second shows what the hung lookups cost (the
-	// broker's own retries take 25 s, a hung fetch forever).
-	for i, limit := range []time.Duration{10 * time.Second, 2 * time.Second} {
-		ctx.RequestID = fmt.Sprintf("req-%d", i)
+	// second under -race; the later ones show what the hung lookups cost
+	// (the broker's own retries take 25 s, a hung fetch forever).
+	for i, tc := range []struct {
+		app      uint32
+		limit    time.Duration
+		modified bool
+	}{
+		{0, 10 * time.Second, true},
+		{0, 2 * time.Second, true},
+		{1, 2 * time.Second, false},
+	} {
+		ctx.RequestID, ctx.AppID = fmt.Sprintf("req-%d", i), tc.app
+		body := noisyBody(t)
 		start := time.Now()
-		resp, err := p.HandlePostAuth(ctx, request(noisyBody(t), nil))
-		if d := time.Since(start); d > limit {
+		resp, err := p.HandlePostAuth(ctx, request(body, nil))
+		if d := time.Since(start); d > tc.limit {
 			t.Errorf("request %d took %v with a hung host", i, d)
 		}
-		if err != nil || !resp.Modified {
+		if err != nil || resp.Modified != tc.modified {
 			t.Errorf("request %d: resp %+v, err %v", i, resp, err)
+		}
+		rec, _ := p.pending.take(ctx.RequestID)
+		if !tc.modified && (rec.Outcome != "skipped" || rec.Report.Reason != ReasonAppPolicyUnknown) {
+			t.Errorf("request %d: record %+v", i, rec)
 		}
 	}
 }

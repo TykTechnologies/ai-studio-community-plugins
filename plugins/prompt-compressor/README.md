@@ -89,8 +89,12 @@ hold the compression settings; bindings pick a policy per LLM or App.
   on exactly one LLM.
 - **Precedence:** the App metadata key `prompt_compressor.policy` (needs
   `apps.read`; cached 30 s per App), then `app:`, `llm_id:`, `llm:`, then
-  `default_policy`. A policy name that doesn't exist in App metadata, or a
-  failed App lookup, falls back to the bindings.
+  `default_policy`. A policy name that doesn't exist in App metadata falls
+  back to the bindings. While an App's metadata is unknown (the lookup is
+  pending, the host is unreachable, or `apps.read` isn't approved) the App's
+  requests are forwarded unchanged with reason `app_policy_unknown`, since
+  the App may have opted out; a request waits at most 25 ms for the lookup.
+  Once known, the metadata is kept while a refresh fails.
 - **Engine credentials** are top-level keys, `engine_<name>_url` and
   `engine_<name>_token`, so `$SECRET/` references work. External engines are
   not supported yet.
@@ -205,7 +209,7 @@ next flush.
 | `kv.readwrite` | Savings rollups and memoised results |
 | `control.send` | Savings records from the edges to Studio |
 | `pricing.read` | Model prices, including the cache-read price, to cost the savings |
-| `apps.read` | The per-App policy override in App metadata; the App picker |
+| `apps.read` | The per-App policy override in App metadata; the App picker. Without it nothing sent through an App is compressed |
 | `llms.read` | The LLM picker on the Policies page; the LLM's endpoint, which decides the request format |
 
 ## Building

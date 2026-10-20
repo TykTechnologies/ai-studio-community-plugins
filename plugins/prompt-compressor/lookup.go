@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// errLookupPending: the value is being fetched in the background; the
-// request goes on without it.
-var errLookupPending = errors.New("lookup pending")
-
 // asyncLookup caches values the request path needs from the host (an LLM's
 // endpoint, an App's metadata) and never makes a request wait on the host
 // longer than the caller allows (getWait). A miss starts one background

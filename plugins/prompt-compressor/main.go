@@ -154,11 +154,7 @@ func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap ma
 	}
 
 	cfg, err := loadConfig(configMap)
-	next := &pluginState{config: cfg, configErr: err, apps: config.NewAppPolicyCache(p.appMetadata)}
-	if prev := p.current.Load(); prev != nil && prev.apps != nil {
-		next.apps = prev.apps
-	}
-	p.current.Store(next)
+	p.current.Store(&pluginState{config: cfg, configErr: err})
 	if err != nil {
 		p.logger().Error("Invalid configuration, compression is off until it is fixed", "error", err.Error())
 	} else if len(cfg.Ignored) > 0 {

@@ -22,6 +22,11 @@ const BypassHeader = "X-Tyk-Compression"
 // endpoint, an App's metadata) the plugin does not have yet.
 const lookupWait = 25 * time.Millisecond
 
+// ReasonAppPolicyUnknown: the request's App metadata, which may opt the App
+// out, is not known yet (or the host cannot be asked), so the request is
+// forwarded unchanged.
+const ReasonAppPolicyUnknown = "app_policy_unknown"
+
 var (
 	errNoBroker           = errors.New("no service broker")
 	errUnexpectedResponse = errors.New("unexpected service response")
@@ -92,7 +97,17 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 
-	res := p.resolvePolicy(ctx)
+	res, known := p.resolvePolicy(ctx)
+	if !known {
+		rec := pendingRecord{
+			RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode,
+			Outcome: string(compress.OutcomeSkipped),
+			Report:  compress.Report{Outcome: compress.OutcomeSkipped, Reason: ReasonAppPolicyUnknown},
+		}
+		p.counters.count(rec.Outcome)
+		p.pending.put(rec)
+		return passThrough, nil
+	}
 	rec := pendingRecord{
 		RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor,
 		Mode: cfg.Mode, PolicyName: res.Name, PolicyHash: res.Hash,

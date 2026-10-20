@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	studiopb "github.com/TykTechnologies/midsommar/v2/proto/ai_studio_management"
 	mgmtpb "github.com/TykTechnologies/midsommar/v2/proto/microgateway_management"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // pluginState is the configuration the hooks read. Initialize replaces it
@@ -19,7 +22,6 @@ type pluginState struct {
 	// configErr is why the admin's config was rejected; the plugin then
 	// runs with compression off.
 	configErr error
-	apps      *config.AppPolicyCache
 }
 
 // loadConfig parses the host's config map. An invalid config turns
@@ -51,15 +53,23 @@ var initialState = func() *pluginState {
 }()
 
 // resolvePolicy picks the policy for a request from the post_auth context:
-// the App metadata override, then the bindings, then the default policy. A
-// failed App lookup reads as no override, so it never fails the request.
-func (p *PromptCompressorPlugin) resolvePolicy(ctx plugin_sdk.Context) config.Resolution {
+// the App metadata override, then the bindings, then the default policy.
+//
+// known is false when the request has an App whose metadata the plugin
+// does not have (the lookup is pending or failing): the App may have opted
+// out, so the request must not be compressed. Once the metadata is known a
+// stale copy is used while it is refreshed.
+func (p *PromptCompressorPlugin) resolvePolicy(ctx plugin_sdk.Context) (res config.Resolution, known bool) {
 	s := p.state()
 	var appPolicy string
-	if ctx.AppID != 0 && s.apps != nil {
-		appPolicy = s.apps.Policy(withServices(ctx), ctx.AppID)
+	if ctx.AppID != 0 {
+		md, ok := p.appMeta.getWait(ctx.AppID, lookupWait)
+		if !ok {
+			return config.Resolution{}, false
+		}
+		appPolicy = config.AppPolicyFromMetadata(md)
 	}
-	return s.config.Resolve(config.Target{AppID: ctx.AppID, LLMID: ctx.LLMID, LLMSlug: ctx.LLMSlug}, appPolicy)
+	return s.config.Resolve(config.Target{AppID: ctx.AppID, LLMID: ctx.LLMID, LLMSlug: ctx.LLMSlug}, appPolicy), true
 }
 
 // servicesKey carries the request's plugin_sdk.Context through the
@@ -95,26 +105,29 @@ func rpcValidateConfig(payload []byte) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{"valid": len(problems) == 0, "errors": problems})
 }
 
-// newAppMetadataLookup caches App metadata, fetched in the background.
-func (p *PromptCompressorPlugin) newAppMetadataLookup() *asyncLookup[uint32, string] {
-	return newAsyncLookup(config.DefaultAppPolicyTTL, config.DefaultAppPolicyErrorTTL, config.DefaultAppPolicyMax, func(appID uint32) (string, error) {
-		return fetchAppMetadata(withServices(p.backgroundContext()), appID)
-	})
-}
+// App metadata cache settings.
+const (
+	appMetadataTTL      = 30 * time.Second
+	appMetadataErrorTTL = 5 * time.Second
+	appMetadataMaxSize  = 10000
+)
 
-// appMetadata is the AppPolicyCache fetcher: the App's metadata when it is
-// known, errLookupPending (no override, briefly cached) while it is
-// fetched. It waits for the host at most lookupWait.
-func (p *PromptCompressorPlugin) appMetadata(_ context.Context, appID uint32) (string, error) {
-	if md, ok := p.appMeta.getWait(appID, lookupWait); ok {
-		return md, nil
-	}
-	return "", errLookupPending
+// newAppMetadataLookup caches App metadata, fetched in the background. An
+// App the host does not have (NotFound) has no override; any other failure
+// leaves the metadata unknown.
+func (p *PromptCompressorPlugin) newAppMetadataLookup() *asyncLookup[uint32, string] {
+	return newAsyncLookup(appMetadataTTL, appMetadataErrorTTL, appMetadataMaxSize, func(appID uint32) (string, error) {
+		md, err := fetchAppMetadata(withServices(p.backgroundContext()), appID)
+		if status.Code(err) == codes.NotFound {
+			return "", nil
+		}
+		return md, err
+	})
 }
 
 // fetchAppMetadata reads an App's metadata JSON through the host. It needs
 // the apps.read scope; until the admin approves it, the call fails and the
-// App has no override.
+// App's requests are not compressed (resolvePolicy).
 func fetchAppMetadata(c context.Context, appID uint32) (string, error) {
 	ctx, ok := c.Value(servicesKey{}).(plugin_sdk.Context)
 	if !ok || ctx.Services == nil {
