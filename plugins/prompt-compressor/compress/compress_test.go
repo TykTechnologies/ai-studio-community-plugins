@@ -381,6 +381,41 @@ func TestDedupeReferences(t *testing.T) {
 	}
 }
 
+// The model's own Responses items (reasoning, calls, built-in tool actions)
+// are read by guardrails but never rewritten, whatever roles the policy
+// selects, and encrypted content is never touched.
+func TestResponsesModelItemsUntouched(t *testing.T) {
+	noisy := "\u001b[31mnoisy\u001b[0m   \n\n\n\n" + strings.Repeat("x  \n", 50)
+	items := []any{
+		map[string]any{"type": "reasoning", "id": "rs", "summary": []any{map[string]any{"type": "summary_text", "text": noisy}}, "encrypted_content": "ENC  \n\n\n"},
+		map[string]any{"type": "local_shell_call", "id": "ls", "call_id": "c1", "action": map[string]any{"type": "exec", "command": []any{noisy}}},
+		map[string]any{"type": "local_shell_call_output", "call_id": "c1", "output": noisy},
+		map[string]any{"type": "function_call", "name": "f", "call_id": "c2", "arguments": `{"a":  "` + strings.Repeat("y", 400) + `"}`},
+		map[string]any{"type": "function_call_output", "call_id": "c2", "output": noisy},
+	}
+	body := mustJSON(t, map[string]any{"model": "gpt-5", "input": items})
+	p := allRoles()
+	p.ProtectRecentTurns = 0
+	out, rep := New(Options{}).Compress(Input{Format: "openai_responses", Body: body, Policy: p})
+	if rep.Outcome != OutcomeCompressed || rep.UnitsCompressed != 2 {
+		t.Fatalf("report %+v", rep)
+	}
+	var before, after struct{ Input []json.RawMessage }
+	if json.Unmarshal(body, &before) != nil || json.Unmarshal(out, &after) != nil {
+		t.Fatal("not JSON")
+	}
+	for _, i := range []int{0, 1, 3} {
+		if !bytes.Equal(before.Input[i], after.Input[i]) {
+			t.Errorf("model item %d changed:\n%s\n%s", i, before.Input[i], after.Input[i])
+		}
+	}
+	for _, i := range []int{2, 4} {
+		if bytes.Equal(before.Input[i], after.Input[i]) {
+			t.Errorf("tool output %d was not compressed", i)
+		}
+	}
+}
+
 // The post-check rejects a rewrite that breaks the body, returning the
 // original.
 func TestPostCheckRejects(t *testing.T) {
