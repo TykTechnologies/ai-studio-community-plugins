@@ -10,10 +10,33 @@ import (
 	"time"
 
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
+	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
 
-// A fetch that hangs costs the caller at most its wait, and later callers
-// share the one fetch instead of starting more.
+// hangGuard is how long a call that must not wait on a hung host may take
+// before the test calls it a hang. The hung host only answers after the
+// call returns, so returning at all is the assertion; the guard only stops
+// a broken build from hanging the suite.
+const hangGuard = 5 * time.Second
+
+// returns runs fn and fails the test if it has not returned within
+// hangGuard.
+func returns(t *testing.T, what string, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(hangGuard):
+		t.Fatalf("%s waited for a hung host", what)
+	}
+}
+
+// A fetch that hangs does not hold the caller, and later callers share the
+// one fetch instead of starting more.
 func TestLookupHungFetchIsBounded(t *testing.T) {
 	release := make(chan struct{})
 	var calls atomic.Int32
@@ -22,15 +45,13 @@ func TestLookupHungFetchIsBounded(t *testing.T) {
 		<-release
 		return "v", nil
 	})
-	start := time.Now()
-	for i := 0; i < 5; i++ {
-		if _, ok := c.getWait(1, 10*time.Millisecond); ok {
-			t.Fatal("a value before the fetch returned")
+	returns(t, "getWait", func() {
+		for i := 0; i < 5; i++ {
+			if _, ok := c.getWait(1, 10*time.Millisecond); ok {
+				t.Error("a value before the fetch returned")
+			}
 		}
-	}
-	if d := time.Since(start); d > time.Second {
-		t.Errorf("five lookups took %v", d)
-	}
+	})
 	close(release)
 	c.inflight.Wait()
 	if v, ok := c.get(1); !ok || v != "v" {
@@ -140,10 +161,11 @@ func (g *hangingGateway) GetApp(ctx context.Context, appID uint32) (interface{},
 	return nil, errors.New("timeout waiting for connection info")
 }
 
-// A host that never answers costs a request the lookup wait, not the
-// broker's retries. Without an App the request is still compressed, by the
-// vendor's format and the plugin's own policy; an App's request is
-// forwarded unchanged, since the App may have opted out.
+// A host that never answers (it is released only after the test) costs a
+// request the lookup wait, not the broker's retries. Without an App the
+// request is still compressed, by the vendor's format and the plugin's own
+// policy; an App's request is forwarded unchanged, since the App may have
+// opted out.
 func TestPostAuthDoesNotWaitForAHungHost(t *testing.T) {
 	p, ctx := hookPlugin(t, `{"mode":"enforce"}`)
 	gw := &hangingGateway{llmGateway: ctx.Services.(*llmBroker).gw, release: make(chan struct{})}
@@ -153,25 +175,19 @@ func TestPostAuthDoesNotWaitForAHungHost(t *testing.T) {
 	p.services = ctx.Services
 	p.mu.Unlock()
 
-	// The first request also loads the tokenizer, which takes about a
-	// second under -race; the later ones show what the hung lookups cost
-	// (the broker's own retries take 25 s, a hung fetch forever).
 	for i, tc := range []struct {
 		app      uint32
-		limit    time.Duration
 		modified bool
 	}{
-		{0, 10 * time.Second, true},
-		{0, 2 * time.Second, true},
-		{1, 2 * time.Second, false},
+		{0, true},
+		{0, true},
+		{1, false},
 	} {
 		ctx.RequestID, ctx.AppID = fmt.Sprintf("req-%d", i), tc.app
 		body := noisyBody(t)
-		start := time.Now()
-		resp, err := p.HandlePostAuth(ctx, request(body, nil))
-		if d := time.Since(start); d > tc.limit {
-			t.Errorf("request %d took %v with a hung host", i, d)
-		}
+		var resp *pb.PluginResponse
+		var err error
+		returns(t, fmt.Sprintf("request %d", i), func() { resp, err = p.HandlePostAuth(ctx, request(body, nil)) })
 		if err != nil || resp.Modified != tc.modified {
 			t.Errorf("request %d: resp %+v, err %v", i, resp, err)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
+	pb "github.com/TykTechnologies/midsommar/v2/proto"
 	mgmtpb "github.com/TykTechnologies/midsommar/v2/proto/microgateway_management"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,13 +32,20 @@ type fakeGateway struct {
 	metadata map[uint32]string
 }
 
-// appNotFound is an App ID fakeGateway does not have.
-const appNotFound = 404
+// appNotFound is an App ID fakeGateway does not have; appDown one it
+// cannot reach.
+const (
+	appNotFound = 404
+	appDown     = 503
+)
 
 func (g *fakeGateway) GetApp(ctx context.Context, appID uint32) (interface{}, error) {
 	g.calls.Add(1)
-	if appID == appNotFound {
+	switch appID {
+	case appNotFound:
 		return nil, status.Error(codes.NotFound, "app not found")
+	case appDown:
+		return nil, status.Error(codes.Unavailable, "service client unavailable")
 	}
 	g.mu.Lock()
 	md, ok := g.metadata[appID]
@@ -69,6 +77,15 @@ func gatewayPlugin(t *testing.T, configJSON string, gw *fakeGateway) (*PromptCom
 		t.Fatalf("Initialize: %v", err)
 	}
 	return p, ctx
+}
+
+// primeApp fetches an App's metadata and waits for it, so a test does not
+// depend on the fetch finishing within lookupWait.
+func primeApp(p *PromptCompressorPlugin, appID uint32) {
+	if appID != 0 {
+		p.appMeta.get(appID)
+		p.appMeta.inflight.Wait()
+	}
 }
 
 // hostConfig flattens a JSON config the way the host does for Initialize.
@@ -131,26 +148,28 @@ func TestResolvePolicyReadsAppMetadata(t *testing.T) {
 	}}
 	p, base := gatewayPlugin(t, testConfig, gw)
 	cases := []struct {
-		app        uint32
-		llmSlug    string
-		wantKnown  bool
-		wantPolicy string
-		wantSource config.Source
+		app         uint32
+		llmSlug     string
+		wantUnknown string
+		wantPolicy  string
+		wantSource  config.Source
 	}{
-		{1, "claude", true, "off", config.SourceAppMetadata},
-		{2, "claude", true, "max", config.SourceAppMetadata},
-		{3, "claude", true, "agents", config.SourceLLMBinding},
-		{9, "claude", true, "max", config.SourceAppBinding},
-		{10, "gpt", false, "", ""},                                  // GetApp fails: the App may have opted out
-		{appNotFound, "gpt", true, "default", config.SourceDefault}, // the host has no such App
-		{0, "claude", true, "agents", config.SourceLLMBinding},      // no App: no lookup
+		{1, "claude", "", "off", config.SourceAppMetadata},
+		{2, "claude", "", "max", config.SourceAppMetadata},
+		{3, "claude", "", "agents", config.SourceLLMBinding},
+		{9, "claude", "", "max", config.SourceAppBinding},
+		{10, "gpt", ReasonAppScopeMissing, "", ""},                // apps.read refused: the App may have opted out
+		{appDown, "gpt", ReasonAppPolicyUnknown, "", ""},          // host unreachable
+		{appNotFound, "gpt", "", "default", config.SourceDefault}, // the host has no such App
+		{0, "claude", "", "agents", config.SourceLLMBinding},      // no App: no lookup
 	}
 	for _, tc := range cases {
 		ctx := base
 		ctx.AppID, ctx.LLMSlug, ctx.LLMID = tc.app, tc.llmSlug, 4
-		r, known := p.resolvePolicy(ctx)
-		if known != tc.wantKnown || r.Name != tc.wantPolicy || r.Source != tc.wantSource {
-			t.Errorf("App %d: %s from %s (known %v), want %s from %s (known %v)", tc.app, r.Name, r.Source, known, tc.wantPolicy, tc.wantSource, tc.wantKnown)
+		primeApp(p, tc.app)
+		r, unknown := p.resolvePolicy(ctx)
+		if unknown != tc.wantUnknown || r.Name != tc.wantPolicy || r.Source != tc.wantSource {
+			t.Errorf("App %d: %s from %s (unknown %q), want %s from %s (unknown %q)", tc.app, r.Name, r.Source, unknown, tc.wantPolicy, tc.wantSource, tc.wantUnknown)
 		}
 	}
 	before := gw.calls.Load()
@@ -170,16 +189,17 @@ func TestResolvePolicyKeepsAStaleOptOut(t *testing.T) {
 	var mu sync.Mutex
 	p.appMeta.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
 	ctx.AppID, ctx.LLMSlug = 1, "claude"
-	if r, known := p.resolvePolicy(ctx); !known || r.Name != "off" {
-		t.Fatalf("got %s (known %v)", r.Name, known)
+	primeApp(p, 1)
+	if r, unknown := p.resolvePolicy(ctx); unknown != "" || r.Name != "off" {
+		t.Fatalf("got %s (unknown %q)", r.Name, unknown)
 	}
 	gw.setMetadata(1, "")
 	mu.Lock()
 	now = now.Add(time.Hour)
 	mu.Unlock()
 	for i := 0; i < 2; i++ {
-		if r, known := p.resolvePolicy(ctx); !known || r.Name != "off" {
-			t.Errorf("refresh %d: got %s (known %v), want the stale off", i, r.Name, known)
+		if r, unknown := p.resolvePolicy(ctx); unknown != "" || r.Name != "off" {
+			t.Errorf("refresh %d: got %s (unknown %q), want the stale off", i, r.Name, unknown)
 		}
 		p.appMeta.inflight.Wait()
 	}
@@ -188,16 +208,51 @@ func TestResolvePolicyKeepsAStaleOptOut(t *testing.T) {
 	}
 }
 
+// When the host refuses App lookups (apps.read not approved) the App's
+// requests are forwarded with reason app_scope_missing, and getStatus says
+// why; the warning goes once a lookup succeeds.
+func TestAppScopeMissingIsVisible(t *testing.T) {
+	gw := &fakeGateway{metadata: map[uint32]string{1: `{}`}}
+	p, ctx := gatewayPlugin(t, `{"mode":"enforce"}`, gw)
+	ctx.RequestID, ctx.AppID, ctx.Vendor = "req-1", 10, "openai"
+	primeApp(p, 10)
+	resp, _ := p.HandlePostAuth(ctx, &pb.EnrichedRequest{Request: &pb.PluginRequest{Method: "POST", Path: "/llm/rest/gpt/v1/chat/completions", Body: []byte(`{"messages":[]}`)}})
+	rec, _ := p.pending.take("req-1")
+	if resp.Modified || rec.Outcome != "skipped" || rec.Report.Reason != ReasonAppScopeMissing {
+		t.Fatalf("resp %+v, record %+v", resp, rec)
+	}
+	warnings := func() []string {
+		raw, err := p.HandleRPC("getStatus", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var st struct {
+			Warnings []string `json:"warnings"`
+		}
+		if err := json.Unmarshal(raw, &st); err != nil {
+			t.Fatal(err)
+		}
+		return st.Warnings
+	}
+	if w := warnings(); len(w) != 1 || w[0] != appScopeMissingStatus {
+		t.Errorf("warnings %q", w)
+	}
+	primeApp(p, 1)
+	if w := warnings(); len(w) != 0 {
+		t.Errorf("warnings after a successful lookup %q", w)
+	}
+}
+
 func TestResolvePolicyWithoutServices(t *testing.T) {
 	p := NewPromptCompressorPlugin()
 	if err := p.Initialize(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway}, hostConfig(t, testConfig)); err != nil {
 		t.Fatal(err)
 	}
-	if _, known := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, AppID: 5, LLMSlug: "claude"}); known {
-		t.Error("without a broker an App's policy was known")
+	if _, unknown := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, AppID: 5, LLMSlug: "claude"}); unknown != ReasonAppPolicyUnknown {
+		t.Errorf("without a broker an App's policy was %q", unknown)
 	}
-	r, known := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, LLMSlug: "claude"})
-	if !known || r.Name != "agents" {
+	r, unknown := p.resolvePolicy(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, LLMSlug: "claude"})
+	if unknown != "" || r.Name != "agents" {
 		t.Errorf("without a broker or App resolved %s, want the llm binding", r.Name)
 	}
 }

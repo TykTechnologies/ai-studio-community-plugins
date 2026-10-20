@@ -66,6 +66,9 @@ type PromptCompressorPlugin struct {
 	llms       *asyncLookup[uint32, llmInfo]
 	appMeta    *asyncLookup[uint32, string]
 	counters   hookCounters
+	// appScopeMissing: the host refused the last App lookup (apps.read is
+	// not approved), so App traffic is forwarded uncompressed.
+	appScopeMissing atomic.Bool
 
 	// rec takes completed requests (response.go); nil is records.Nop.
 	rec records.Recorder
@@ -243,6 +246,10 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 		if s.configErr != nil {
 			configError = s.configErr.Error()
 		}
+		var warnings []string
+		if p.appScopeMissing.Load() {
+			warnings = append(warnings, appScopeMissingStatus)
+		}
 		return json.Marshal(map[string]interface{}{
 			"plugin":           PluginName,
 			"version":          PluginVersion,
@@ -251,6 +258,7 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 			"config_error":     configError,
 			"strategy_version": config.StrategyVersion,
 			"requests":         p.counters.snapshot(),
+			"warnings":         warnings,
 		})
 	case "validateConfig":
 		return rpcValidateConfig(payload)

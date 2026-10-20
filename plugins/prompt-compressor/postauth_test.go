@@ -119,7 +119,7 @@ func TestPostAuthBypass(t *testing.T) {
 	p, ctx := hookPlugin(t, `{"mode":"enforce","allow_client_bypass":true}`)
 	resp, _ := p.HandlePostAuth(ctx, request(body, hdr))
 	rec, _ := p.pending.take("req-1")
-	if resp.Modified || rec.Outcome != OutcomeBypassed {
+	if resp.Modified || rec.Outcome != OutcomeBypassed || rec.Report.Reason != ReasonClientBypass {
 		t.Fatalf("bypass allowed: %+v, %+v", resp, rec)
 	}
 
@@ -189,6 +189,8 @@ func TestPostAuthFormatFromEndpoint(t *testing.T) {
 	}})
 	req := request(body, nil)
 	req.Request.Path = "/llm/rest/gpt/responses"
+	p.llms.get(ctx.LLMID) // the endpoint is known before the request
+	p.llms.inflight.Wait()
 	resp, _ := p.HandlePostAuth(ctx, req)
 	rec, _ := p.pending.take("req-1")
 	if !resp.Modified || rec.Report.Format != "openai_responses" {

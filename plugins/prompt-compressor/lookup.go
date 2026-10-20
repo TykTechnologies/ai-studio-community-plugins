@@ -31,6 +31,7 @@ type lookupEntry[V any] struct {
 	retryAt  time.Time // when a failed key may be fetched again
 	fetching bool
 	done     chan struct{} // closed when the current fetch ends
+	err      error         // the last fetch's error; nil after a success
 }
 
 func newAsyncLookup[K comparable, V any](ttl, errTTL time.Duration, max int, fetch func(K) (V, error)) *asyncLookup[K, V] {
@@ -111,11 +112,23 @@ func (c *asyncLookup[K, V]) refresh(k K, e *lookupEntry[V]) {
 	defer c.mu.Unlock()
 	e.fetching = false
 	close(e.done)
+	e.err = err
 	if err != nil {
 		e.retryAt = now.Add(c.errTTL)
 		return
 	}
 	e.val, e.ok, e.expires = v, true, now.Add(c.ttl)
+}
+
+// lastError is the error of k's last fetch, nil when it succeeded or none
+// has finished.
+func (c *asyncLookup[K, V]) lastError(k K) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e := c.entries[k]; e != nil {
+		return e.err
+	}
+	return nil
 }
 
 // evictLocked drops idle entries, and everything when that is not enough.

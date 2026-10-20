@@ -55,21 +55,26 @@ var initialState = func() *pluginState {
 // resolvePolicy picks the policy for a request from the post_auth context:
 // the App metadata override, then the bindings, then the default policy.
 //
-// known is false when the request has an App whose metadata the plugin
-// does not have (the lookup is pending or failing): the App may have opted
-// out, so the request must not be compressed. Once the metadata is known a
-// stale copy is used while it is refreshed.
-func (p *PromptCompressorPlugin) resolvePolicy(ctx plugin_sdk.Context) (res config.Resolution, known bool) {
+// unknown is set when the request has an App whose metadata the plugin
+// does not have: the App may have opted out, so the request must not be
+// compressed. It is ReasonAppScopeMissing when the host refused the lookup
+// (apps.read not approved), else ReasonAppPolicyUnknown (pending or
+// failing). Once the metadata is known a stale copy is used while it is
+// refreshed.
+func (p *PromptCompressorPlugin) resolvePolicy(ctx plugin_sdk.Context) (res config.Resolution, unknown string) {
 	s := p.state()
 	var appPolicy string
 	if ctx.AppID != 0 {
 		md, ok := p.appMeta.getWait(ctx.AppID, lookupWait)
 		if !ok {
-			return config.Resolution{}, false
+			if status.Code(p.appMeta.lastError(ctx.AppID)) == codes.PermissionDenied {
+				return config.Resolution{}, ReasonAppScopeMissing
+			}
+			return config.Resolution{}, ReasonAppPolicyUnknown
 		}
 		appPolicy = config.AppPolicyFromMetadata(md)
 	}
-	return s.config.Resolve(config.Target{AppID: ctx.AppID, LLMID: ctx.LLMID, LLMSlug: ctx.LLMSlug}, appPolicy), true
+	return s.config.Resolve(config.Target{AppID: ctx.AppID, LLMID: ctx.LLMID, LLMSlug: ctx.LLMSlug}, appPolicy), ""
 }
 
 // servicesKey carries the request's plugin_sdk.Context through the
@@ -118,8 +123,13 @@ const (
 func (p *PromptCompressorPlugin) newAppMetadataLookup() *asyncLookup[uint32, string] {
 	return newAsyncLookup(appMetadataTTL, appMetadataErrorTTL, appMetadataMaxSize, func(appID uint32) (string, error) {
 		md, err := fetchAppMetadata(withServices(p.backgroundContext()), appID)
-		if status.Code(err) == codes.NotFound {
+		switch status.Code(err) {
+		case codes.NotFound:
 			return "", nil
+		case codes.PermissionDenied:
+			p.appScopeMissing.Store(true)
+		case codes.OK:
+			p.appScopeMissing.Store(false)
 		}
 		return md, err
 	})

@@ -90,11 +90,14 @@ hold the compression settings; bindings pick a policy per LLM or App.
 - **Precedence:** the App metadata key `prompt_compressor.policy` (needs
   `apps.read`; cached 30 s per App), then `app:`, `llm_id:`, `llm:`, then
   `default_policy`. A policy name that doesn't exist in App metadata falls
-  back to the bindings. While an App's metadata is unknown (the lookup is
-  pending, the host is unreachable, or `apps.read` isn't approved) the App's
-  requests are forwarded unchanged with reason `app_policy_unknown`, since
-  the App may have opted out; a request waits at most 25 ms for the lookup.
-  Once known, the metadata is kept while a refresh fails.
+  back to the bindings. While an App's metadata is unknown the App's
+  requests are forwarded unchanged, since the App may have opted out: reason
+  `app_scope_missing` when the host refuses the lookup (`apps.read` isn't
+  approved; the status RPC and the dashboard say so too), else
+  `app_policy_unknown` (the lookup is pending or the host is unreachable).
+  A request waits at most 25 ms for the lookup. Once known, the metadata is
+  kept while a refresh fails. A client bypass is recorded with reason
+  `client_bypass`.
 - **Engine credentials** are top-level keys, `engine_<name>_url` and
   `engine_<name>_token`, so `$SECRET/` references work. External engines are
   not supported yet.

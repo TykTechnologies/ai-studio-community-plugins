@@ -27,6 +27,17 @@ const lookupWait = 25 * time.Millisecond
 // forwarded unchanged.
 const ReasonAppPolicyUnknown = "app_policy_unknown"
 
+// ReasonAppScopeMissing: as ReasonAppPolicyUnknown, because the host
+// refused the App lookup (the plugin's apps.read scope is not approved).
+const ReasonAppScopeMissing = "app_scope_missing"
+
+// ReasonClientBypass: the client sent X-Tyk-Compression: off.
+const ReasonClientBypass = "client_bypass"
+
+// appScopeMissingStatus is getStatus's message while App lookups are
+// refused.
+const appScopeMissingStatus = "apps.read not approved: App traffic is forwarded uncompressed"
+
 var (
 	errNoBroker           = errors.New("no service broker")
 	errUnexpectedResponse = errors.New("unexpected service response")
@@ -93,16 +104,17 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 
 	if cfg.AllowClientBypass && strings.EqualFold(strings.TrimSpace(headerValue(r.GetHeaders(), BypassHeader)), "off") {
 		p.counters.count(OutcomeBypassed)
-		p.pending.put(pendingRecord{RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode, Outcome: OutcomeBypassed})
+		p.pending.put(pendingRecord{RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode, Outcome: OutcomeBypassed,
+			Report: compress.Report{Reason: ReasonClientBypass}})
 		return passThrough, nil
 	}
 
-	res, known := p.resolvePolicy(ctx)
-	if !known {
+	res, unknown := p.resolvePolicy(ctx)
+	if unknown != "" {
 		rec := pendingRecord{
 			RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode,
 			Outcome: string(compress.OutcomeSkipped),
-			Report:  compress.Report{Outcome: compress.OutcomeSkipped, Reason: ReasonAppPolicyUnknown},
+			Report:  compress.Report{Outcome: compress.OutcomeSkipped, Reason: unknown},
 		}
 		p.counters.count(rec.Outcome)
 		p.pending.put(rec)
