@@ -8,6 +8,7 @@ replace github.com/TykTechnologies/midsommar/microgateway => ../../../microgatew
 
 require (
 	github.com/TykTechnologies/midsommar/v2 v2.0.0
+	github.com/gosimple/slug v1.13.1
 	github.com/xeipuuv/gojsonschema v1.2.0
 )
 
@@ -19,7 +20,6 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gosimple/slug v1.13.1 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-plugin v1.7.0 // indirect

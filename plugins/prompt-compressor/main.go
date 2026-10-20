@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,8 +45,14 @@ type PromptCompressorPlugin struct {
 	runtime  plugin_sdk.RuntimeType
 	services plugin_sdk.ServiceBroker
 
+	// pluginID is the plugin's own ID, from the host's config keys.
+	pluginID atomic.Uint32
+
 	// current is the configuration the hooks read; see state().
 	current atomic.Pointer[pluginState]
+
+	// testStudio replaces the Studio service API in tests.
+	testStudio studioAPI
 }
 
 // NewPromptCompressorPlugin creates a new plugin instance
@@ -94,6 +101,14 @@ func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap ma
 	p.runtime = ctx.Runtime
 	p.services = ctx.Services
 	p.mu.Unlock()
+
+	// Studio passes plugin_id, the gateway _plugin_id
+	for _, key := range []string{"plugin_id", "_plugin_id"} {
+		if id, err := strconv.ParseUint(configMap[key], 10, 32); err == nil && id > 0 {
+			p.pluginID.Store(uint32(id))
+			break
+		}
+	}
 
 	cfg, err := loadConfig(configMap)
 	next := &pluginState{config: cfg, configErr: err, apps: config.NewAppPolicyCache(fetchAppMetadata)}
@@ -218,6 +233,18 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 		})
 	case "validateConfig":
 		return rpcValidateConfig(payload)
+	case "getEditor":
+		view, err := p.rpcGetEditor(p.studioAPI(), p.pluginID.Load())
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(view)
+	case "saveConfig":
+		res, err := p.rpcSaveConfig(p.studioAPI(), p.pluginID.Load(), payload)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(res)
 	default:
 		return nil, fmt.Errorf("unknown RPC method: %s", method)
 	}

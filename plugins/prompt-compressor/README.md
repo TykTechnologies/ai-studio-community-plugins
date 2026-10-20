@@ -69,8 +69,26 @@ hold the compression settings; bindings pick a policy per LLM or App.
   change it; engine credentials are not part of it.
 
 An invalid config is logged and turns compression off; it never stops the
-plugin loading. The `validateConfig` RPC checks a config before it is saved.
-The full schema is in `config.schema.json`.
+plugin loading. The full schema is in `config.schema.json`.
+
+### Policies page
+
+Admin > Prompt Compressor > Policies edits the mode, the policies and their
+bindings, and saves them through the host's plugin config update, so the
+edges pick the change up on their next config sync. It validates before it
+saves and warns that a change makes every affected session miss the prompt
+cache once. LLMs are bound by ID (`llm_id:<id>`); `llm:<slug>` bindings
+written by hand are shown with the LLM they match.
+
+- Reading needs the plugin's **Compression policies read** permission,
+  saving **Compression policies write** (`policies:read` / `policies:write`
+  in the manifest's `rbac` block).
+- Stored engine tokens are masked in the page and kept when it saves.
+  Plugins may not add `$SECRET/` references, so add those in the plugin's own
+  configuration form.
+- The page cannot tell which LLMs have request filters (the management API
+  does not expose them), so it notes on every level-3 policy that it is
+  skipped on such LLMs unless `lossy_with_request_filters` is set.
 
 ## Service scopes
 
@@ -79,7 +97,8 @@ The full schema is in `config.schema.json`.
 | `kv.readwrite` | Savings rollups and memoised results |
 | `control.send` | Savings records from the edges to Studio |
 | `pricing.read` | Model prices, including the cache-read price, to cost the savings |
-| `apps.read` | The per-App policy override in App metadata |
+| `apps.read` | The per-App policy override in App metadata; the App picker |
+| `llms.read` | The LLM picker on the Policies page |
 
 ## Building
 

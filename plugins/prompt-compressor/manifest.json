@@ -8,7 +8,7 @@
     "primary_hook": "post_auth"
   },
   "permissions": {
-    "services": ["kv.readwrite", "control.send", "pricing.read", "apps.read"],
+    "services": ["kv.readwrite", "control.send", "pricing.read", "apps.read", "llms.read"],
     "ui": ["sidebar.register", "route.register"],
     "rpc": ["call"],
     "routes": ["GET:/plugin/com.tyk.prompt-compressor/rpc/*"]
@@ -29,15 +29,35 @@
               "tag": "prompt-compressor-dashboard",
               "entry": "/ui/webc/dashboard.js"
             }
+          },
+          {
+            "type": "route",
+            "path": "/admin/prompt-compressor/policies",
+            "title": "Policies",
+            "mount": {
+              "kind": "webc",
+              "tag": "prompt-compressor-policies",
+              "entry": "/ui/webc/policies.js"
+            }
           }
         ]
       }
     ]
   },
   "rbac": {
+    "resources": [
+      {
+        "key": "policies",
+        "label": "Compression policies",
+        "description": "Read or change the compression mode, policies and their bindings to LLMs and Apps.",
+        "actions": ["read", "write"]
+      }
+    ],
     "rpc_methods": {
       "getStatus": "read",
-      "validateConfig": "read"
+      "validateConfig": "policies:read",
+      "getEditor": "policies:read",
+      "saveConfig": "policies:write"
     }
   },
   "compat": {
@@ -49,6 +69,7 @@
   },
   "assets": [
     "/assets/icon.svg",
-    "/ui/webc/dashboard.js"
+    "/ui/webc/dashboard.js",
+    "/ui/webc/policies.js"
   ]
 }
