@@ -34,6 +34,12 @@ var reducerCases = []struct {
 	{corpus.Cargo, "", 6000, "cargo test"},
 	{corpus.Maven, "", 6000, "maven"},
 	{corpus.Gradle, "", 6000, "gradle"},
+	{corpus.TerraformPlan, "", 6000, "terraform plan"},
+	{corpus.Kubectl, "", 6000, "kubectl"},
+	{corpus.Kubectl, "describe", 6000, "kubectl"},
+	{corpus.DirListing, "", 6000, "listing"},
+	{corpus.DirListing, "find", 6000, "listing"},
+	{corpus.DockerBuild, "", 12000, "build log"},
 }
 
 func caseOutput(kind corpus.Kind, variant string, size int) corpus.Output {
@@ -99,9 +105,17 @@ func TestReducerProperties(t *testing.T) {
 			lines := strings.Split(in, "\n")
 			// Protect one line the reducer would otherwise drop.
 			var protected string
-			st := &reducerState{}
-			for _, l := range lines {
-				if r.drop(st, l) && strings.TrimSpace(l) != "" {
+			var drops []bool
+			if r.plan != nil {
+				drops = r.plan(lines).drop
+			} else {
+				st := &reducerState{}
+				for _, l := range lines {
+					drops = append(drops, r.drop(st, l))
+				}
+			}
+			for i, l := range lines {
+				if drops[i] && strings.TrimSpace(l) != "" && !(r.keepErrors && errorLine.MatchString(l)) {
 					protected = l
 					break
 				}
@@ -123,7 +137,7 @@ func TestReducerProperties(t *testing.T) {
 				outLines[l]++
 			}
 			for _, l := range lines {
-				if r.failure(l) && outLines[l] == 0 {
+				if r.failure != nil && r.failure(l) && outLines[l] == 0 {
 					t.Errorf("%s seed %d: failure line dropped: %q", tc.kind, seed, l)
 				}
 			}
@@ -133,6 +147,7 @@ func TestReducerProperties(t *testing.T) {
 			if again, _ := reduce(in, keep); again != out {
 				t.Errorf("%s seed %d: not deterministic", tc.kind, seed)
 			}
+			assertVerbatim(t, fmt.Sprintf("%s seed %d", tc.kind, seed), r, in, out)
 		}
 	}
 }
@@ -152,8 +167,8 @@ func TestReducersIgnoreOtherText(t *testing.T) {
 			t.Errorf("%s was reduced by %q", name, reducer)
 		}
 	}
-	// Other corpus shapes are left to later reducers.
-	for _, kind := range []corpus.Kind{corpus.GitDiff, corpus.Ripgrep, corpus.DirListing, corpus.Kubectl, corpus.CSV, corpus.HTML} {
+	// Other corpus shapes are left alone.
+	for _, kind := range []corpus.Kind{corpus.CSV, corpus.HTML} {
 		if _, reducer := reduce(caseOutput(kind, "", 6000).Text, nil); reducer != "" {
 			t.Errorf("%s output was reduced by %q", kind, reducer)
 		}
@@ -175,8 +190,9 @@ func TestMarkerFormat(t *testing.T) {
 // The registry's reducers and versions are pinned with the strategy version
 // that feeds every policy hash: change a reducer, bump both.
 func TestRegistryPinnedToStrategyVersion(t *testing.T) {
-	const pinned = "pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1"
-	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 2 {
+	const pinned = "pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1," +
+		"terraform plan@1,kubectl@1,git diff@1,grep@1,listing@1,build log@1,stack trace@1,repeated lines@1"
+	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 3 {
 		t.Fatalf("registry %q at strategy version %d: update the pin here and bump config.StrategyVersion", got, config.StrategyVersion)
 	}
 }
@@ -249,5 +265,97 @@ func TestProtectPatternsSurviveLevel2(t *testing.T) {
 	}
 	if !strings.Contains(units[0].Text, "[tyk-compressed: go test output") {
 		t.Error("not reduced")
+	}
+}
+
+// assertVerbatim checks R3: every line the reducer kept is a line of the
+// input, unchanged, and (for reducers that keep errors) every input line
+// that mentions an error survives.
+func assertVerbatim(t *testing.T, name string, r reducer, in, out string) {
+	t.Helper()
+	inLines := map[string]bool{}
+	for _, l := range strings.Split(in, "\n") {
+		inLines[l] = true
+	}
+	outLines := map[string]bool{}
+	for _, l := range strings.Split(out, "\n") {
+		outLines[l] = true
+		if strings.HasPrefix(l, "[tyk-compressed: ") {
+			continue
+		}
+		if !inLines[l] {
+			t.Errorf("%s: kept line %q is not an input line", name, l)
+		}
+	}
+	for l := range inLines {
+		if r.keepErrors && errorLine.MatchString(l) && !outLines[l] {
+			t.Errorf("%s: error line dropped: %q", name, l)
+		}
+	}
+}
+
+// The log and listing reducers on shapes the corpus does not generate.
+func TestTextReducers(t *testing.T) {
+	javaTrace := strings.Join([]string{
+		"java.lang.IllegalStateException: period already closed",
+		"\tat com.acme.ledger.PeriodCloser.close(PeriodCloser.java:88)",
+		"\tat com.acme.ledger.StatementService.closePeriod(StatementService.java:140)",
+		"\tat java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)",
+		"\tat java.base/java.lang.reflect.Method.invoke(Method.java:580)",
+		"\tat org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:355)",
+		"\tat org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196)",
+		"\tat org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163)",
+		"\tat org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119)",
+		"\tat com.acme.ledger.api.PeriodController.close(PeriodController.java:52)",
+		"\tat org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:166)",
+		"\tat org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:90)",
+		"\tat java.base/java.lang.Thread.run(Thread.java:1583)",
+	}, "\n")
+	repeated := "starting worker\n" + strings.Repeat("WARN retrying connection to db:5432\n", 40) + "connected\nready\n" + strings.Repeat("tick\n", 10)
+	var rg strings.Builder
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&rg, "internal/store/ledger.go:%d:\ttotal := x.Subtotal()\n", 100+i)
+	}
+	rg.WriteString("internal/api/handler.go:12:\treturn errors.New(\"subtotal failed\")\n")
+	rg.WriteString("pkg/client/tenant.go:9:\ttotal := x.Subtotal()\n")
+	diff := "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1,20 +1,20 @@\n" +
+		strings.Repeat(" ctx line\n", 8) + "-old\n+new\n" + strings.Repeat(" ctx tail\n", 9)
+	for _, tc := range []struct {
+		name, text, reducer string
+		contains, absent    []string
+	}{
+		{"java trace", javaTrace, "stack trace",
+			[]string{"IllegalStateException", "PeriodCloser.close", "StatementService.closePeriod", "PeriodController.close", "Thread.run", "framework frames]"},
+			[]string{"AopUtils"}},
+		{"repeated", repeated, "repeated lines",
+			[]string{"WARN retrying connection to db:5432\n", "[tyk-compressed: previous line repeated 39 more times]", "tick\n[tyk-compressed: previous line repeated 9 more times]", "connected"},
+			nil},
+		{"ripgrep", rg.String(), "grep",
+			[]string{"ledger.go:104:", "[tyk-compressed: 35 more matches in internal/store/ledger.go]", "handler.go:12:", "tenant.go:9:"},
+			[]string{"ledger.go:105:"}},
+		{"wide diff", diff, "git diff",
+			[]string{"@@ -1,20 +1,20 @@", "-old", "+new"},
+			nil},
+	} {
+		out, name := reduce(tc.text, nil)
+		if name != tc.reducer {
+			t.Errorf("%s: reduced by %q, want %q", tc.name, name, tc.reducer)
+			continue
+		}
+		for _, want := range tc.contains {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: output lacks %q:\n%s", tc.name, want, out)
+			}
+		}
+		for _, no := range tc.absent {
+			if strings.Contains(out, no) {
+				t.Errorf("%s: output still has %q", tc.name, no)
+			}
+		}
+		for _, r := range registry {
+			if r.name == tc.reducer && r.name != "repeated lines" {
+				assertVerbatim(t, tc.name, r, tc.text, out)
+			}
+		}
 	}
 }

@@ -13,6 +13,37 @@ import (
 
 var fuzzFormats = []string{"openai", "ollama", "anthropic", "google_ai", "bedrock", "openai_responses", "huggingface"}
 
+// FuzzReduce: a reducer never panics, never grows the text, and keeps the
+// lines it keeps verbatim.
+func FuzzReduce(f *testing.F) {
+	for _, tc := range reducerCases {
+		f.Add(caseOutput(tc.kind, tc.variant, 3000).Text)
+	}
+	f.Add("a\na\na\na\na\na\na\na\nb")
+	f.Add("diff --git a b\n@@ -1 +1 @@\n x\n-y\n+z\n x\n x\n x\n x\n x")
+	f.Fuzz(func(t *testing.T, text string) {
+		out, name := reduce(text, nil)
+		if name == "" {
+			if out != text {
+				t.Fatal("no reducer, changed text")
+			}
+			return
+		}
+		if len(out) >= len(text) {
+			t.Fatalf("%s grew the text", name)
+		}
+		in := map[string]bool{}
+		for _, l := range strings.Split(text, "\n") {
+			in[l] = true
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if !strings.HasPrefix(l, "[tyk-compressed: ") && !in[l] {
+				t.Fatalf("%s kept a line that is not an input line: %q", name, l)
+			}
+		}
+	})
+}
+
 // FuzzCompress drives selection, the strategies and Apply: Compress never
 // panics, never grows the body, returns the input itself unless it
 // compressed, and a compressed body reads in its format with its tool calls
@@ -41,6 +72,7 @@ func FuzzCompress(f *testing.F) {
 			p.CacheMode = config.CacheSkipCached
 		}
 		p.ProtectRecentTurns = int(flags>>2) % 3
+		p.Level = 1 + int(flags>>4)%2
 		out, rep := c.Compress(Input{Format: format, Body: body, Policy: p})
 		if len(out) > len(body) {
 			t.Fatalf("output grew: %d > %d", len(out), len(body))

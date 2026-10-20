@@ -1,0 +1,105 @@
+[tyk-compressed: terraform plan output, 1,722 → 925 tokens]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # aws_instance.api will be updated in-place
+  ~ resource "aws_instance" "api" {
+        id                     = "bfd60a3281e366d53"
+      ~ tags                   = {
+          ~ "Version"     = "2.13.3" -> "2.14.0"
+            # (4 unchanged elements hidden)
+        }
+      ~ tags_all               = {
+          ~ "Version"     = "2.13.6" -> "2.14.7"
+            # (6 unchanged elements hidden)
+        }
+        # (32 unchanged attributes hidden)
+
+        # (3 unchanged blocks hidden)
+    }
+
+  # aws_security_group.api will be created
+  + resource "aws_security_group" "api" {
+[tyk-compressed: 7 lines]
+      + name                   = "acme-ledger-prod-api"
+      + tags                   = {
+          + "Environment" = "prod"
+          + "Project"     = "acme-ledger-prod"
+          + "Owner"       = "platform"
+        }
+    }
+
+  # aws_lb_target_group.api must be replaced
+-/+ resource "aws_lb_target_group" "api" {
+      ~ arn                    = "arn:aws:lb:eu-west-1:000000000000:api/d3bdf6b06341" -> (known after apply)
+      ~ id                     = "26c6a2f4b91b73766" -> (known after apply)
+      ~ engine_version         = "15.7" -> "16.4" # forces replacement
+        # (29 unchanged attributes hidden)
+    }
+
+  # aws_db_instance.ledger will be updated in-place
+  ~ resource "aws_db_instance" "ledger" {
+        id                     = "d731bfff1150d17c6"
+      ~ tags                   = {
+          ~ "Version"     = "2.13.6" -> "2.14.2"
+            # (4 unchanged elements hidden)
+        }
+      ~ tags_all               = {
+          ~ "Version"     = "2.13.5" -> "2.14.4"
+            # (6 unchanged elements hidden)
+        }
+        # (17 unchanged attributes hidden)
+
+        # (4 unchanged blocks hidden)
+    }
+
+  # aws_s3_bucket.exports will be created
+  + resource "aws_s3_bucket" "exports" {
+[tyk-compressed: 7 lines]
+      + name                   = "acme-ledger-prod-exports"
+      + tags                   = {
+          + "Environment" = "prod"
+          + "Project"     = "acme-ledger-prod"
+          + "Owner"       = "platform"
+        }
+    }
+
+  # aws_iam_role.worker must be replaced
+-/+ resource "aws_iam_role" "worker" {
+      ~ arn                    = "arn:aws:iam:eu-west-1:000000000000:worker/ea160b61cc0f" -> (known after apply)
+      ~ id                     = "024549d3d3d7990e9" -> (known after apply)
+      ~ engine_version         = "15.7" -> "16.4" # forces replacement
+        # (13 unchanged attributes hidden)
+    }
+
+  # aws_iam_role_policy.worker_s3 will be updated in-place
+  ~ resource "aws_iam_role_policy" "worker_s3" {
+        id                     = "38da4cbf7cd5d6834"
+      ~ tags                   = {
+          ~ "Version"     = "2.13.5" -> "2.14.2"
+            # (4 unchanged elements hidden)
+        }
+      ~ tags_all               = {
+          ~ "Version"     = "2.13.6" -> "2.14.8"
+            # (6 unchanged elements hidden)
+        }
+        # (13 unchanged attributes hidden)
+
+        # (1 unchanged blocks hidden)
+    }
+
+Plan: 4 to add, 3 to change, 2 to destroy.
+
+Changes to Outputs:
+  ~ api_version = "2.13.4" -> "2.14.3"
+
+─────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so Terraform can't
+guarantee to take exactly these actions if you run "terraform apply" now.

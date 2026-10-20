@@ -1,0 +1,11 @@
+NAMESPACE        NAME                                        READY   STATUS             RESTARTS        AGE     IP             NODE                                          NOMINATED NODE   READINESS GATES
+[tyk-compressed: kubectl output, 1,529 → 298 tokens]
+[tyk-compressed: 2 healthy rows]
+ledger-staging   pgbouncer-vz7gln9bv7-i0ta4                  0/1     CrashLoopBackOff   27 (3m ago)     5d      10.42.6.197    ip-10-0-1-38.eu-west-1.compute.internal       <none>           <none>
+[tyk-compressed: 2 healthy rows]
+ingress-nginx    ledger-worker-zm37hehwck-0pvm2              1/1     Running            1 (26h ago)     15d     10.42.8.132    ip-10-0-3-40.eu-west-1.compute.internal       <none>           <none>
+[tyk-compressed: 20 healthy rows]
+monitoring       otel-collector-cowv12m8im-quvom             0/1     Pending            0               24d     10.42.1.152    ip-10-0-1-78.eu-west-1.compute.internal       <none>           <none>
+ledger-staging   ledger-export-bg8konkgw1-c7mox              0/1     Pending            0               17d     10.42.3.134    ip-10-0-2-176.eu-west-1.compute.internal      <none>           <none>
+ledger-prod      ledger-export-i47uiqyvx3-t3s40              1/1     Running            2 (12h ago)     54d     10.42.7.234    ip-10-0-3-40.eu-west-1.compute.internal       <none>           <none>
+[tyk-compressed: 1 healthy row]

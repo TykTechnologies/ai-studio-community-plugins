@@ -1,0 +1,70 @@
+Name:             ledger-web-otgbubd44r-qggt8
+Namespace:        ledger-prod
+Priority:         0
+Service Account:  ledger-web
+Node:             ip-10-0-2-17.eu-west-1.compute.internal/10.0.2.17
+Start Time:       Sun, 13 Sep 2026 22:41:07 +0000
+Labels:           app.kubernetes.io/name=ledger-web
+[tyk-compressed: kubectl output, 1,510 → 852 tokens]
+Annotations:      kubectl.kubernetes.io/restartedAt: 2026-09-13T22:40:51Z
+Status:           Running
+IP:               10.42.3.118
+Controlled By:  ReplicaSet/ledger-web-82pgn7g857
+Containers:
+  ledger-web:
+    Container ID:   containerd://c3e071f7fd9476efea6b16523f46b545a582e3b084fb698b6b57372e74f16d43
+    Image:          registry.example.internal/ledger-web:2.14.1
+    Image ID:       registry.example.internal/ledger-web@sha256:eb04471c201ec81fd0033f14cfa091008e72386881e58f58f98220dbee885c74
+    Port:           8080/TCP
+    Host Port:      0/TCP
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    1
+      Started:      Mon, 14 Sep 2026 09:12:44 +0000
+      Finished:     Mon, 14 Sep 2026 09:12:49 +0000
+    Ready:          False
+    Restart Count:  84
+    Limits:
+      cpu:     1
+      memory:  512Mi
+    Requests:
+      cpu:      250m
+      memory:   256Mi
+    Liveness:   http-get http://:8080/healthz delay=10s timeout=1s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:8080/readyz delay=5s timeout=1s period=5s #success=1 #failure=3
+    Environment:
+[tyk-compressed: 3 lines]
+    Mounts:
+[tyk-compressed: 1 line]
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True
+  Initialized                 True
+  Ready                       False
+  ContainersReady             False
+  PodScheduled                True
+Volumes:
+[tyk-compressed: 5 lines]
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+[tyk-compressed: 1 line]
+Events:
+  Type     Reason     Age                    From     Message
+  ----     ------     ----                   ----     -------
+[tyk-compressed: 3 lines]
+  Warning  Unhealthy  3m (x230 over 3h)      kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+[tyk-compressed: 2 lines]
+  Warning  BackOff    24m (x28 over 7h)      kubelet  Back-off restarting failed container ledger-web in pod ledger-web-otgbubd44r-qggt8_ledger-prod(ccc75942-0c0f-418b-a9aa-077c03a7d602)
+[tyk-compressed: 2 lines]
+  Warning  Unhealthy  55m (x270 over 2h)     kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+  Warning  Unhealthy  28m (x101 over 3h)     kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+[tyk-compressed: 4 lines]
+  Warning  Unhealthy  18m (x294 over 2h)     kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+[tyk-compressed: 2 lines]
+  Warning  Unhealthy  44m (x205 over 12h)    kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+[tyk-compressed: 6 lines]
+  Warning  Unhealthy  54m (x20 over 11h)     kubelet  Readiness probe failed: Get "http://10.42.3.118:8080/readyz": dial tcp 10.42.3.118:8080: connect: connection refused
+  Warning  BackOff    21m (x113 over 2h)     kubelet  Back-off restarting failed container ledger-web in pod ledger-web-otgbubd44r-qggt8_ledger-prod(0f7000c1-b1f9-4124-b8ac-18734965f2a2)

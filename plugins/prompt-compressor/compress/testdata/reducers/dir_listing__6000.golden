@@ -1,0 +1,32 @@
+total 224
+drwxr-xr-x  14 dev  staff    448 Sep 14 09:12 .
+drwxr-xr-x   9 dev  staff    288 Sep  2 17:40 ..
+-rw-r--r--   2 dev  staff   25498 Apr 15 09:51 payment_oc3s.json
+-rw-r--r--  14 dev  staff     222 Apr  6 16:18 batch_l8fp.go
+drwxr-xr-x   4 dev  staff     576 Sep 14 07:40 deploy
+-rw-r--r--   6 dev  staff    8562 Aug 29 06:42 invoice_nwsh.json
+-rw-r--r--   9 dev  staff   52884 May  5 14:28 payment_lgs7.rs
+-rw-r--r--  15 dev  staff   71378 Jul  4 04:28 batch_2t1u.tsx
+drwxr-xr-x  10 dev  staff     160 Aug 24 17:22 deploy
+-rw-r--r--  10 dev  staff   75948 Jul  1 13:47 statement_lewj.ts
+drwxr-xr-x  14 dev  staff     128 Jul 22 10:21 cmd
+-rw-r--r--   2 dev  staff   53660 Jun 11 17:12 invoice_vh1v.md
+drwxr-xr-x   8 dev  staff     736 Jul 30 06:54 migrations
+-rw-r--r--  11 dev  staff   76834 Jun 18 14:59 webhook_89zd.go
+-rw-r--r--  15 dev  staff   24256 Jul 20 13:48 payment_19jb_test.go
+-rw-r--r--  20 dev  staff   64553 Aug 25 07:59 invoice_uzai.ts
+-rw-r--r--  18 dev  staff   38230 Jun 20 15:32 account_bi1k.rs
+-rw-r--r--   6 dev  staff   53475 Apr 16 23:46 batch_hp6e.java
+-rw-r--r--   8 dev  staff   14560 May 15 22:58 ledger_pzkt.json
+-rw-r--r--  17 dev  staff    8487 Aug 22 17:45 tenant_c87s.go
+drwxr-xr-x  20 dev  staff     512 Jun 15 19:42 parser
+drwxr-xr-x   7 dev  staff     544 Aug 28 10:28 web
+-rw-r--r--  18 dev  staff   50156 Jul 27 08:00 refund_947x.go
+-rw-r--r--  19 dev  staff   61342 Jul 18 11:20 payment_1vvy.go
+-rw-r--r--   3 dev  staff   88233 Apr 14 05:52 account_tmts.java
+drwxr-xr-x  17 dev  staff     576 Jun 20 13:25 pkg
+-rw-r--r--  12 dev  staff   84472 Apr 21 20:45 ledger_6qfu.ts
+-rw-r--r--  18 dev  staff   33874 Aug 17 16:14 statement_613w.go
+drwxr-xr-x  18 dev  staff     672 Jul 13 16:23 docs
+-rw-r--r--   4 dev  staff   40570 May 16 18:15 tenant_l6zw.yaml
+[tyk-compressed: listing output, 1,506 → 451 tokens]

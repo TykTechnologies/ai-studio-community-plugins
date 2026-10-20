@@ -31,14 +31,43 @@ type reducer struct {
 	drop func(st *reducerState, line string) bool
 	// failure reports whether a line marks one failure, for the marker.
 	failure func(line string) bool
+	// plan, when set, replaces drop and failure: it sees every line at
+	// once (folds, caps per file, context windows).
+	plan func(lines []string) cutPlan
+	// keepErrors keeps every line that mentions an error, failure, panic or
+	// exception, whatever the plan says.
+	keepErrors bool
 }
 
 type reducerState struct {
 	section string
 }
 
+// cutPlan is what a reducer drops. notes give a run of dropped lines its
+// own marker ("previous line repeated 40 more times"); a note applies only
+// when the run it starts is cut whole. failures < 0 leaves the count out of
+// the marker.
+type cutPlan struct {
+	drop     []bool
+	notes    map[int]note
+	failures int
+}
+
+type note struct {
+	n    int
+	text string
+}
+
+// errorLine reports a line that mentions an error, failure, panic or
+// exception, in any case.
+var errorLine = regexp.MustCompile(`(?i)error|fail|panic|exception|fatal`)
+
 // registry is the level-2 reducers, in order.
-var registry = []reducer{pytestReducer, jestReducer, goTestReducer, cargoReducer, mavenReducer, gradleReducer}
+var registry = []reducer{
+	pytestReducer, jestReducer, goTestReducer, cargoReducer, mavenReducer, gradleReducer,
+	terraformReducer, kubectlReducer, gitDiffReducer, grepReducer, listingReducer, buildLogReducer,
+	stackTraceReducer, repeatedReducer,
+}
 
 // registryFingerprint names every reducer and version, in order.
 func registryFingerprint() string {
@@ -77,17 +106,30 @@ func reduce(text string, keep func(string) bool) (string, string) {
 // apply drops the reducer's lines, replacing the first run of dropped lines
 // with the full marker and each later run with a short one.
 func (r reducer) apply(text string, lines []string, keep func(string) bool) (string, bool) {
-	st := &reducerState{}
-	dropped := make([]bool, len(lines))
-	failures, cut := 0, 0
+	var pl cutPlan
+	if r.plan != nil {
+		pl = r.plan(lines)
+	} else {
+		st := &reducerState{}
+		pl.drop = make([]bool, len(lines))
+		for i, line := range lines {
+			if r.failure(line) {
+				pl.failures++
+			}
+			pl.drop[i] = r.drop(st, line)
+		}
+	}
+	dropped := pl.drop
+	cut := 0
 	for i, line := range lines {
-		if r.failure(line) {
-			failures++
+		if !dropped[i] {
+			continue
 		}
-		if r.drop(st, line) && (keep == nil || !keep(line)) {
-			dropped[i] = true
-			cut++
+		if (keep != nil && keep(line)) || (r.keepErrors && errorLine.MatchString(line)) {
+			dropped[i] = false
+			continue
 		}
+		cut++
 	}
 	if cut == 0 {
 		return text, false
@@ -117,12 +159,23 @@ func (r reducer) apply(text string, lines []string, keep func(string) bool) (str
 				b.WriteByte('\n')
 			}
 		}
-		if ri == 0 {
-			b.WriteString(marker(r.name, selectionTokens(text), after, failures))
-		} else {
+		nt, hasNote := pl.notes[rn.at]
+		hasNote = hasNote && nt.n == rn.n
+		switch {
+		case ri == 0 && hasNote:
+			b.WriteString(marker(r.name, selectionTokens(text), after, pl.failures))
+			b.WriteByte('\n')
+			b.WriteString(nt.text)
+		case ri == 0:
+			b.WriteString(marker(r.name, selectionTokens(text), after, pl.failures))
+		case hasNote:
+			b.WriteString(nt.text)
+		default:
 			b.WriteString(shortMarker(rn.n))
 		}
-		b.WriteByte('\n')
+		if rn.at+rn.n < len(lines) {
+			b.WriteByte('\n')
+		}
 		next = rn.at + rn.n
 	}
 	for ; next < len(lines); next++ {
@@ -143,7 +196,11 @@ func (r reducer) apply(text string, lines []string, keep func(string) bool) (str
 //	[tyk-compressed: pytest output, 18,400 → 1,150 tokens; 3 failures kept]
 //
 // Tokens are UTF-8 bytes over four, so the marker depends only on the text.
+// A reducer without failures to count leaves the last part out.
 func marker(name string, before, after, failures int) string {
+	if failures < 0 {
+		return fmt.Sprintf("[tyk-compressed: %s output, %s → %s tokens]", name, thousands(before), thousands(after))
+	}
 	noun := "failures"
 	if failures == 1 {
 		noun = "failure"

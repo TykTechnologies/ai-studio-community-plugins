@@ -109,12 +109,23 @@ plugin loading. The full schema is in `config.schema.json`.
   values get the text strategies; text loses ANSI escape codes, carriage-return
   progress frames (rendered as a terminal shows them), trailing whitespace and
   runs of blank lines.
-- **Level 2:** level 1, then a reducer when the text is a test runner's
-  output: pytest, jest, go test, cargo test, Maven (surefire) or Gradle. A
-  reducer drops passing tests, progress, downloads and up-to-date tasks and
-  keeps every failure with its message and location, the totals, and every
-  line a `protect_patterns` regex matches. Text no reducer recognises (prose,
-  code, JSON) gets level 1 only.
+- **Level 2:** level 1, then a reducer when the text has a shape it knows.
+  Test runners (pytest, jest, go test, cargo test, Maven surefire, Gradle)
+  drop passing tests, progress, downloads and up-to-date tasks and keep
+  every failure with its message and location and the totals. Logs and
+  listings: terraform plan (Refreshing lines and `(known after apply)`
+  attributes go), kubectl (healthy pods in a table; labels, annotations,
+  volumes, mounts and Normal events in describe output), git diff (context
+  more than 3 lines from a change), grep and ripgrep (more than 5 matches in
+  one file), directory listings (deeper than 4 levels, more than 30 entries
+  in one directory, anything under node_modules, .git, vendor, dist, build,
+  target and the like), build logs (all but the last 20 lines, step headers
+  and errors), stack traces (runs of framework frames) and repeated lines
+  (folded with a count). Every reducer keeps the lines it keeps verbatim,
+  and every line a `protect_patterns` regex matches; the log and listing
+  reducers also keep every line that mentions an error, failure, panic,
+  exception or fatal. Text no reducer recognises (prose, code, JSON) gets
+  level 1 only.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
@@ -128,8 +139,11 @@ A reducer's cut leaves an inline marker, in a fixed format:
 ```
 
 The first cut in an output carries the reducer, the size before and after
-(UTF-8 bytes / 4, so it depends only on the text) and the failures kept;
-each later cut in the same output carries the number of lines it removed.
+(UTF-8 bytes / 4, so it depends only on the text) and, for test runners, the
+failures kept; each later cut carries the number of lines it removed, or
+what it removed: `[tyk-compressed: previous line repeated 39 more times]`,
+`[tyk-compressed: 35 more matches in internal/store/ledger.go]`,
+`[tyk-compressed: 6 framework frames]`, `[tyk-compressed: 20 healthy rows]`.
 
 ### Policies page
 
