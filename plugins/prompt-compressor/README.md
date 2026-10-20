@@ -9,15 +9,15 @@ Microgateway before they reach the vendor, starting with tool outputs.
 - **Measured:** it reports tokens and money saved next to the cache-read share.
 - **Fails open:** any error passes the request through unchanged.
 
-> **Status:** scaffold. This version loads on Studio and the Microgateway and
-> passes every request through untouched. Compression, the config model and
-> the dashboard land in later versions.
+> **Status:** level 1 (lossless) compression on the Microgateway in `audit`
+> and `enforce` modes. Higher levels, the response-phase records and the
+> dashboard land in later versions.
 
 ## Hooks
 
 | Hook | Runtime | What it does |
 |------|---------|--------------|
-| `post_auth` | Microgateway | Compresses the request body (pass-through for now) |
+| `post_auth` | Microgateway | Compresses the request body (`enforce`) or measures what it would save (`audit`) |
 | `on_response` | Microgateway | Reads usage, including cache-read tokens, and records the savings |
 | `studio_ui` | Studio | Admin pages: policies, preview, savings dashboard |
 
@@ -25,6 +25,33 @@ Microgateway before they reach the vendor, starting with tool outputs.
 OpenAI-compatible endpoints (`/ai/{slug}/v1`, the unified `/v1` and
 `/router/`) reach it through their internal `/llm/call/` hop for every vendor
 except Bedrock, which they call directly.
+
+### Coverage
+
+| Traffic | Compressed? |
+|---------|-------------|
+| `/llm/rest`, `/llm/stream`, `/llm/call` (vendor-native bodies) | Yes |
+| `/ai/`, unified `/v1`, `/router/` to a non-Bedrock LLM | Yes, on the internal `/llm/call/` hop (vendor-native body) |
+| `/ai/` and `/anthropic/` to a Bedrock LLM | **No**: these call AWS directly and run no `post_auth`, until the core `pre_upstream` hook exists |
+| Studio Chat | No: Chat does not go through the gateway |
+
+The request format comes from the LLM's vendor, the path and the LLM's
+endpoint (`pkg/requestformat`); the plugin reads the endpoint with `llms.read`
+and falls back to the vendor's own format without it.
+
+### Request handling
+
+- `mode: off` does nothing; `audit` compresses, records the result and
+  forwards the original body; `enforce` forwards the compressed body.
+- `X-Tyk-Compression: off` skips compression for one request when
+  `allow_client_bypass` is set. No header can choose a policy or raise a
+  level.
+- The hook never fails a request: it returns no error, recovers panics
+  (counted as `failed_open`), and passes the request through on anything it
+  cannot do. It returns no request headers, so multi-value headers reach the
+  vendor as the client sent them. It never logs headers or bodies.
+- What it learned is kept by request ID for the response hook (300 s, at
+  most 8,192 requests).
 
 ## Configuration
 
@@ -113,7 +140,7 @@ written by hand are shown with the LLM they match.
 | `control.send` | Savings records from the edges to Studio |
 | `pricing.read` | Model prices, including the cache-read price, to cost the savings |
 | `apps.read` | The per-App policy override in App metadata; the App picker |
-| `llms.read` | The LLM picker on the Policies page |
+| `llms.read` | The LLM picker on the Policies page; the LLM's endpoint, which decides the request format |
 
 ## Building
 

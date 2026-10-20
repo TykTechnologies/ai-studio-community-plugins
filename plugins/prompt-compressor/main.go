@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
@@ -53,6 +54,14 @@ type PromptCompressorPlugin struct {
 
 	// testStudio replaces the Studio service API in tests.
 	testStudio studioAPI
+
+	// The request path (postauth.go): compressFn is the compressor's
+	// Compress (replaced in tests), pending holds what post_auth learned
+	// for the response hook, llms caches LLM endpoints.
+	compressFn func(compress.Input) ([]byte, compress.Report)
+	pending    *pendingCache
+	llms       *llmInfoCache
+	counters   hookCounters
 }
 
 // NewPromptCompressorPlugin creates a new plugin instance
@@ -63,6 +72,9 @@ func NewPromptCompressorPlugin() *PromptCompressorPlugin {
 			PluginVersion,
 			"Prompt Compressor - cache-safe, measured compression of LLM request bodies",
 		),
+		compressFn: compress.New(compress.Options{}).Compress,
+		pending:    newPendingCache(pendingTTL, pendingMaxSize),
+		llms:       newLLMInfoCache(fetchLLMInfo),
 	}
 }
 
@@ -140,16 +152,6 @@ func (p *PromptCompressorPlugin) OnSessionReady(ctx plugin_sdk.Context) {
 // OnSessionClosing implements plugin_sdk.SessionAware
 func (p *PromptCompressorPlugin) OnSessionClosing(ctx plugin_sdk.Context) {
 	p.logger().Debug("Session closing")
-}
-
-// HandlePostAuth implements plugin_sdk.PostAuthHandler. The scaffold passes
-// every request through untouched.
-//
-// Headers stay nil on every response: the host Sets each returned header on
-// the upstream request and never removes one, so echoing the request headers
-// back would collapse multi-value headers.
-func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.EnrichedRequest) (*pb.PluginResponse, error) {
-	return &pb.PluginResponse{Modified: false}, nil
 }
 
 // OnBeforeWriteHeaders implements plugin_sdk.ResponseHandler. The host
@@ -230,6 +232,7 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 			"mode":             s.config.Mode,
 			"config_error":     configError,
 			"strategy_version": config.StrategyVersion,
+			"requests":         p.counters.snapshot(),
 		})
 	case "validateConfig":
 		return rpcValidateConfig(payload)
