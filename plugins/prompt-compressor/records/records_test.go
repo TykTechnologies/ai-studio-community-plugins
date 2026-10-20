@@ -406,6 +406,16 @@ func TestDeltaAddAndMergeAgree(t *testing.T) {
 		}
 	}
 	a.Merge(b)
+	// Costs are float sums: the order of additions may change the last
+	// bits (and does across CPU architectures), so compare them apart
+	for _, pair := range [][2]map[string]float64{{a.CostSaved, one.CostSaved}, {a.CostSavedAtCacheRead, one.CostSavedAtCacheRead}} {
+		for c, v := range pair[1] {
+			if diff := pair[0][c] - v; diff > 1e-12 || diff < -1e-12 {
+				t.Errorf("merged cost %s = %v, added %v", c, pair[0][c], v)
+			}
+		}
+	}
+	a.CostSaved, one.CostSaved, a.CostSavedAtCacheRead, one.CostSavedAtCacheRead = nil, nil, nil, nil
 	ja, _ := json.Marshal(a)
 	jo, _ := json.Marshal(one)
 	if string(ja) != string(jo) {
