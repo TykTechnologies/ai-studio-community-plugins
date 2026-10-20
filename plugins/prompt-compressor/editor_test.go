@@ -287,6 +287,24 @@ func TestSaveConfigRefusesEngineAndOtherNonEditorKeys(t *testing.T) {
 		}
 	}
 
+	// A refusal does not hide the policy problems in the same request
+	{
+		studio := &fakeStudio{stored: stored}
+		p := editorPlugin(t, studio)
+		cfg := map[string]interface{}{"bindings": map[string]interface{}{"llm_id:1": "no-such-policy"}}
+		var res saveResult
+		if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg}, &res); err != nil {
+			t.Fatal(err)
+		}
+		all := strings.Join(res.Errors, "\n")
+		if res.Saved || !strings.Contains(all, "no-such-policy") || !strings.Contains(all, "engine_main_url: the policy editor cannot remove") {
+			t.Errorf("saveConfig = %+v, want both the unknown policy and the removed keys reported", res)
+		}
+		if len(studio.updates) != 0 {
+			t.Error("a refused config was stored")
+		}
+	}
+
 	// Unchanged, as shown: the policy change saves and every other key is
 	// stored exactly as it was, the literal token included
 	studio := &fakeStudio{stored: stored}

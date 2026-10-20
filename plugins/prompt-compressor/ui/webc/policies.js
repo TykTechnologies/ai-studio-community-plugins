@@ -1,8 +1,8 @@
 // Prompt Compressor: policies and bindings editor.
 //
 // Reads the stored config with getEditor and saves it with saveConfig; the
-// plugin validates before it stores, and the edges pick the change up on
-// their next config sync. The DOM is built with createElement and
+// plugin validates before it stores, and edges apply the change after the
+// next configuration push to them. The DOM is built with createElement and
 // textContent only: names of LLMs, Apps, policies and tools never reach
 // innerHTML.
 //
@@ -160,7 +160,7 @@ class PromptCompressorPolicies extends HTMLElement {
         return;
       }
       await this._load();
-      this._setErrors([], 'Saved. Gateways apply the change on their next configuration sync.');
+      this._setErrors([], 'Saved. Edge gateways apply the change after the next configuration push to them (Edge Gateways page).');
     } catch (error) {
       this._busy = false;
       this._setErrors(['Save failed: ' + error.message]);

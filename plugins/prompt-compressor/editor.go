@@ -17,7 +17,8 @@ import (
 
 // The policy editor (Studio UI) reads the stored config, the LLMs and the
 // Apps it can bind, and saves the config through the host's plugin config
-// update. The edges pick the change up on their next config sync.
+// update. Edges get the change with the next configuration push to them;
+// they do not pull it.
 
 // studioAPI is what the editor needs from Studio. The plugin's service
 // broker provides it; tests use a fake.
@@ -118,14 +119,13 @@ func (p *PromptCompressorPlugin) rpcSaveConfig(api studioAPI, pluginID uint32, p
 		return nil, err
 	}
 	next, refused := editorMerge(req.Config, stored)
-	if len(refused) > 0 {
-		return map[string]interface{}{"saved": false, "errors": refused}, nil
-	}
 	raw, err := json.Marshal(next)
 	if err != nil {
 		return nil, fmt.Errorf("saveConfig: %w", err)
 	}
-	if problems := problemsOf(raw); len(problems) > 0 {
+	// Report the policy problems with the refusal, so one fix is not hidden
+	// behind another
+	if problems := append(problemsOf(raw), refused...); len(problems) > 0 {
 		return map[string]interface{}{"saved": false, "errors": problems}, nil
 	}
 	if err := api.UpdatePluginConfig(ctx, pluginID, string(raw)); err != nil {
@@ -193,9 +193,10 @@ var editorKeys = map[string]bool{
 
 // editorMerge builds the config to store: the editor's keys from next, every
 // other key exactly as stored. A request that changes, adds or removes any
-// other key is refused (refused lists why), so a client that tries is told
-// rather than silently overruled. next must carry those keys as getEditor
-// showed them, tokens masked.
+// other key must be refused (refused lists why), so a client that tries is
+// told rather than silently overruled; the merged config is still returned
+// so its policy problems can be reported in the same answer. next must carry
+// those keys as getEditor showed them, tokens masked.
 func editorMerge(next, stored map[string]interface{}) (map[string]interface{}, []string) {
 	shown := maskTokens(stored)
 	var refused []string
@@ -219,7 +220,6 @@ func editorMerge(next, stored map[string]interface{}) (map[string]interface{}, [
 	if len(refused) > 0 {
 		sort.Strings(refused)
 		refused = append(refused, "Engine credentials and other settings outside the policy editor are changed in the plugin's configuration form.")
-		return nil, refused
 	}
 	out := make(map[string]interface{}, len(next)+len(stored))
 	for k, v := range stored {
@@ -232,7 +232,7 @@ func editorMerge(next, stored map[string]interface{}) (map[string]interface{}, [
 			out[k] = v
 		}
 	}
-	return out, nil
+	return out, refused
 }
 
 // sameJSON compares two decoded JSON values by their encoding.

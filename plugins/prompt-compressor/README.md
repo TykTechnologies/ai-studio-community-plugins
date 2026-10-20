@@ -78,8 +78,9 @@ plugin loading. The full schema is in `config.schema.json`.
 ### Policies page
 
 Admin > Prompt Compressor > Policies edits the mode, the policies and their
-bindings, and saves them through the host's plugin config update, so the
-edges pick the change up on their next config sync. It validates before it
+bindings, and saves them through the host's plugin config update. Edge
+gateways show as pending and apply the change after the next configuration
+push (Edge Gateways page); they do not pull it. It validates before it
 saves and warns that a change makes every affected session miss the prompt
 cache once. LLMs are bound by ID (`llm_id:<id>`); `llm:<slug>` bindings
 written by hand are shown with the LLM they match.
