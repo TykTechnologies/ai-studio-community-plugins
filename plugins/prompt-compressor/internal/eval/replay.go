@@ -60,7 +60,10 @@ type Options struct {
 	Levels     []int
 	Compressor Compressor
 	Tokens     Tokenizer
-	Prices     Prices
+	// TokensFor, when set, picks the tokenizer per request format (the
+	// compress package's estimator) and overrides Tokens.
+	TokensFor func(format string) Tokenizer
+	Prices    Prices
 	// OutputTokens is the response length billed per session turn (the
 	// corpus records requests, not responses).
 	OutputTokens int
@@ -82,6 +85,13 @@ func (o *Options) defaults() {
 	if o.OutputTokens == 0 {
 		o.OutputTokens = 400
 	}
+}
+
+func (o Options) tok(format string) Tokenizer {
+	if o.TokensFor != nil {
+		return o.TokensFor(format)
+	}
+	return o.Tokens
 }
 
 // KindStats are the tool-result tokens of one tool kind.
@@ -121,6 +131,10 @@ type SessionResult struct {
 	// previous turn's compressed conversation byte for byte, beyond what
 	// the uncompressed bodies already differ in (a cache-stability bug).
 	PrefixBreaks int `json:"prefix_breaks"`
+	// LateCompressions counts tool results sent verbatim while recent and
+	// compressed on a later turn (protect_recent_turns), each of which
+	// costs the cache that one result once.
+	LateCompressions int `json:"late_compressions"`
 	// Skipped: the session's format has no extractor yet.
 	Skipped string `json:"skipped,omitempty"`
 }
@@ -135,8 +149,9 @@ type LevelResult struct {
 	// Unattributed: tokens saved in entries whose unit layout changed, so
 	// savings could not be assigned to a tool kind.
 	Unattributed int `json:"unattributed_saved_tokens"`
-	// SkipViolations are pass-through or native-context-management bodies
-	// the compressor changed. Any is a bug.
+	// SkipViolations are pass-through bodies the compressor changed, and
+	// native-context-management bodies compressed beyond level 1. Any is a
+	// bug.
 	SkipViolations []string `json:"skip_violations"`
 	// Nondeterministic are bodies that compressed differently twice.
 	Nondeterministic []string        `json:"nondeterministic"`
@@ -160,6 +175,9 @@ type Report struct {
 func Replay(m corpus.Manifest, o Options) (*Report, error) {
 	o.defaults()
 	rep := &Report{Compressor: o.Compressor.Name(), Tokenizer: o.Tokens.Name(), Output: o.OutputTokens, Prices: o.Prices}
+	if o.TokensFor != nil {
+		rep.Tokenizer = "per format: " + o.TokensFor("anthropic").Name() + " (anthropic), " + o.TokensFor("openai").Name() + " (openai)"
+	}
 	baseline := map[string]float64{}
 	for _, s := range m.Sessions {
 		r := replaySession(s, Identity{}, 0, o, nil)
@@ -186,6 +204,7 @@ func Replay(m corpus.Manifest, o Options) (*Report, error) {
 
 func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 	body := e.Body()
+	tk := o.tok(e.Format)
 	out, err := o.Compressor.Compress(e.Format, e.Path, body, level)
 	if err != nil {
 		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: %s", e.Name, ErrorClass(err)))
@@ -194,15 +213,22 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 	if again, err := o.Compressor.Compress(e.Format, e.Path, body, level); err != nil || !bytes.Equal(again, out) {
 		lr.Nondeterministic = append(lr.Nondeterministic, e.Name)
 	}
-	mustSkip := e.Expect == corpus.ExpectSkip || e.NativeContextManagement || !e.Readable(segments.Supports)
+	mustSkip := e.Expect == corpus.ExpectSkip || !e.Readable(segments.Supports)
 	if mustSkip {
 		if !bytes.Equal(out, body) {
 			lr.SkipViolations = append(lr.SkipViolations, e.Name)
 		}
 		return
 	}
+	// A body whose context the vendor manages is capped at level 1
+	// (lossless): above it, the output must be what level 1 gives.
+	if e.NativeContextManagement && level > 1 {
+		if l1, err := o.Compressor.Compress(e.Format, e.Path, body, 1); err == nil && !bytes.Equal(out, l1) {
+			lr.SkipViolations = append(lr.SkipViolations, e.Name+" (native context management above level 1)")
+		}
+	}
 	lr.Entries++
-	before, after := o.Tokens.Count(body), o.Tokens.Count(out)
+	before, after := tk.Count(body), tk.Count(out)
 	lr.TokensBefore += before
 	lr.TokensAfter += after
 
@@ -221,8 +247,8 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 		kind := kindOf(e, u.Text)
 		ks := lr.ByKind[kind]
 		ks.Units++
-		ks.Before += o.Tokens.Count([]byte(u.Text))
-		ks.After += o.Tokens.Count([]byte(ta[i].Text))
+		ks.Before += tk.Count([]byte(u.Text))
+		ks.After += tk.Count([]byte(ta[i].Text))
 		lr.ByKind[kind] = ks
 	}
 }
@@ -255,6 +281,7 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 		return r
 	}
 	rule := CacheRules[s.Format]
+	tk := o.tok(s.Format)
 	price := o.Prices[s.Format]
 	var prevIn, prevOut []byte
 	var prevLeaves map[string][2]string
@@ -266,8 +293,8 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 			}
 			out = in
 		}
-		tokens := o.Tokens.Count(out)
-		r.TokensBefore += o.Tokens.Count(in)
+		tokens := tk.Count(out)
+		r.TokensBefore += tk.Count(in)
 		r.TokensAfter += tokens
 		shared := 0
 		var leaves map[string][2]string
@@ -276,8 +303,8 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 		}
 		if prevOut != nil {
 			n := commonPrefix(prevOut, out)
-			shared = o.Tokens.Count(out[:n])
-			if prefixBroken(prevLeaves, leaves, o.Tokens.Count(in[:commonPrefix(prevIn, in)]), shared, o.Tokens.Count(in), tokens) {
+			shared = tk.Count(out[:n])
+			if prefixBroken(prevLeaves, leaves, tk.Count(in[:commonPrefix(prevIn, in)]), shared, tk.Count(in), tokens, &r.LateCompressions) {
 				r.PrefixBreaks++
 			}
 		}
@@ -346,17 +373,31 @@ func leafMap(format string, in, out []byte) map[string][2]string {
 
 // prefixBroken reports a turn that loses prompt-cache prefix the
 // uncompressed history kept:
-//   - a tool result already sent in the previous turn, with the same text,
-//     compressed differently this time (output is not a pure function of
-//     the unit text: the R1 rule), or
+//   - a tool result already sent compressed in the previous turn, with the
+//     same text, compressed differently this time (output is not a pure
+//     function of the unit text: the R1 rule), or
 //   - the compressed shared prefix is under half of what the uncompressed
 //     shared prefix becomes at this turn's compression ratio (something
 //     before the history changed, such as a stamp or a reordering).
-func prefixBroken(prev, cur map[string][2]string, sharedIn, sharedOut, tokensIn, tokensOut int) bool {
+//
+// A result the previous turn sent uncompressed and this turn compresses is
+// not a break: protect_recent_turns keeps the newest turn verbatim by
+// design, so it costs the cache only that result, once (counted in late).
+func prefixBroken(prev, cur map[string][2]string, sharedIn, sharedOut, tokensIn, tokensOut int, late *int) bool {
+	broken := false
 	for path, c := range cur {
-		if p, ok := prev[path]; ok && p[0] == c[0] && p[1] != c[1] {
-			return true
+		p, ok := prev[path]
+		if !ok || p[0] != c[0] || p[1] == c[1] {
+			continue
 		}
+		if p[0] == p[1] {
+			*late++
+			continue
+		}
+		broken = true
+	}
+	if broken {
+		return true
 	}
 	if tokensIn == 0 {
 		return false

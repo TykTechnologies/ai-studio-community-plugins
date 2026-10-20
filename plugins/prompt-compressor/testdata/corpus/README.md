@@ -91,7 +91,7 @@ Converse from InvokeModel and separates the pass-through endpoints.
 - `cache_breakpoints`: the number of `cache_control` and `cachePoint`
   markers.
 - `native_context_management`: the body asks the vendor to manage context
-  itself, so the compressor skips it.
+  itself, so the compressor caps it at level 1 (lossless only).
 - `tool_pairing`:
   - `paired`: every call has exactly one result.
   - `previous_response`: the calls live in a stored response.

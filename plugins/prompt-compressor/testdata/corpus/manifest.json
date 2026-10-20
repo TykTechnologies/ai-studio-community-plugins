@@ -158,7 +158,7 @@
       "file": "bodies/anthropic/anthropic_context_management.json",
       "format": "anthropic",
       "path": "/v1/messages",
-      "description": "Top-level context_management (clear_tool_uses): the vendor edits context itself, so the compressor must skip the body.",
+      "description": "Top-level context_management (clear_tool_uses): the vendor edits context itself, so the compressor caps the level at 1.",
       "expect": "extract",
       "tools": [
         {
@@ -189,7 +189,7 @@
       "file": "bodies/anthropic/anthropic_compaction.json",
       "format": "anthropic",
       "path": "/v1/messages",
-      "description": "A compaction block from server-side compaction leading the history, with context_management asking for compaction: skip.",
+      "description": "A compaction block from server-side compaction leading the history, with context_management asking for compaction: level capped at 1.",
       "expect": "extract",
       "tools": [
         {
@@ -1137,7 +1137,7 @@
       "file": "bodies/openai_responses/responses_compaction.json",
       "format": "openai_responses",
       "path": "/v1/responses",
-      "description": "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: skip.",
+      "description": "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: level capped at 1.",
       "expect": "extract",
       "tools": [
         {

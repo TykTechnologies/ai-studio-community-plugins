@@ -78,6 +78,8 @@ func replay(args []string) error {
 	prices := fs.String("prices", "", "JSON price file overriding the defaults ({\"anthropic\": {\"cpit\": ...}})")
 	outTok := fs.Int("output-tokens", 400, "response tokens billed per session turn")
 	out := fs.String("out", "", "write report.json and report.md here (default: print Markdown)")
+	comp := fs.String("compressor", "library", "library (the plugin's compress package) | identity")
+	toks := fs.String("tokens", "library", "library (the compress package's per-format estimator) | bytes (bytes/4)")
 	fs.Parse(args)
 
 	ls, err := levels(*lv)
@@ -97,7 +99,23 @@ func replay(args []string) error {
 	if err != nil {
 		return err
 	}
-	rep, err := eval.Replay(m, eval.Options{Levels: ls, Prices: p, OutputTokens: *outTok})
+	opts := eval.Options{Levels: ls, Prices: p, OutputTokens: *outTok}
+	switch *comp {
+	case "library":
+		opts.Compressor = eval.NewLibrary()
+	case "identity":
+		opts.Compressor = eval.Identity{}
+	default:
+		return fmt.Errorf("unknown -compressor %q", *comp)
+	}
+	switch *toks {
+	case "library":
+		opts.TokensFor = eval.LibraryTokens
+	case "bytes":
+	default:
+		return fmt.Errorf("unknown -tokens %q", *toks)
+	}
+	rep, err := eval.Replay(m, opts)
 	if err != nil {
 		return err
 	}

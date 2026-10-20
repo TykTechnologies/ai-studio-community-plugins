@@ -101,7 +101,8 @@ type Entry struct {
 	// cachePoint blocks (Bedrock) in the body.
 	CacheBreakpoints int `json:"cache_breakpoints"`
 	// NativeContextManagement: the body asks the vendor to manage context
-	// itself (context_management, compaction), so the compressor skips it.
+	// itself (context_management, compaction), so the compressor caps it at
+	// level 1 (lossless only).
 	NativeContextManagement bool `json:"native_context_management"`
 	// ToolPairing is "paired" when every tool call has exactly one result
 	// and every result a call.
@@ -261,7 +262,7 @@ func Entries() []Entry {
 		s2 := b.step("Checking the running pod.", b.out(Kubectl, "describe", 6000))
 		c := b.convo(modelClaude, "The web image build fails and the staging pod is crash-looping. Sort out both.", s1, s2)
 		cm := O("context_management", O("edits", []any{O("type", "clear_tool_uses_20250919", "trigger", O("type", "input_tokens", "value", 30000), "keep", O("type", "tool_uses", "value", 3), "clear_at_least", O("type", "input_tokens", "value", 5000))}))
-		e := b.entry("anthropic_context_management", "anthropic", pathAnthropic, "Top-level context_management (clear_tool_uses): the vendor edits context itself, so the compressor must skip the body.",
+		e := b.entry("anthropic_context_management", "anthropic", pathAnthropic, "Top-level context_management (clear_tool_uses): the vendor edits context itself, so the compressor caps the level at 1.",
 			RenderAnthropic(c, 2, AnthropicOpts{Extra: cm}), ShapeContextManagement, ShapeToolResultString, ShapeIsError)
 		e.NativeContextManagement = true
 		add(e)
@@ -275,7 +276,7 @@ func Entries() []Entry {
 		msgs := body.Get("messages").([]any)
 		summary := O("role", "assistant", "content", []any{O("type", "compaction", "content", "Summary of earlier work: the engineer asked to upgrade the ledger database to Postgres 16. "+b.g.Sentence(40)+" "+b.g.Sentence(30))})
 		body.Set("messages", append([]any{O("role", "user", "content", "Start the Postgres 16 upgrade.")}, append([]any{summary}, msgs...)...))
-		e := b.entry("anthropic_compaction", "anthropic", pathAnthropic, "A compaction block from server-side compaction leading the history, with context_management asking for compaction: skip.",
+		e := b.entry("anthropic_compaction", "anthropic", pathAnthropic, "A compaction block from server-side compaction leading the history, with context_management asking for compaction: level capped at 1.",
 			body, ShapeCompaction, ShapeContextManagement, ShapeToolResultString)
 		e.NativeContextManagement = true
 		add(e)
@@ -581,7 +582,7 @@ func Entries() []Entry {
 		s2.Encrypted = "gAAAAAB" + b.g.B64(800)
 		c := &Convo{Model: modelCodex, System: codingSystem, Tools: codexTools(), Task: "Carry on with the upgrade.", Steps: []Step{s1, s2}}
 		compaction := O("type", "compaction", "encrypted_content", "gAAAAAB"+b.g.B64(1500))
-		e := b.entry("responses_compaction", "openai_responses", pathResponses, "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: skip.",
+		e := b.entry("responses_compaction", "openai_responses", pathResponses, "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: level capped at 1.",
 			RenderResponses(c, 2, ResponsesOpts{Codex: true, Prefix: []any{compaction}, Extra: O("context_management", []any{O("type", "compaction", "compact_threshold", 200000)})}), ShapeCompaction, ShapeContextManagement, ShapeEncryptedReasoning)
 		e.NativeContextManagement = true
 		add(e)

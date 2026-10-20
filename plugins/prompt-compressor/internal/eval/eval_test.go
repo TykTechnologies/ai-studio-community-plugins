@@ -202,6 +202,35 @@ func TestContextDependentCompressionBreaksPrefix(t *testing.T) {
 	}
 }
 
+// The plugin's compress library at level 1 over the whole corpus: no
+// pass-through body touched, nothing nondeterministic, no prefix breaks, and
+// sessions no dearer than at off (the level-1 tiered gate's replay check).
+func TestLibraryLevel1Replay(t *testing.T) {
+	t.Parallel()
+	lib := NewLibrary()
+	rep, err := Replay(loadCorpus(t), Options{Levels: []int{1}, Compressor: lib})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := rep.Levels[0]
+	if len(l.SkipViolations)+len(l.Nondeterministic)+len(l.Errors) != 0 {
+		t.Fatalf("skip violations %v, nondeterministic %v, errors %v", l.SkipViolations, l.Nondeterministic, l.Errors)
+	}
+	if l.TokensAfter > l.TokensBefore {
+		t.Errorf("level 1 grew the corpus: %d -> %d tokens", l.TokensBefore, l.TokensAfter)
+	}
+	for _, s := range l.Sessions {
+		if s.PrefixBreaks != 0 {
+			t.Errorf("%s: %d prefix breaks", s.Name, s.PrefixBreaks)
+		}
+		if s.CostDelta > 1e-9 {
+			t.Errorf("%s: level 1 costs more than off after cache (%+.4f)", s.Name, s.CostDelta)
+		}
+	}
+	t.Logf("level 1: %d -> %d tokens, session cost %.4f vs %.4f at off, outcomes %v",
+		l.TokensBefore, l.TokensAfter, l.SessionCost, l.BaselineCost, lib.Outcomes)
+}
+
 // leaky fails the way a careless compressor would: quoting the text it
 // failed on.
 type leaky struct{}
