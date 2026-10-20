@@ -36,7 +36,8 @@
   },
   "rbac": {
     "rpc_methods": {
-      "getStatus": "read"
+      "getStatus": "read",
+      "validateConfig": "read"
     }
   },
   "compat": {

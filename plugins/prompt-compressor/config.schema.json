@@ -2,6 +2,184 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "Prompt Compressor Configuration",
-  "description": "Placeholder: the pass-through scaffold takes no settings.",
-  "properties": {}
+  "description": "One config for every LLM the plugin is attached to. Named policies hold the compression settings; bindings pick a policy per LLM or App. An App can override its policy with the metadata key prompt_compressor.policy.",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off does nothing. audit compresses and records the savings but forwards the original body. enforce forwards the compressed body.",
+      "enum": ["off", "audit", "enforce"],
+      "default": "audit"
+    },
+    "default_policy": {
+      "type": "string",
+      "title": "Default policy",
+      "description": "The policy for requests no binding matches. \"default\" is level 1 on tool outputs when no policy of that name is defined; \"off\" turns compression off.",
+      "default": "default",
+      "maxLength": 64
+    },
+    "policies": {
+      "type": "object",
+      "title": "Policies",
+      "description": "Named policies. Each one starts from the defaults and lists only what it changes. The name \"off\" is reserved.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9]+([-_][a-z0-9]+)*$",
+        "maxLength": 64
+      },
+      "maxProperties": 64,
+      "additionalProperties": { "$ref": "#/definitions/policy" },
+      "default": {}
+    },
+    "bindings": {
+      "type": "object",
+      "title": "Bindings",
+      "description": "Policy by LLM or App: keys llm:<slug>, llm_id:<id> or app:<id>, values a policy name or \"off\". Precedence: App metadata, app:, llm_id:, llm:, then the default policy.",
+      "propertyNames": {
+        "pattern": "^(llm:.+|llm_id:[1-9][0-9]*|app:[1-9][0-9]*)$"
+      },
+      "maxProperties": 10000,
+      "additionalProperties": { "type": "string", "maxLength": 64 },
+      "default": {}
+    },
+    "allow_client_bypass": {
+      "type": "boolean",
+      "title": "Allow client bypass",
+      "description": "Honour the request header X-Tyk-Compression: off.",
+      "default": true
+    },
+    "failure_mode": {
+      "type": "string",
+      "title": "Engine failure mode",
+      "description": "What happens when an external engine call fails: open forwards the request, closed answers 502. Every other failure always passes the request through unchanged.",
+      "enum": ["open", "closed"],
+      "default": "open"
+    },
+    "lossy_with_request_filters": {
+      "type": "boolean",
+      "title": "Lossy levels with request filters",
+      "description": "Run level 3 and engines on LLMs that have request filters. Off by default, because the filters would screen the compressed body rather than the original.",
+      "default": false
+    },
+    "max_body_bytes": {
+      "type": "integer",
+      "title": "Maximum body size (bytes)",
+      "description": "Bodies larger than this pass through uncompressed. Limits are by size, never by time, so load never changes the output.",
+      "minimum": 1,
+      "default": 4194304
+    }
+  },
+  "patternProperties": {
+    "^engine_[a-z0-9]+(_[a-z0-9]+)*_(url|token)$": {
+      "type": "string",
+      "description": "Engine credentials, engine_<name>_url and engine_<name>_token. Use a $SECRET/ reference. External engines are not supported yet: the settings are accepted and not used."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "policy": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "title": "Level",
+          "description": "0 off, 1 lossless, 2 noise reduction, 3 aggressive. Cumulative.",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 1
+        },
+        "roles": {
+          "type": "array",
+          "title": "Roles",
+          "description": "Which messages are compressed. Tool outputs by default.",
+          "items": { "type": "string", "enum": ["tool", "user", "assistant", "system"] },
+          "uniqueItems": true,
+          "minItems": 1,
+          "default": ["tool"]
+        },
+        "min_unit_tokens": {
+          "type": "integer",
+          "title": "Minimum unit size (tokens)",
+          "description": "Smaller units are left alone.",
+          "minimum": 0,
+          "default": 300
+        },
+        "protect_recent_turns": {
+          "type": "integer",
+          "title": "Protected recent turns",
+          "description": "The newest turns stay at level 1 at most, so the model reads its latest tool output in full.",
+          "minimum": 0,
+          "default": 1
+        },
+        "cache_mode": {
+          "type": "string",
+          "title": "Cache mode",
+          "description": "deterministic compresses everything selected, the same way every turn. skip_cached leaves everything up to the last cache breakpoint alone.",
+          "enum": ["deterministic", "skip_cached"],
+          "default": "deterministic"
+        },
+        "dedupe_references": {
+          "type": "boolean",
+          "title": "Replace repeated tool outputs with a reference",
+          "description": "A tool output identical to an earlier one in the same request becomes a reference to it.",
+          "default": false
+        },
+        "tool_overrides": {
+          "type": "object",
+          "title": "Per-tool overrides",
+          "description": "By tool name: exclude the tool, or set its level or size budget.",
+          "maxProperties": 256,
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "exclude": { "type": "boolean", "title": "Exclude" },
+              "level": { "type": "integer", "title": "Level", "minimum": 0, "maximum": 3 },
+              "max_unit_tokens": { "type": "integer", "title": "Size budget (tokens)", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "protect_patterns": {
+          "type": "array",
+          "title": "Protect patterns",
+          "description": "Regular expressions (RE2) whose matches lossy levels keep verbatim, such as ticket IDs.",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "maxItems": 64
+        },
+        "max_unit_tokens": {
+          "type": "integer",
+          "title": "Maximum unit size (tokens, level 3)",
+          "description": "Level 3 cuts longer tool outputs to their head and tail, with a marker.",
+          "minimum": 0,
+          "default": 6000
+        },
+        "mask_after_turns": {
+          "type": "integer",
+          "title": "Mask after turns (level 3)",
+          "description": "Level 3 replaces tool results older than this many turns with a placeholder.",
+          "minimum": 0,
+          "default": 8
+        },
+        "mask_step_tokens": {
+          "type": "integer",
+          "title": "Mask step (tokens, level 3)",
+          "description": "Level 3 masks old turns in steps of at least this many tokens, so each one-off cache rewrite buys a large saving.",
+          "minimum": 0,
+          "default": 20000
+        },
+        "engine": {
+          "type": "object",
+          "title": "External engine",
+          "description": "Not supported yet: accepted and not used. Credentials come from engine_<name>_url and engine_<name>_token.",
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$", "maxLength": 64 },
+            "kind": { "type": "string", "enum": ["headroom", "llmlingua2"] },
+            "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 60000, "default": 2000 }
+          },
+          "required": ["name", "kind"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

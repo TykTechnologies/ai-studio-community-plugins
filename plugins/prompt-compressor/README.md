@@ -26,6 +26,52 @@ OpenAI-compatible endpoints (`/ai/{slug}/v1`, the unified `/v1` and
 `/router/`) reach it through their internal `/llm/call/` hop for every vendor
 except Bedrock, which they call directly.
 
+## Configuration
+
+The plugin gets one config for every LLM it is attached to. Named policies
+hold the compression settings; bindings pick a policy per LLM or App.
+
+```json
+{
+  "mode": "audit",
+  "default_policy": "safe",
+  "policies": {
+    "safe":   {"level": 1},
+    "agents": {"level": 2, "min_unit_tokens": 400,
+               "tool_overrides": {"Bash": {"max_unit_tokens": 4000},
+                                  "read_contract": {"exclude": true}},
+               "protect_patterns": ["[A-Z]{2,6}-[0-9]+"]}
+  },
+  "bindings": {"llm:claude-prod": "agents", "app:42": "off"}
+}
+```
+
+- **mode:** `off`, `audit` (the default: compute and record, forward the
+  original) or `enforce`.
+- **Policies** start from the defaults (level 1, tool outputs only,
+  `min_unit_tokens` 300, `protect_recent_turns` 1, `cache_mode`
+  deterministic) and list only what they change. `off` is a reserved policy
+  name that turns compression off; `default` is the defaults when no policy of
+  that name is defined.
+- **Bindings** are keyed `llm:<slug>`, `llm_id:<id>` or `app:<id>`. Don't use
+  the per-LLM config override: the gateway applies it only when the plugin is
+  on exactly one LLM.
+- **Precedence:** the App metadata key `prompt_compressor.policy` (needs
+  `apps.read`; cached 30 s per App), then `app:`, `llm_id:`, `llm:`, then
+  `default_policy`. A policy name that doesn't exist in App metadata, or a
+  failed App lookup, falls back to the bindings.
+- **Engine credentials** are top-level keys, `engine_<name>_url` and
+  `engine_<name>_token`, so `$SECRET/` references work. External engines are
+  not supported yet.
+- **Policy hash:** every record carries the SHA-256 of the policy's effective
+  settings and the strategy version, so a reviewer can tell which rules
+  changed a request. Key order and settings left at their defaults don't
+  change it; engine credentials are not part of it.
+
+An invalid config is logged and turns compression off; it never stops the
+plugin loading. The `validateConfig` RPC checks a config before it is saved.
+The full schema is in `config.schema.json`.
+
 ## Service scopes
 
 | Scope | Why |

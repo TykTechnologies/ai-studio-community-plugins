@@ -8,7 +8,9 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
@@ -41,6 +43,9 @@ type PromptCompressorPlugin struct {
 	mu       sync.RWMutex
 	runtime  plugin_sdk.RuntimeType
 	services plugin_sdk.ServiceBroker
+
+	// current is the configuration the hooks read; see state().
+	current atomic.Pointer[pluginState]
 }
 
 // NewPromptCompressorPlugin creates a new plugin instance
@@ -82,13 +87,25 @@ func stdLog(level, msg string, fields []interface{}) {
 
 // Initialize implements plugin_sdk.Plugin. The gateway host may call it more
 // than once.
-func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, config map[string]string) error {
+// An invalid config is logged and turns compression off; it never fails
+// the load.
+func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap map[string]string) error {
 	p.mu.Lock()
 	p.runtime = ctx.Runtime
 	p.services = ctx.Services
 	p.mu.Unlock()
 
-	p.logger().Info("Initialized", "runtime", ctx.Runtime, "version", PluginVersion)
+	cfg, err := loadConfig(configMap)
+	next := &pluginState{config: cfg, configErr: err, apps: config.NewAppPolicyCache(fetchAppMetadata)}
+	if prev := p.current.Load(); prev != nil && prev.apps != nil {
+		next.apps = prev.apps
+	}
+	p.current.Store(next)
+	if err != nil {
+		p.logger().Error("Invalid configuration, compression is off until it is fixed", "error", err.Error())
+	}
+
+	p.logger().Info("Initialized", "runtime", ctx.Runtime, "version", PluginVersion, "mode", cfg.Mode)
 	return nil
 }
 
@@ -184,11 +201,21 @@ func (p *PromptCompressorPlugin) HandleRPC(method string, payload []byte) ([]byt
 		p.mu.RLock()
 		runtime := p.runtime
 		p.mu.RUnlock()
+		s := p.state()
+		configError := ""
+		if s.configErr != nil {
+			configError = s.configErr.Error()
+		}
 		return json.Marshal(map[string]interface{}{
-			"plugin":  PluginName,
-			"version": PluginVersion,
-			"runtime": runtime,
+			"plugin":           PluginName,
+			"version":          PluginVersion,
+			"runtime":          runtime,
+			"mode":             s.config.Mode,
+			"config_error":     configError,
+			"strategy_version": config.StrategyVersion,
 		})
+	case "validateConfig":
+		return rpcValidateConfig(payload)
 	default:
 		return nil, fmt.Errorf("unknown RPC method: %s", method)
 	}
