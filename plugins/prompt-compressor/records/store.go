@@ -1,0 +1,346 @@
+package records
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+)
+
+// KV is the part of the plugin KV service the store uses. Read must return
+// an error that notFound recognises for a missing key.
+type KV interface {
+	Read(ctx context.Context, key string) ([]byte, error)
+	Write(ctx context.Context, key string, value []byte, expireAt *time.Time) (bool, error)
+	Delete(ctx context.Context, key string) (bool, error)
+}
+
+// Store keeps Studio's hourly rollups in plugin KV.
+//
+// KV has no List, so every document is reachable from an index:
+//
+//	pc:edges                     edges that sent records (hashed ids)
+//	pc:e:<edge>:hours            hour buckets held for one edge
+//	pc:e:<edge>:h:<hour>         that edge's rows for one hour
+//	pc:policy:<hash>             when a policy hash was first seen
+//
+// Documents are per edge: an edge's payloads arrive one batch at a time,
+// on one Studio replica at a time, so two replicas never merge into the
+// same hour document. Each hour document lists the batch IDs merged into
+// it, which makes applying a batch idempotent: a redelivered batch (edge
+// retry, hub restart, a new cluster leader replaying) changes nothing.
+//
+// Keys are built from hashes and integers only, never from edge-supplied
+// strings.
+type Store struct {
+	kv        KV
+	notFound  func(error) bool
+	retention time.Duration
+	// batchIDsPerHour bounds the idempotency list kept in an hour document.
+	batchIDsPerHour int
+	now             func() time.Time
+
+	mu sync.Mutex
+}
+
+// Store defaults.
+const (
+	DefaultRetention = 90 * 24 * time.Hour
+	// maxBatchIDsPerHour bounds the idempotency list in an hour document.
+	// An edge flushes about once a minute.
+	maxBatchIDsPerHour = 1000
+	// MaxEdges bounds the edge index.
+	MaxEdges = 1000
+)
+
+// NewStore returns a store over kv.
+func NewStore(kv KV, notFound func(error) bool) *Store {
+	return &Store{kv: kv, notFound: notFound, retention: DefaultRetention, batchIDsPerHour: maxBatchIDsPerHour, now: time.Now}
+}
+
+// EdgeKey is the KV-safe name of an edge.
+func EdgeKey(namespace, edgeID string) string {
+	sum := sha256.Sum256([]byte(namespace + "\x00" + edgeID))
+	return hex.EncodeToString(sum[:8])
+}
+
+type hourDoc struct {
+	Batches []string          `json:"batches"`
+	Rows    map[string]*Delta `json:"rows"`
+}
+
+type edgesDoc struct {
+	Edges map[string]int64 `json:"edges"` // edge key -> last hour seen
+}
+
+// PolicyMarker records when a policy version was first seen.
+type PolicyMarker struct {
+	Hash      string `json:"hash"`
+	FirstSeen int64  `json:"first_seen"` // Unix hour
+	Name      string `json:"name,omitempty"`
+	Level     int    `json:"level"`
+}
+
+func (s *Store) read(ctx context.Context, key string, v interface{}) (bool, error) {
+	raw, err := s.kv.Read(ctx, key)
+	if err != nil {
+		if s.notFound != nil && s.notFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if len(raw) == 0 {
+		return false, nil
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return true, nil
+}
+
+func (s *Store) write(ctx context.Context, key string, v interface{}) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = s.kv.Write(ctx, key, raw, nil)
+	return err
+}
+
+func hoursKey(edge string) string            { return "pc:e:" + edge + ":hours" }
+func hourKey(edge string, hour int64) string { return fmt.Sprintf("pc:e:%s:h:%d", edge, hour) }
+
+// Apply merges a batch from an edge. It validates the batch first and
+// stores nothing from an invalid one. Applying the same batch again is a
+// no-op.
+func (s *Store) Apply(ctx context.Context, namespace, edgeID string, b *Batch) error {
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	edge := EdgeKey(namespace, edgeID)
+	oldest := HourOf(s.now().Add(-s.retention))
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	byHour := map[int64][]*Delta{}
+	for _, d := range b.Deltas {
+		if d.Hour < oldest {
+			continue // past retention: nothing would keep it
+		}
+		byHour[d.Hour] = append(byHour[d.Hour], d)
+	}
+	hours := make([]int64, 0, len(byHour))
+	for h := range byHour {
+		hours = append(hours, h)
+	}
+	sort.Slice(hours, func(i, j int) bool { return hours[i] < hours[j] })
+
+	// Index first: a crash after it leaves an hour listed with no or old
+	// rows, which reads as empty; never rows no index reaches.
+	if err := s.indexHours(ctx, edge, hours, oldest); err != nil {
+		return err
+	}
+	for _, h := range hours {
+		if err := s.mergeHour(ctx, edge, h, b.ID, byHour[h]); err != nil {
+			return err
+		}
+	}
+	if len(hours) > 0 {
+		if err := s.indexEdge(ctx, edge, hours[len(hours)-1]); err != nil {
+			return err
+		}
+	}
+	return s.markPolicies(ctx, b.Deltas)
+}
+
+func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch string, deltas []*Delta) error {
+	key := hourKey(edge, hour)
+	doc := hourDoc{}
+	if _, err := s.read(ctx, key, &doc); err != nil {
+		return err
+	}
+	for _, id := range doc.Batches {
+		if id == batch {
+			return nil // already applied
+		}
+	}
+	if doc.Rows == nil {
+		doc.Rows = map[string]*Delta{}
+	}
+	for _, d := range deltas {
+		row := d.Row()
+		if cur := doc.Rows[row]; cur != nil {
+			cur.Merge(d)
+		} else {
+			cp := NewDelta(d.Key)
+			cp.Merge(d)
+			doc.Rows[row] = cp
+		}
+	}
+	doc.Batches = append(doc.Batches, batch)
+	if len(doc.Batches) > s.batchIDsPerHour {
+		doc.Batches = doc.Batches[len(doc.Batches)-s.batchIDsPerHour:]
+	}
+	return s.write(ctx, key, doc)
+}
+
+// indexHours adds hours to the edge's index and removes, with their
+// documents, the hours past retention.
+func (s *Store) indexHours(ctx context.Context, edge string, add []int64, oldest int64) error {
+	var held []int64
+	if _, err := s.read(ctx, hoursKey(edge), &held); err != nil {
+		return err
+	}
+	set := map[int64]bool{}
+	var expired []int64
+	for _, h := range held {
+		if h < oldest {
+			expired = append(expired, h)
+			continue
+		}
+		set[h] = true
+	}
+	changed := len(expired) > 0
+	for _, h := range add {
+		if !set[h] {
+			set[h] = true
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	next := make([]int64, 0, len(set))
+	for h := range set {
+		next = append(next, h)
+	}
+	sort.Slice(next, func(i, j int) bool { return next[i] < next[j] })
+	if err := s.write(ctx, hoursKey(edge), next); err != nil {
+		return err
+	}
+	for _, h := range expired {
+		if _, err := s.kv.Delete(ctx, hourKey(edge, h)); err != nil && !(s.notFound != nil && s.notFound(err)) {
+			return err
+		}
+	}
+	return nil
+}
+
+// indexEdge records the edge in the edge index. Only a new edge or a new
+// latest hour writes it, so replicas rarely touch it at the same time; an
+// edge lost to such a race is added again by its next batch.
+func (s *Store) indexEdge(ctx context.Context, edge string, hour int64) error {
+	doc := edgesDoc{}
+	if _, err := s.read(ctx, "pc:edges", &doc); err != nil {
+		return err
+	}
+	if doc.Edges == nil {
+		doc.Edges = map[string]int64{}
+	}
+	if last, ok := doc.Edges[edge]; ok && last >= hour {
+		return nil
+	}
+	if _, ok := doc.Edges[edge]; !ok && len(doc.Edges) >= MaxEdges {
+		return errors.New("edge index is full")
+	}
+	doc.Edges[edge] = hour
+	// Edges silent for longer than the retention hold no data any more
+	oldest := HourOf(s.now().Add(-s.retention))
+	for e, last := range doc.Edges {
+		if last < oldest {
+			delete(doc.Edges, e)
+		}
+	}
+	return s.write(ctx, "pc:edges", doc)
+}
+
+func (s *Store) markPolicies(ctx context.Context, deltas []*Delta) error {
+	first := map[string]*Delta{}
+	for _, d := range deltas {
+		if d.PolicyHash == "" {
+			continue
+		}
+		if cur := first[d.PolicyHash]; cur == nil || d.Hour < cur.Hour {
+			first[d.PolicyHash] = d
+		}
+	}
+	for hash, d := range first {
+		key := "pc:policy:" + hash
+		var m PolicyMarker
+		found, err := s.read(ctx, key, &m)
+		if err != nil {
+			return err
+		}
+		if found && m.FirstSeen <= d.Hour {
+			continue
+		}
+		m = PolicyMarker{Hash: hash, FirstSeen: d.Hour, Name: d.PolicyName, Level: d.Level}
+		if err := s.write(ctx, key, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Query returns the rows for hours from..to (inclusive), merged across
+// edges, and the markers of the policies they name.
+func (s *Store) Query(ctx context.Context, from, to int64) ([]*Delta, []PolicyMarker, error) {
+	edges := edgesDoc{}
+	if _, err := s.read(ctx, "pc:edges", &edges); err != nil {
+		return nil, nil, err
+	}
+	merged := map[string]*Delta{}
+	for edge := range edges.Edges {
+		var held []int64
+		if _, err := s.read(ctx, hoursKey(edge), &held); err != nil {
+			return nil, nil, err
+		}
+		for _, h := range held {
+			if h < from || h > to {
+				continue
+			}
+			doc := hourDoc{}
+			if _, err := s.read(ctx, hourKey(edge, h), &doc); err != nil {
+				return nil, nil, err
+			}
+			for row, d := range doc.Rows {
+				if cur := merged[row]; cur != nil {
+					cur.Merge(d)
+				} else {
+					cp := NewDelta(d.Key)
+					cp.Merge(d)
+					merged[row] = cp
+				}
+			}
+		}
+	}
+	rows := make([]*Delta, 0, len(merged))
+	hashes := map[string]bool{}
+	for _, d := range merged {
+		rows = append(rows, d)
+		if d.PolicyHash != "" {
+			hashes[d.PolicyHash] = true
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Row() < rows[j].Row() })
+
+	markers := make([]PolicyMarker, 0, len(hashes))
+	for h := range hashes {
+		var m PolicyMarker
+		found, err := s.read(ctx, "pc:policy:"+h, &m)
+		if err != nil {
+			return nil, nil, err
+		}
+		if found {
+			markers = append(markers, m)
+		}
+	}
+	sort.Slice(markers, func(i, j int) bool { return markers[i].FirstSeen < markers[j].FirstSeen })
+	return rows, markers, nil
+}
