@@ -27,7 +27,7 @@ type KV interface {
 //	pc:edges                     edges that sent records (hashed ids)
 //	pc:e:<edge>:hours            hour buckets held for one edge
 //	pc:e:<edge>:h:<hour>         that edge's rows for one hour
-//	pc:policy:<hash>             when a policy hash was first seen
+//	pc:policies                  when each policy hash was first and last seen
 //
 // Documents are per edge: an edge's payloads arrive one batch at a time,
 // on one Studio replica at a time, so two replicas never merge into the
@@ -43,9 +43,14 @@ type Store struct {
 	retention time.Duration
 	// batchIDsPerHour bounds the idempotency list kept in an hour document.
 	batchIDsPerHour int
-	now             func() time.Time
+	// rowsPerHour and policyMarkers bound what an edge can make Studio
+	// keep, whatever its batches say.
+	rowsPerHour   int
+	policyMarkers int
+	now           func() time.Time
 
-	mu sync.Mutex
+	mu    sync.Mutex
+	stats StoreStats
 }
 
 // Store defaults.
@@ -56,11 +61,22 @@ const (
 	maxBatchIDsPerHour = 1000
 	// MaxEdges bounds the edge index.
 	MaxEdges = 1000
+	// MaxRowsPerHour bounds the rows in one edge's hour document; later
+	// rows fold into an overflow row per outcome.
+	MaxRowsPerHour = 5000
+	// MaxPolicyMarkers bounds the policy markers; the least recently seen
+	// go first.
+	MaxPolicyMarkers = 500
+	// maxClockSkew is how far ahead of Studio's clock an edge's hour may be.
+	maxClockSkew = time.Hour
 )
 
 // NewStore returns a store over kv.
 func NewStore(kv KV, notFound func(error) bool) *Store {
-	return &Store{kv: kv, notFound: notFound, retention: DefaultRetention, batchIDsPerHour: maxBatchIDsPerHour, now: time.Now}
+	return &Store{
+		kv: kv, notFound: notFound, retention: DefaultRetention, batchIDsPerHour: maxBatchIDsPerHour,
+		rowsPerHour: MaxRowsPerHour, policyMarkers: MaxPolicyMarkers, now: time.Now,
+	}
 }
 
 // EdgeKey is the KV-safe name of an edge.
@@ -72,7 +88,13 @@ func EdgeKey(namespace, edgeID string) string {
 type hourDoc struct {
 	Batches []string          `json:"batches"`
 	Rows    map[string]*Delta `json:"rows"`
+	// Folded counts deltas merged into the overflow rows.
+	Folded int64 `json:"folded,omitempty"`
 }
+
+// overflowRow names the row an hour folds new rows into once it holds
+// MaxRowsPerHour rows. It never collides with a key's Row.
+func overflowRow(outcome string) string { return "overflow:" + outcome }
 
 type edgesDoc struct {
 	Edges map[string]int64 `json:"edges"` // edge key -> last hour seen
@@ -82,6 +104,7 @@ type edgesDoc struct {
 type PolicyMarker struct {
 	Hash      string `json:"hash"`
 	FirstSeen int64  `json:"first_seen"` // Unix hour
+	LastSeen  int64  `json:"last_seen"`  // Unix hour
 	Name      string `json:"name,omitempty"`
 	Level     int    `json:"level"`
 }
@@ -128,10 +151,19 @@ func (s *Store) Apply(ctx context.Context, namespace, edgeID string, b *Batch) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Hours are the edge's word: one past retention would never be kept,
+	// one in the future would never age out. A small skew allows for
+	// clocks and the current hour.
+	newest := HourOf(s.now().Add(maxClockSkew))
 	byHour := map[int64][]*Delta{}
 	for _, d := range b.Deltas {
-		if d.Hour < oldest {
-			continue // past retention: nothing would keep it
+		switch {
+		case d.Hour < oldest:
+			s.stats.TooOld++
+			continue
+		case d.Hour > newest:
+			s.stats.Future++
+			continue
 		}
 		byHour[d.Hour] = append(byHour[d.Hour], d)
 	}
@@ -156,7 +188,29 @@ func (s *Store) Apply(ctx context.Context, namespace, edgeID string, b *Batch) e
 			return err
 		}
 	}
-	return s.markPolicies(ctx, b.Deltas)
+	var kept []*Delta
+	for _, h := range hours {
+		kept = append(kept, byHour[h]...)
+	}
+	return s.markPolicies(ctx, kept, oldest)
+}
+
+// StoreStats counts what Apply left out.
+type StoreStats struct {
+	// TooOld and Future count deltas outside retention or beyond the clock
+	// skew; they are not stored.
+	TooOld int64 `json:"too_old"`
+	Future int64 `json:"future"`
+	// Folded counts deltas merged into an hour's overflow row because the
+	// hour already held MaxRowsPerHour rows.
+	Folded int64 `json:"folded"`
+}
+
+// Stats returns the counts since the store was made.
+func (s *Store) Stats() StoreStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stats
 }
 
 func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch string, deltas []*Delta) error {
@@ -177,11 +231,28 @@ func (s *Store) mergeHour(ctx context.Context, edge string, hour int64, batch st
 		row := d.Row()
 		if cur := doc.Rows[row]; cur != nil {
 			cur.Merge(d)
-		} else {
-			cp := NewDelta(d.Key)
-			cp.Merge(d)
-			doc.Rows[row] = cp
+			continue
 		}
+		// A full hour folds new rows into one overflow row per outcome, so
+		// totals stay right while the document stays bounded.
+		if len(doc.Rows) >= s.rowsPerHour {
+			s.stats.Folded++
+			doc.Folded++
+			row = overflowRow(d.Outcome)
+			if cur := doc.Rows[row]; cur != nil {
+				cur.Merge(d)
+				continue
+			}
+			cp := NewDelta(Key{Hour: d.Hour, Outcome: d.Outcome})
+			cp.Overflow = true
+			cp.Merge(d)
+			cp.PolicyName, cp.Mode, cp.Level = "", "", 0
+			doc.Rows[row] = cp
+			continue
+		}
+		cp := NewDelta(d.Key)
+		cp.Merge(d)
+		doc.Rows[row] = cp
 	}
 	doc.Batches = append(doc.Batches, batch)
 	if len(doc.Batches) > s.batchIDsPerHour {
@@ -260,32 +331,86 @@ func (s *Store) indexEdge(ctx context.Context, edge string, hour int64) error {
 	return s.write(ctx, "pc:edges", doc)
 }
 
-func (s *Store) markPolicies(ctx context.Context, deltas []*Delta) error {
-	first := map[string]*Delta{}
+func (s *Store) markPolicies(ctx context.Context, deltas []*Delta, oldest int64) error {
+	type span struct{ first, last *Delta }
+	seen := map[string]*span{}
 	for _, d := range deltas {
 		if d.PolicyHash == "" {
 			continue
 		}
-		if cur := first[d.PolicyHash]; cur == nil || d.Hour < cur.Hour {
-			first[d.PolicyHash] = d
-		}
-	}
-	for hash, d := range first {
-		key := "pc:policy:" + hash
-		var m PolicyMarker
-		found, err := s.read(ctx, key, &m)
-		if err != nil {
-			return err
-		}
-		if found && m.FirstSeen <= d.Hour {
+		sp := seen[d.PolicyHash]
+		if sp == nil {
+			seen[d.PolicyHash] = &span{d, d}
 			continue
 		}
-		m = PolicyMarker{Hash: hash, FirstSeen: d.Hour, Name: d.PolicyName, Level: d.Level}
-		if err := s.write(ctx, key, m); err != nil {
-			return err
+		if d.Hour < sp.first.Hour {
+			sp.first = d
+		}
+		if d.Hour > sp.last.Hour {
+			sp.last = d
 		}
 	}
-	return nil
+	if len(seen) == 0 {
+		return nil
+	}
+	doc := policiesDoc{}
+	if _, err := s.read(ctx, policiesKey, &doc); err != nil {
+		return err
+	}
+	if doc.Policies == nil {
+		doc.Policies = map[string]*PolicyMarker{}
+	}
+	changed := false
+	for hash, sp := range seen {
+		m := doc.Policies[hash]
+		if m == nil {
+			doc.Policies[hash] = &PolicyMarker{Hash: hash, FirstSeen: sp.first.Hour, LastSeen: sp.last.Hour, Name: sp.first.PolicyName, Level: sp.first.Level}
+			changed = true
+			continue
+		}
+		if sp.first.Hour < m.FirstSeen {
+			m.FirstSeen = sp.first.Hour
+			changed = true
+		}
+		if sp.last.Hour > m.LastSeen {
+			m.LastSeen = sp.last.Hour
+			changed = true
+		}
+	}
+	// Markers of policies not seen within the retention go; past the cap,
+	// the least recently seen go first.
+	for hash, m := range doc.Policies {
+		if m.LastSeen < oldest {
+			delete(doc.Policies, hash)
+			changed = true
+		}
+	}
+	if over := len(doc.Policies) - s.policyMarkers; over > 0 {
+		list := make([]*PolicyMarker, 0, len(doc.Policies))
+		for _, m := range doc.Policies {
+			list = append(list, m)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].LastSeen != list[j].LastSeen {
+				return list[i].LastSeen < list[j].LastSeen
+			}
+			return list[i].Hash < list[j].Hash
+		})
+		for _, m := range list[:over] {
+			delete(doc.Policies, m.Hash)
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.write(ctx, policiesKey, doc)
+}
+
+const policiesKey = "pc:policies"
+
+type policiesDoc struct {
+	Policies map[string]*PolicyMarker `json:"policies"`
 }
 
 // Query returns the rows for hours from..to (inclusive), merged across
@@ -330,15 +455,14 @@ func (s *Store) Query(ctx context.Context, from, to int64) ([]*Delta, []PolicyMa
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Row() < rows[j].Row() })
 
+	pdoc := policiesDoc{}
+	if _, err := s.read(ctx, policiesKey, &pdoc); err != nil {
+		return nil, nil, err
+	}
 	markers := make([]PolicyMarker, 0, len(hashes))
 	for h := range hashes {
-		var m PolicyMarker
-		found, err := s.read(ctx, "pc:policy:"+h, &m)
-		if err != nil {
-			return nil, nil, err
-		}
-		if found {
-			markers = append(markers, m)
+		if m := pdoc.Policies[h]; m != nil {
+			markers = append(markers, *m)
 		}
 	}
 	sort.Slice(markers, func(i, j int) bool { return markers[i].FirstSeen < markers[j].FirstSeen })

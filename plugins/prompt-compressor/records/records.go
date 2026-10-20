@@ -178,6 +178,9 @@ type Delta struct {
 	PolicyName string `json:"policy_name,omitempty"`
 	Mode       string `json:"mode,omitempty"`
 	Level      int    `json:"level"`
+	// Overflow marks Studio's row for an hour's rows past MaxRowsPerHour:
+	// its App, LLM and policy are mixed. Edges never send one.
+	Overflow bool `json:"overflow,omitempty"`
 
 	Requests        int64 `json:"requests"`
 	UnitsSeen       int64 `json:"units_seen"`
@@ -375,6 +378,9 @@ func (b *Batch) Validate() error {
 		}
 		if err := d.Key.Valid(); err != nil {
 			return fmt.Errorf("delta %d: %w", i, err)
+		}
+		if d.Overflow {
+			return fmt.Errorf("delta %d: overflow rows are Studio's", i)
 		}
 		if len(d.PolicyName) > 64 || len(d.Mode) > 16 {
 			return fmt.Errorf("delta %d: policy name or mode too long", i)
