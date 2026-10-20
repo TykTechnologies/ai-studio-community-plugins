@@ -158,7 +158,7 @@ func Sessions() []Session {
 					Out:  Output{Kind: "patch_result", Text: "Success. Updated the following files:\nM internal/billing/invoice.go\n", Marker: "Success."}})
 			}
 		}
-		s := Session{Name: "responses_codex_30", Format: "openai_responses", Path: pathResponses, History: "full", Kinds: kinds, Pending: "midsommar-clean-eac.9",
+		s := Session{Name: "responses_codex_30", Format: "openai_responses", Path: pathResponses, History: "full", Kinds: kinds,
 			Description: "A Codex CLI style Responses session: full history with store false, encrypted reasoning items, wrapped shell outputs and apply_patch calls.",
 			Shapes:      []string{ShapeEncryptedReasoning, ShapeWrappedOutput, ShapeCustomToolOutput, ShapeUserFollowUp}}
 		key := g.UUID()
@@ -170,7 +170,7 @@ func Sessions() []Session {
 	{
 		c, kinds := sessionConvo("session_chained", "openai", modelGPT, codingTools())
 		g := NewR("session_chained/opaque")
-		s := Session{Name: "responses_chained_30", Format: "openai_responses", Path: pathResponses, History: "previous_response_id", Kinds: kinds, Pending: "midsommar-clean-eac.9",
+		s := Session{Name: "responses_chained_30", Format: "openai_responses", Path: pathResponses, History: "previous_response_id", Kinds: kinds,
 			Description: "A Responses session chained with previous_response_id: each turn sends only the new tool outputs.",
 			Shapes:      []string{ShapePreviousResponseID, ShapeParallelToolCalls, ShapeUserFollowUp}}
 		prev := ""

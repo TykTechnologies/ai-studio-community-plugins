@@ -538,7 +538,7 @@ func Entries() []Entry {
 			ollamaGenerate(modelOllama, codingSystem, "Why does this fail?\n\n"+o.Text)))
 	}
 
-	// ---- OpenAI Responses (eac.9 adds the extractor) ----
+	// ---- OpenAI Responses ----
 	{
 		b := newBuilder("responses_codex_shell", "openai")
 		s1 := b.step("", b.out(GoTest, "", 10000))
@@ -552,7 +552,6 @@ func Entries() []Entry {
 		c := &Convo{Model: modelCodex, System: codingSystem, Tools: codexTools(), Task: "Fix the nil Subtotal call in billing and make sure nothing else regressed.", Steps: []Step{s1, s2, s3}}
 		e := b.entry("responses_codex_shell", "openai_responses", pathResponses, "Codex CLI style: store false, encrypted reasoning items, shell outputs wrapped as a JSON string, an apply_patch custom tool call and output.",
 			RenderResponses(c, 3, ResponsesOpts{Codex: true, CacheKey: b.g.UUID()}), ShapeEncryptedReasoning, ShapeWrappedOutput, ShapeCustomToolOutput)
-		e.Pending = "midsommar-clean-eac.9"
 		add(e)
 	}
 	{
@@ -561,7 +560,6 @@ func Entries() []Entry {
 		b.refs = append(b.refs, ToolRef{Kind: Pytest, Marker: o.Marker, Via: "input", Bytes: len(o.Text)})
 		body := O("model", modelGPT, "instructions", "You are a concise senior engineer.", "input", "Why does this test run fail?\n\n"+o.Text)
 		e := b.entry("responses_string_input", "openai_responses", pathResponses, "Responses with a plain string input holding a pasted pytest log.", body, ShapeStringInput)
-		e.Pending = "midsommar-clean-eac.9"
 		add(e)
 	}
 	{
@@ -571,7 +569,6 @@ func Entries() []Entry {
 		c := b.convo(modelGPT, "Collect the open rounding issues from the API, the docs and the tracker.", s1, s2)
 		e := b.entry("responses_function_outputs", "openai_responses", pathResponses, "Responses item array with function_call / function_call_output pairs (JSON API, HTML, MCP).",
 			RenderResponses(c, 2, ResponsesOpts{}), ShapeMCPResult, ShapeParallelToolCalls)
-		e.Pending = "midsommar-clean-eac.9"
 		add(e)
 	}
 	{
@@ -587,7 +584,6 @@ func Entries() []Entry {
 		e := b.entry("responses_compaction", "openai_responses", pathResponses, "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: skip.",
 			RenderResponses(c, 2, ResponsesOpts{Codex: true, Prefix: []any{compaction}, Extra: O("context_management", []any{O("type", "compaction", "compact_threshold", 200000)})}), ShapeCompaction, ShapeContextManagement, ShapeEncryptedReasoning)
 		e.NativeContextManagement = true
-		e.Pending = "midsommar-clean-eac.9"
 		add(e)
 	}
 	{
@@ -597,7 +593,6 @@ func Entries() []Entry {
 		e := b.entry("responses_previous_response_id", "openai_responses", pathResponses, "A chained turn: previous_response_id plus only the new function_call_output items.",
 			RenderResponsesChained(c, 1, "resp_"+b.g.Hex(48)), ShapePreviousResponseID, ShapeParallelToolCalls)
 		e.ToolPairing = "previous_response"
-		e.Pending = "midsommar-clean-eac.9"
 		add(e)
 	}
 

@@ -62,9 +62,11 @@ Converse from InvokeModel and separates the pass-through endpoints.
     `ExtractUnits` refuses it (an unsupported format, or a body not shaped
     like its format, such as Titan or Llama on the Bedrock InvokeModel path),
     and the compressor never falls back to `segments.Generic`.
-- `pending`: the bead that adds the format's extractor (OpenAI Responses,
-  eac.9). Until `segments.Supports` returns true for the format, the entry is
-  read as a skip. After that the tests hold it to `extract` automatically.
+- `pending`: the bead that adds the format's extractor, for entries in a
+  format segments cannot read yet (none at present; OpenAI Responses was
+  pending on eac.9). Until `segments.Supports` returns true for the format, the
+  entry is read as a skip. After that the tests hold it to `extract`
+  automatically.
 - `tools`: each tool output the body carries. Fields:
   - `kind` (pytest, jest, gotest, cargo, maven, gradle, docker_build,
     kubectl, terraform_plan, git_diff, ripgrep, dir_listing, json_api, csv,

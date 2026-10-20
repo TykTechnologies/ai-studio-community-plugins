@@ -1052,7 +1052,6 @@
       "path": "/v1/responses",
       "description": "Codex CLI style: store false, encrypted reasoning items, shell outputs wrapped as a JSON string, an apply_patch custom tool call and output.",
       "expect": "extract",
-      "pending": "midsommar-clean-eac.9",
       "tools": [
         {
           "kind": "gotest",
@@ -1083,7 +1082,6 @@
       "path": "/v1/responses",
       "description": "Responses with a plain string input holding a pasted pytest log.",
       "expect": "extract",
-      "pending": "midsommar-clean-eac.9",
       "tools": [
         {
           "kind": "pytest",
@@ -1106,7 +1104,6 @@
       "path": "/v1/responses",
       "description": "Responses item array with function_call / function_call_output pairs (JSON API, HTML, MCP).",
       "expect": "extract",
-      "pending": "midsommar-clean-eac.9",
       "tools": [
         {
           "kind": "json_api",
@@ -1142,7 +1139,6 @@
       "path": "/v1/responses",
       "description": "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: skip.",
       "expect": "extract",
-      "pending": "midsommar-clean-eac.9",
       "tools": [
         {
           "kind": "terraform_plan",
@@ -1173,7 +1169,6 @@
       "path": "/v1/responses",
       "description": "A chained turn: previous_response_id plus only the new function_call_output items.",
       "expect": "extract",
-      "pending": "midsommar-clean-eac.9",
       "tools": [
         {
           "kind": "kubectl",
@@ -1357,7 +1352,6 @@
       "description": "A Codex CLI style Responses session: full history with store false, encrypted reasoning items, wrapped shell outputs and apply_patch calls.",
       "turns": 30,
       "history": "full",
-      "pending": "midsommar-clean-eac.9",
       "kinds": [
         "cargo",
         "dir_listing",
@@ -1419,7 +1413,6 @@
         "resp_e307fd8a8baa650bc183a0de91f786caf833c45c9398820a",
         "resp_3986751f7d80f9859b025a4570c41aa4ca87b86dde7872bc"
       ],
-      "pending": "midsommar-clean-eac.9",
       "kinds": [
         "cargo",
         "csv",
