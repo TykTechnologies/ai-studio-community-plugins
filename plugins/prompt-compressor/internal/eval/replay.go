@@ -11,6 +11,7 @@ package eval
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -187,7 +188,7 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 	body := e.Body()
 	out, err := o.Compressor.Compress(e.Format, e.Path, body, level)
 	if err != nil {
-		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: %v", e.Name, err))
+		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: %s", e.Name, ErrorClass(err)))
 		return
 	}
 	if again, err := o.Compressor.Compress(e.Format, e.Path, body, level); err != nil || !bytes.Equal(again, out) {
@@ -208,7 +209,7 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 	ub, err1 := segments.ExtractUnits(e.Format, body)
 	ua, err2 := segments.ExtractUnits(e.Format, out)
 	if err1 != nil || err2 != nil {
-		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: units: %v %v", e.Name, err1, err2))
+		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: units: %s", e.Name, ErrorClass(errors.Join(err1, err2))))
 		return
 	}
 	tb, ta := toolUnits(ub), toolUnits(ua)
@@ -261,7 +262,7 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 		out, err := c.Compress(s.Format, s.Path, in, level)
 		if err != nil {
 			if lr != nil {
-				lr.Errors = append(lr.Errors, fmt.Sprintf("%s turn %d: %v", s.Name, k+1, err))
+				lr.Errors = append(lr.Errors, fmt.Sprintf("%s turn %d: %s", s.Name, k+1, ErrorClass(err)))
 			}
 			out = in
 		}
@@ -293,6 +294,27 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 	r.Cost = price.Cost(r.Usage)
 	r.CacheReadShare = r.Usage.CacheReadShare()
 	return r
+}
+
+// ErrorClass names an error for a report without its message: compressor and
+// segmenter errors can quote the body text they failed on, and a report of
+// customer traffic must never carry that text. An error type can name its
+// own class with an ErrorClass() string method.
+func ErrorClass(err error) string {
+	var c interface{ ErrorClass() string }
+	switch {
+	case err == nil:
+		return "none"
+	case errors.As(err, &c):
+		return c.ErrorClass()
+	case errors.Is(err, segments.ErrDuplicateKey):
+		return "duplicate_key"
+	case errors.Is(err, segments.ErrUnrecognisedBody):
+		return "unrecognised_body"
+	case errors.Is(err, segments.ErrUnsupportedFormat):
+		return "unsupported_format"
+	}
+	return "compress_error"
 }
 
 // leafMap maps each tool-result leaf path to its uncompressed and compressed

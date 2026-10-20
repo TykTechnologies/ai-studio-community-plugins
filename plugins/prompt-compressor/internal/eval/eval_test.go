@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -196,6 +198,53 @@ func TestContextDependentCompressionBreaksPrefix(t *testing.T) {
 	for _, s := range rep.Levels[0].Sessions {
 		if s.Name == "anthropic_agent_30" && s.PrefixBreaks == 0 {
 			t.Errorf("%s: unit output changed with request length but no prefix break reported", s.Name)
+		}
+	}
+}
+
+// leaky fails the way a careless compressor would: quoting the text it
+// failed on.
+type leaky struct{}
+
+func (leaky) Name() string { return "leaky" }
+func (leaky) Compress(format, _ string, body []byte, _ int) ([]byte, error) {
+	units, _ := segments.ExtractUnits(format, body)
+	text := string(body)
+	if len(units) > 0 {
+		text = units[len(units)-1].Text
+	}
+	return nil, fmt.Errorf("cannot reduce %q: %w", text, segments.ErrUnrecognisedBody)
+}
+
+// Reports of customer traffic carry counts, names and error classes, never
+// body text, even when the compressor's errors quote it (security, eac.23).
+func TestReportNeverQuotesBodyText(t *testing.T) {
+	const canary = "CANARY-pc23-7f3e-do-not-report"
+	dir := t.TempDir()
+	body := `{"model":"gpt-4.1","messages":[{"role":"user","content":"run it"},` +
+		`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{}"}}]},` +
+		`{"role":"tool","tool_call_id":"call_1","content":"secret-looking output ` + canary + `"}]}`
+	if err := os.MkdirAll(filepath.Join(dir, "openai"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "openai", "captured-1.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadBodies(dir)
+	if err != nil || len(m.Entries) != 1 {
+		t.Fatalf("load: %v, %d entries", err, len(m.Entries))
+	}
+	rep, err := Replay(m, Options{Levels: []int{1}, Compressor: leaky{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Levels[0].Errors) != 1 || !strings.Contains(rep.Levels[0].Errors[0], "unrecognised_body") {
+		t.Fatalf("errors %v, want one classified error", rep.Levels[0].Errors)
+	}
+	js, _ := rep.JSON()
+	for name, out := range map[string]string{"report.json": string(js), "report.md": rep.Markdown()} {
+		if strings.Contains(out, canary) || strings.Contains(out, "secret-looking output") {
+			t.Errorf("%s quotes body text", name)
 		}
 	}
 }
