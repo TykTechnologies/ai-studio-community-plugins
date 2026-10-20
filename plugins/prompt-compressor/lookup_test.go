@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -152,13 +153,19 @@ func TestPostAuthDoesNotWaitForAHungHost(t *testing.T) {
 	p.mu.Unlock()
 	ctx.AppID = 1
 
-	start := time.Now()
-	resp, err := p.HandlePostAuth(ctx, request(noisyBody(t), nil))
-	if d := time.Since(start); d > time.Second {
-		t.Errorf("post_auth took %v with a hung host", d)
-	}
-	if err != nil || !resp.Modified {
-		t.Errorf("resp %+v, err %v", resp, err)
+	// The first request also loads the tokenizer, which takes about a
+	// second under -race; the second shows what the hung lookups cost (the
+	// broker's own retries take 25 s, a hung fetch forever).
+	for i, limit := range []time.Duration{10 * time.Second, 2 * time.Second} {
+		ctx.RequestID = fmt.Sprintf("req-%d", i)
+		start := time.Now()
+		resp, err := p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+		if d := time.Since(start); d > limit {
+			t.Errorf("request %d took %v with a hung host", i, d)
+		}
+		if err != nil || !resp.Modified {
+			t.Errorf("request %d: resp %+v, err %v", i, resp, err)
+		}
 	}
 }
 
