@@ -177,6 +177,26 @@ func TestPreviewLimitsAndPrivacy(t *testing.T) {
 	}
 }
 
+// An LLM with request filters holds level 3 at 2, as on the edge.
+func TestPreviewRequestFiltersCapLevel3(t *testing.T) {
+	p, _ := previewPlugin(t)
+	req := map[string]interface{}{"mode": "tool_output", "format": "openai", "text": previewPytest, "policy": map[string]interface{}{"level": 3, "min_unit_tokens": 50}}
+	free := runPreview(t, p, req)
+	if free.Report.RequestFiltersCapped {
+		t.Error("capped without request filters")
+	}
+	req["request_filters"] = true
+	capped := runPreview(t, p, req)
+	if !capped.Report.RequestFiltersCapped {
+		t.Fatal("not capped with request filters")
+	}
+	for _, u := range capped.Units {
+		if u.Selected && u.Level > 2 {
+			t.Errorf("unit %d at level %d with request filters", u.Index, u.Level)
+		}
+	}
+}
+
 func TestPreviewOptions(t *testing.T) {
 	p, _ := previewPlugin(t)
 	out, err := p.HandleRPC("getPreviewOptions", nil)

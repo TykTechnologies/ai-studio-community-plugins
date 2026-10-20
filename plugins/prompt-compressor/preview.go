@@ -67,6 +67,9 @@ type previewRequest struct {
 	// checked exactly as a saved one is.
 	PolicyName string          `json:"policy_name"`
 	Policy     json.RawMessage `json:"policy"`
+	// RequestFilters previews an LLM with request filters: level 3 is
+	// held at 2 unless lossy_with_request_filters is set, as on the edge.
+	RequestFilters bool `json:"request_filters"`
 }
 
 type protectHit struct {
@@ -96,6 +99,9 @@ type previewResponse struct {
 	Output     string          `json:"output"`
 	Changed    bool            `json:"changed"`
 	PostCheck  string          `json:"post_check"`
+	// EngineNotRun: the policy names an external engine, which the preview
+	// never calls; an edge would run it after levels 1–3.
+	EngineNotRun bool `json:"engine_not_run,omitempty"`
 }
 
 var errPreviewTooLarge = errors.New("the input is larger than 2 MiB; preview a smaller body")
@@ -121,17 +127,21 @@ func (p *PromptCompressorPlugin) rpcPreview(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	cfg := p.state().config
+	// No engine is called from Studio
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
 		Body:         body,
 		Policy:       policy,
-		MaxBodyBytes: p.state().config.MaxBodyBytes,
+		MaxBodyBytes: cfg.MaxBodyBytes,
+		CapLossy:     req.RequestFilters && !cfg.LossyWithRequestFilters,
 		Trace:        true,
 	})
 	resp := previewResponse{
 		Format: format, PolicyName: name, PolicyHash: policy.Hash(), Level: policy.Level,
 		Input: string(body), Output: string(out), Changed: string(out) != string(body),
-		Units: make([]previewUnit, 0, len(rep.Units)),
+		Units:        make([]previewUnit, 0, len(rep.Units)),
+		EngineNotRun: policy.Engine != nil,
 	}
 	switch rep.Outcome {
 	case compress.OutcomeRejected:

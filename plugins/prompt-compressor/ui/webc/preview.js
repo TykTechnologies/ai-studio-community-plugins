@@ -26,6 +26,7 @@ const CAP_REASONS = {
   native_context_management: 'the request asks the vendor to manage context (level 1 at most)',
   tool_override: 'a per-tool level override',
   protected_turn: 'one of the newest turns (protect_recent_turns)',
+  request_filters: 'the LLM has request filters, so level 3 is held at 2 (lossy_with_request_filters is off)',
 };
 const SAMPLE_TOOL_OUTPUT = `============================= test session starts ==============================
 platform linux -- Python 3.12.3, pytest-8.3.2, pluggy-1.5.0
@@ -135,6 +136,7 @@ class PromptCompressorPreview extends HTMLElement {
     this._sample = '';
     this._policyName = '';
     this._editInline = false;
+    this._requestFilters = false;
     this._policyJSON = '';
     this._result = null;
     this._errors = [];
@@ -180,6 +182,7 @@ class PromptCompressorPreview extends HTMLElement {
     if (this._mode === 'tool_output') Object.assign(req, { text: this._text, tool_name: this._toolName, format: this._format });
     if (this._mode === 'body') Object.assign(req, { vendor: this._vendor, path: this._path });
     if (this._mode === 'sample') req.sample = this._sample;
+    req.request_filters = this._requestFilters;
     if (this._editInline) {
       let policy;
       try {
@@ -322,7 +325,10 @@ class PromptCompressorPreview extends HTMLElement {
         }, policies.map((p) => h('option', { value: p.name, selected: p.name === this._policyName }, `${p.name} (level ${p.level}, ${p.short_hash})`)))),
       h('label', { className: 'inline' },
         h('input', { type: 'checkbox', checked: this._editInline, 'data-testid': 'pc-preview-edit-inline', onChange: (e) => { this._editInline = e.target.checked; this._paint(); } }),
-        'Edit a copy here (not saved)')));
+        'Edit a copy here (not saved)'),
+      h('label', { className: 'inline' },
+        h('input', { type: 'checkbox', checked: this._requestFilters, 'data-testid': 'pc-preview-request-filters', onChange: (e) => { this._requestFilters = e.target.checked; } }),
+        'The LLM has request filters')));
     if (this._editInline) {
       section.appendChild(h('label', { className: 'field' }, 'Policy (JSON, checked like a saved policy)',
         h('textarea', { rows: 8, value: this._policyJSON, spellcheck: false, 'data-testid': 'pc-preview-policy-json', onInput: (e) => { this._policyJSON = e.target.value; } })));
@@ -344,6 +350,8 @@ class PromptCompressorPreview extends HTMLElement {
       ['Post-check', r.post_check],
     ];
     if (rep.native_context_management) facts.push(['Note', 'The request asks the vendor to manage context, so level 1 at most.']);
+    if (rep.request_filters_capped) facts.push(['Note', 'Level 3 was held at 2: the LLM has request filters.']);
+    if (r.engine_not_run) facts.push(['Note', 'The policy names an external engine. The preview never calls it; an edge runs it after these levels, so its output can differ.']);
     box.appendChild(h('section', {}, h('h2', {}, 'Result'),
       h('dl', { className: 'facts' }, facts.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))));
     if (Object.keys(rep.strategies || {}).length) {
@@ -377,6 +385,7 @@ class PromptCompressorPreview extends HTMLElement {
         for (const c of u.capped || []) decision.push(h('div', { className: 'muted' }, 'Capped: ', CAP_REASONS[c] || c));
         if (u.budget) decision.push(h('div', { className: 'muted' }, `Tool budget ${fmtInt(u.budget)} tokens`));
         if (u.dedupe) decision.push(h('div', { className: 'muted' }, 'Replaced by a reference to an identical earlier output'));
+        if (u.masked) decision.push(h('div', { className: 'muted' }, 'An old tool result, replaced by a placeholder (mask_after_turns)'));
         if ((u.detected || []).length) decision.push(h('div', { className: 'muted' }, `Detected: ${u.detected.join(', ')} (the first one runs)`));
         for (const p of u.protected || []) decision.push(h('div', { className: 'muted' }, `Protect pattern ${p.pattern}: ${p.before} lines matched, ${p.after} kept`));
       }
