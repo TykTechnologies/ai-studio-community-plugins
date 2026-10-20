@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/internal/corpus"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/internal/eval"
 )
@@ -41,6 +43,8 @@ func main() {
 		err = replay(os.Args[2:])
 	case "plan":
 		err = plan(os.Args[2:])
+	case "compress":
+		err = compressOne(os.Args[2:])
 	default:
 		usage()
 	}
@@ -51,8 +55,42 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: pc-eval replay|plan [flags]  (pc-eval <cmd> -h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: pc-eval replay|plan|compress [flags]  (pc-eval <cmd> -h for flags)")
 	os.Exit(2)
+}
+
+// compressOne runs one body through the compress library with the default
+// policy at a level and writes the body the gateway would forward, plus the
+// library's report on stderr: what the plugin should send upstream, for
+// checks against a live gateway.
+func compressOne(args []string) error {
+	fs := flag.NewFlagSet("compress", flag.ExitOnError)
+	in := fs.String("in", "", "request body file (required)")
+	out := fs.String("out", "", "write the compressed body here (default: stdout)")
+	format := fs.String("format", "openai", "request filter format")
+	level := fs.Int("level", 1, "level")
+	fs.Parse(args)
+	if *in == "" {
+		return errors.New("-in is required")
+	}
+	body, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	res, rep := compress.New(compress.Options{}).Compress(compress.Input{Format: *format, Body: body, Policy: levelPolicy(*level)})
+	rj, _ := json.Marshal(rep)
+	fmt.Fprintln(os.Stderr, string(rj))
+	if *out == "" {
+		_, err = os.Stdout.Write(res)
+		return err
+	}
+	return os.WriteFile(*out, res, 0o644)
+}
+
+func levelPolicy(level int) *config.Policy {
+	p := config.DefaultPolicy()
+	p.Level = level
+	return p
 }
 
 func levels(s string) ([]int, error) {
