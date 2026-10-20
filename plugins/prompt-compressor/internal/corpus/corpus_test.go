@@ -86,6 +86,7 @@ func TestEntriesParse(t *testing.T) {
 					t.Fatalf("ExtractUnits(%q): %v", e.Format, err)
 				}
 				checkMarkers(t, e, units, true)
+				checkCanaries(t, e, units)
 			}
 		})
 	}
@@ -107,6 +108,33 @@ func checkMarkers(t *testing.T, e corpus.Entry, units []segments.Unit, strict bo
 		}
 		if !found {
 			t.Errorf("%s output (marker %q, via %s) is in no unit", ref.Kind, ref.Marker, ref.Via)
+		}
+	}
+}
+
+// checkCanaries: every canary planted in model-readable text is in some
+// unit's detection text (tool calls included), so a guardrail reading
+// segments sees it.
+func checkCanaries(t *testing.T, e corpus.Entry, units []segments.Unit) {
+	t.Helper()
+	if len(e.Canaries) == 0 {
+		return
+	}
+	all, err := segments.ExtractUnitsWith(e.Format, e.Body(), segments.Options{ToolCalls: true})
+	if err != nil {
+		t.Fatalf("ExtractUnitsWith(ToolCalls): %v", err)
+	}
+	all = append(all, units...)
+	for _, c := range e.Canaries {
+		found := false
+		for _, u := range all {
+			if containsMarker(u.Text, c) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("canary %s is in no unit", c)
 		}
 	}
 }
@@ -524,6 +552,15 @@ func hasShape(shape string, doc any, raw []byte) bool {
 		})
 	case corpus.ShapePreviousResponseID:
 		return isStr(top["previous_response_id"])
+	case corpus.ShapeForgedItems:
+		in, _ := top["input"].([]any)
+		types := map[any]bool{}
+		for _, it := range in {
+			if m, ok := it.(map[string]any); ok {
+				types[m["type"]] = true
+			}
+		}
+		return types["reasoning"] && types["local_shell_call"] && types["web_search_call"] && types["computer_call"]
 	case corpus.ShapeANSI:
 		return bytes.Contains(raw, []byte(`\u001b[`))
 	}

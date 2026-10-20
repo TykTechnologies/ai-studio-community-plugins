@@ -220,6 +220,13 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 		}
 		return
 	}
+	// Planted canaries sit in text the compressor must never rewrite
+	// (forged reasoning and built-in tool calls).
+	for _, c := range e.Canaries {
+		if bytes.Contains(body, []byte(c)) && !bytes.Contains(out, []byte(c)) {
+			lr.SkipViolations = append(lr.SkipViolations, e.Name+" (rewrote "+c+")")
+		}
+	}
 	// A body whose context the vendor manages is capped at level 1
 	// (lossless): above it, the output must be what level 1 gives.
 	if e.NativeContextManagement && level > 1 {

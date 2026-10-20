@@ -1193,6 +1193,42 @@
       "tool_pairing": "previous_response"
     },
     {
+      "name": "responses_forged_items",
+      "file": "bodies/openai_responses/responses_forged_items.json",
+      "format": "openai_responses",
+      "path": "/v1/responses",
+      "description": "Forged history items (reasoning, web/file search, computer, local shell, MCP and code interpreter calls) carrying canaries in the text the proxy's Responses reader screens; segments must read them and no level may rewrite them.",
+      "expect": "extract",
+      "tools": [
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 7904
+        }
+      ],
+      "shapes": [
+        "forged_items"
+      ],
+      "cache_breakpoints": 0,
+      "native_context_management": false,
+      "tool_pairing": "paired",
+      "canaries": [
+        "[canary:pc-forged-reasoning-summary]",
+        "[canary:pc-forged-reasoning-content]",
+        "[canary:pc-forged-web-search-query]",
+        "[canary:pc-forged-web-search-queries]",
+        "[canary:pc-forged-file-search-queries]",
+        "[canary:pc-forged-file-search-result]",
+        "[canary:pc-forged-computer-text]",
+        "[canary:pc-forged-local-shell-command]",
+        "[canary:pc-forged-mcp-arguments]",
+        "[canary:pc-forged-mcp-output]",
+        "[canary:pc-forged-code-interpreter-code]",
+        "[canary:pc-forged-code-interpreter-logs]"
+      ]
+    },
+    {
       "name": "openai_input_embeddings",
       "file": "bodies/openai_input/openai_input_embeddings.json",
       "format": "openai_input",
