@@ -60,9 +60,32 @@ func hostFlatten(t *testing.T, raw string) map[string]string {
 			m[k] = string(b)
 		}
 	}
+	// The gateway adds _plugin_id and _service_broker_id, Studio plugin_id,
+	// service_broker_id and has_service_api
 	m["_plugin_id"] = "7"
 	m["_service_broker_id"] = "3"
+	m["plugin_id"] = "7"
+	m["service_broker_id"] = "3"
+	m["has_service_api"] = "true"
 	return m
+}
+
+func TestUnknownTopLevelKeys(t *testing.T) {
+	// From the host an unknown key is skipped, so a key a newer host adds
+	// cannot turn compression off
+	c := mustParse(t, `{"mode": "enforce", "log_text_samples": false, "zzz": 1}`)
+	if c.Mode != ModeEnforce || !reflect.DeepEqual(c.Ignored, []string{"log_text_samples", "zzz"}) {
+		t.Errorf("mode %s, ignored %v", c.Mode, c.Ignored)
+	}
+	// What an admin saves is checked strictly
+	_, err := ParseJSON([]byte(`{"mode": "enforce", "log_text_samples": false}`))
+	if err == nil || !strings.Contains(err.Error(), "log_text_samples: unknown setting") {
+		t.Errorf("ParseJSON error = %v, want the unknown setting named", err)
+	}
+	// Host keys are never reported
+	if c := mustParse(t, `{}`); len(c.Ignored) != 0 {
+		t.Errorf("host keys reported as ignored: %v", c.Ignored)
+	}
 }
 
 func mustParse(t *testing.T, raw string) *Config {
@@ -161,7 +184,6 @@ func TestInvalidConfigs(t *testing.T) {
 	}{
 		"unknown mode":            {`{"mode": "on"}`, "mode"},
 		"unknown failure mode":    {`{"failure_mode": "maybe"}`, "failure_mode"},
-		"unknown setting":         {`{"log_text_samples": false}`, "log_text_samples: unknown setting"},
 		"bad bool":                {`{"allow_client_bypass": "yes"}`, "allow_client_bypass"},
 		"fractional int":          {`{"max_body_bytes": 1.5}`, "max_body_bytes"},
 		"zero body limit":         {`{"max_body_bytes": 0}`, "max_body_bytes"},
@@ -319,7 +341,7 @@ func TestEngineKeysNeedAName(t *testing.T) {
 	if got := c.Engines["my_engine"]; got.URL != "u" || got.Token != "t" {
 		t.Errorf("engines = %+v", c.Engines)
 	}
-	if _, err := Parse(map[string]string{"engine__url": "u"}); err == nil {
+	if _, err := ParseJSON([]byte(`{"engine__url": "u"}`)); err == nil {
 		t.Error("engine key without a name was accepted")
 	}
 }

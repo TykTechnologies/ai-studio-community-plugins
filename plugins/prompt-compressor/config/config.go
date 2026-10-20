@@ -128,6 +128,9 @@ type Config struct {
 	// engine_<name>_url and engine_<name>_token keys, by name. They sit at
 	// the top level so $SECRET/ references are resolved for them.
 	Engines map[string]EngineCredentials `json:"-"`
+
+	// Ignored lists the unknown top-level keys Parse skipped, sorted.
+	Ignored []string `json:"-"`
 }
 
 // EngineCredentials is where an engine is and how to authenticate to it.
@@ -239,11 +242,20 @@ func (c *Config) Policy(name string) (*Policy, bool) {
 
 var defaultPolicy = DefaultPolicy()
 
+// hostKeys are the keys the host adds to the config map for the plugin's
+// own use (plugin and broker IDs). Gateway keys start with "_".
+var hostKeys = map[string]bool{"plugin_id": true, "service_broker_id": true, "has_service_api": true}
+
 // Parse builds a Config from the string map the host passes to Initialize:
-// top-level scalars as strings, arrays and objects JSON-encoded. Keys that
-// start with "_" are the host's (plugin and broker IDs) and are ignored.
-// Unknown keys are an error, so a typo does not silently do nothing.
+// top-level scalars as strings, arrays and objects JSON-encoded. The host's
+// own keys are skipped. Any other unknown top-level key is listed in
+// Ignored rather than rejected, so a key a newer host adds cannot turn
+// compression off; ParseJSON, which checks what an admin saves, rejects it.
 func Parse(m map[string]string) (*Config, error) {
+	return parse(m, false)
+}
+
+func parse(m map[string]string, strict bool) (*Config, error) {
 	c := Default()
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -254,8 +266,8 @@ func Parse(m map[string]string) (*Config, error) {
 	var errs []error
 	for _, k := range keys {
 		v := m[k]
-		// "_" keys are the host's; null is how the host passes an unset value
-		if strings.HasPrefix(k, "_") || v == "null" {
+		// null is how the host passes an unset value
+		if strings.HasPrefix(k, "_") || hostKeys[k] || v == "null" {
 			continue
 		}
 		var err error
@@ -288,6 +300,10 @@ func Parse(m map[string]string) (*Config, error) {
 				c.Engines[sub[1]] = creds
 				continue
 			}
+			if !strict {
+				c.Ignored = append(c.Ignored, k)
+				continue
+			}
 			err = errors.New("unknown setting")
 		}
 		if err != nil {
@@ -314,7 +330,8 @@ func Parse(m map[string]string) (*Config, error) {
 
 // ParseJSON builds a Config from the JSON object an admin saves, the form
 // the Studio UI edits. It flattens the object the way the host does and
-// calls Parse, so both paths accept exactly the same input.
+// parses it as Parse does, except that an unknown top-level key is an
+// error, so a typo does not silently do nothing.
 func ParseJSON(raw []byte) (*Config, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -329,7 +346,7 @@ func ParseJSON(raw []byte) (*Config, error) {
 		}
 		m[k] = string(bytes.TrimSpace(v))
 	}
-	return Parse(m)
+	return parse(m, true)
 }
 
 // parseInt reads an integer the host formatted with %v from a JSON number,

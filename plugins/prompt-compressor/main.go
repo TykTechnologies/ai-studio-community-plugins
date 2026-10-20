@@ -103,6 +103,8 @@ func (p *PromptCompressorPlugin) Initialize(ctx plugin_sdk.Context, configMap ma
 	p.current.Store(next)
 	if err != nil {
 		p.logger().Error("Invalid configuration, compression is off until it is fixed", "error", err.Error())
+	} else if len(cfg.Ignored) > 0 {
+		p.logger().Warn("Ignoring unknown configuration keys", "keys", strings.Join(cfg.Ignored, ","))
 	}
 
 	p.logger().Info("Initialized", "runtime", ctx.Runtime, "version", PluginVersion, "mode", cfg.Mode)
