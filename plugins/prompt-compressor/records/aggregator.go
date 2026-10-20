@@ -123,15 +123,23 @@ func (a *Aggregator) Flush() []*Batch {
 
 // Restore merges an unsent batch back, to go out with the next flush (with
 // a new batch ID: Studio never applied the old one).
+//
+// The key bound holds here too: a restored key the aggregator has no room
+// for is dropped and its requests counted in Dropped, so repeated failed
+// sends cannot grow it past MaxKeys.
 func (a *Aggregator) Restore(b *Batch) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, d := range b.Deltas {
 		if cur := a.deltas[d.Key]; cur != nil {
 			cur.Merge(d)
-		} else {
-			a.deltas[d.Key] = d
+			continue
 		}
+		if len(a.deltas) >= a.maxKeys {
+			a.dropped += d.Requests
+			continue
+		}
+		a.deltas[d.Key] = d
 	}
 }
 

@@ -430,6 +430,57 @@ func TestDeltaAddAndMergeAgree(t *testing.T) {
 	}
 }
 
+// eac.55: while sends keep failing, restoring unsent batches must not grow
+// the aggregator past its key bound.
+func TestRestoreRespectsTheKeyBound(t *testing.T) {
+	agg := NewAggregator(nil)
+	agg.maxKeys = 10
+	app := uint32(0)
+	for cycle := 0; cycle < 20; cycle++ {
+		for i := 0; i < 10; i++ {
+			app++
+			agg.Add(req(base, app, 1, hashA, OutcomeApplied, 10, 9))
+		}
+		for _, b := range agg.Flush() {
+			agg.Restore(b) // the send failed
+		}
+		agg.mu.Lock()
+		n := len(agg.deltas)
+		agg.mu.Unlock()
+		if n > 10 {
+			t.Fatalf("cycle %d: %d keys held, bound 10", cycle, n)
+		}
+	}
+	// The first ten keys are kept; every later request was counted
+	if got := agg.Dropped(); got != 190 {
+		t.Errorf("dropped %d requests, want 190", got)
+	}
+	// New requests filled the aggregator while a batch was out: restoring
+	// the batch keeps the bound and counts what it could not keep
+	unsent := agg.Flush()
+	for i := 0; i < 10; i++ {
+		app++
+		agg.Add(req(base, app, 1, hashA, OutcomeApplied, 10, 9))
+	}
+	for _, b := range unsent {
+		agg.Restore(b)
+	}
+	agg.mu.Lock()
+	n := len(agg.deltas)
+	agg.mu.Unlock()
+	if n != 10 || agg.Dropped() != 10 {
+		t.Errorf("after restoring into a full aggregator: %d keys", n)
+	}
+
+	// Restoring into an existing key still merges at the bound
+	b := agg.Flush()
+	agg.Restore(b[0])
+	agg.Restore(&Batch{Deltas: b[0].Deltas[:1]})
+	if d := agg.Flush()[0].Deltas[0]; d.Requests != 2 {
+		t.Errorf("merged restore = %d requests, want 2", d.Requests)
+	}
+}
+
 func TestSwitchRecorder(t *testing.T) {
 	var s Switch
 	s.Add(req(base, 1, 1, hashA, OutcomeApplied, 10, 9)) // discarded: no target yet
