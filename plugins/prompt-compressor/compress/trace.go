@@ -26,8 +26,11 @@ type UnitTrace struct {
 	// Level is the effective level; Capped says what lowered it.
 	Level  int      `json:"level"`
 	Capped []string `json:"capped,omitempty"`
-	// Budget is the tool's size budget (max_unit_tokens), when it has one.
+	// Budget is the size budget (the tool's max_unit_tokens, or the
+	// policy's at level 3), when there is one.
 	Budget int `json:"budget,omitempty"`
+	// Masked: level 3 replaces this old tool result with a placeholder.
+	Masked bool `json:"masked,omitempty"`
 
 	Changed bool `json:"changed"`
 	// Dedupe: the unit became a reference to an earlier identical output.
@@ -66,9 +69,10 @@ const (
 
 // What lowered a unit's level.
 const (
-	TraceCapNativeContext = "native_context_management"
-	TraceCapToolOverride  = "tool_override"
-	TraceCapProtectedTurn = "protected_turn"
+	TraceCapRequestFilters = "request_filters"
+	TraceCapNativeContext  = "native_context_management"
+	TraceCapToolOverride   = "tool_override"
+	TraceCapProtectedTurn  = "protected_turn"
 )
 
 // addLeaf adds one of the unit's leaves, and its result, to the trace.

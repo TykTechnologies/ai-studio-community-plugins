@@ -19,7 +19,9 @@ import (
 //	   grep, listing, build log, stack trace, repeated lines)
 //	4: level 2 JSON array reducer (compress/reducers_json.go) and per-tool
 //	   size budgets
-const StrategyVersion = 4
+//	5: level 3 head/tail, JSON shape and stepped old-turn masking
+//	   (compress/level3.go)
+const StrategyVersion = 5
 
 // Hash returns the policy hash carried on every savings record: the SHA-256
 // of the policy's canonical JSON (its effective settings, defaults filled

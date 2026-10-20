@@ -65,6 +65,10 @@ type Input struct {
 	// Model names the tokenizer for the token estimate; empty reads the
 	// body's "model".
 	Model string
+	// CapLossy caps the level at 2: the LLM has request filters, which
+	// would screen the cut body instead of the client's, and the config
+	// does not allow lossy levels with them (lossy_with_request_filters).
+	CapLossy bool
 	// Trace fills Report.Units with every unit's decisions (trace.go), for
 	// the Studio preview. It never changes the body or the rest of the
 	// Report; the request path leaves it off.
@@ -109,6 +113,8 @@ type Report struct {
 	ServerToolSkipped int `json:"server_tool_skipped,omitempty"`
 	// CacheSkipped counts units left alone under cache_mode skip_cached.
 	CacheSkipped int `json:"cache_skipped,omitempty"`
+	// RequestFiltersCapped: Input.CapLossy lowered the level to 2.
+	RequestFiltersCapped bool `json:"request_filters_capped,omitempty"`
 
 	// Units is every unit's decisions, in body order, when Input.Trace.
 	Units []UnitTrace `json:"units,omitempty"`
@@ -231,14 +237,19 @@ func btoi(b bool) int {
 type selected struct {
 	unit   segments.Unit
 	level  int
-	budget int // the tool's size budget, tokens; 0 for none
-	trace  int // the unit's entry in Report.Units, when tracing
+	budget int  // the size budget, tokens; 0 for none
+	mask   bool // level 3: an old tool result, replaced by a placeholder
+	trace  int  // the unit's entry in Report.Units, when tracing
 }
 
 // selectUnits picks the units the policy compresses, with the level each
 // gets.
 func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Unit, rep *Report) []selected {
 	maxLevel := p.Level
+	if in.CapLossy && maxLevel > 2 {
+		rep.RequestFiltersCapped = true
+		maxLevel = 2
+	}
 	if segments.NativeContextManagement(in.Format, in.Body) {
 		rep.NativeContextManagement = true
 		maxLevel = min(maxLevel, 1)
@@ -252,6 +263,10 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 	lastTurn := 0
 	for _, u := range units {
 		lastTurn = max(lastTurn, u.Turn)
+	}
+	maskBefore := 0
+	if maxLevel >= 3 {
+		maskBefore = maskBoundary(units, lastTurn, p)
 	}
 
 	var out []selected
@@ -290,7 +305,10 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 		}
 		level, budget := maxLevel, 0
 		var capped []string
-		if maxLevel < p.Level {
+		if rep.RequestFiltersCapped {
+			capped = append(capped, TraceCapRequestFilters)
+		}
+		if rep.NativeContextManagement && p.Level > 1 {
 			capped = append(capped, TraceCapNativeContext)
 		}
 		if o := p.ToolOverride(u.ToolName); u.Kind == guardrails.KindToolResult && o != nil {
@@ -308,8 +326,12 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 			level = 1
 			capped = append(capped, TraceCapProtectedTurn)
 		}
+		if level >= 3 && budget == 0 {
+			budget = p.MaxUnitTokens
+		}
+		mask := level >= 3 && u.Kind == guardrails.KindToolResult && u.Turn < maskBefore
 		if tr != nil {
-			tr.Level, tr.Capped, tr.Budget = level, capped, budget
+			tr.Level, tr.Capped, tr.Budget, tr.Masked = level, capped, budget, mask
 		}
 		if level <= 0 {
 			skip(TraceLevel0)
@@ -327,7 +349,7 @@ func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Un
 		if tr != nil {
 			tr.Selected = true
 		}
-		out = append(out, selected{unit: u, level: level, budget: budget, trace: len(rep.Units) - 1})
+		out = append(out, selected{unit: u, level: level, budget: budget, mask: mask, trace: len(rep.Units) - 1})
 	}
 	rep.UnitsSelected = len(out)
 	return out
@@ -343,6 +365,12 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		var tr *UnitTrace
 		if rep.Units != nil {
 			tr = &rep.Units[s.trace]
+		}
+		if s.mask {
+			if e, ok := c.mask(p, u, est, rep, tr); ok {
+				edits = append(edits, e...)
+				continue
+			}
 		}
 		if p.DedupeReferences && u.Kind == guardrails.KindToolResult && len(u.Leaves) == 1 {
 			if first, ok := seen[u.Text]; ok {
@@ -388,6 +416,31 @@ func (c *Compressor) edit(p *config.Policy, policyHash string, sel []selected, e
 		}
 	}
 	return edits
+}
+
+// mask replaces an old tool result with a placeholder. Only a result held
+// in one leaf is masked: a structured result (a JSON tool result read leaf
+// by leaf) cannot lose its fields through leaf edits, so it keeps its
+// level-3 cuts instead. It does nothing when the placeholder would not be
+// shorter.
+func (c *Compressor) mask(p *config.Policy, u segments.Unit, est *Estimator, rep *Report, tr *UnitTrace) ([]segments.Edit, bool) {
+	if len(u.Leaves) != 1 {
+		return nil, false
+	}
+	l := u.Leaves[0]
+	ph := maskPlaceholder(u.ToolName, selectionTokens(u.Text), p.MaskAfterTurns)
+	if len(ph) >= len(l.Text) {
+		return nil, false
+	}
+	v := memoValue{Text: ph, Steps: []step{{StrategyMask, len(l.Text) - len(ph)}}}
+	rep.TokensBefore += c.countTokens(est, l.Text)
+	rep.TokensAfter += c.countTokens(est, ph)
+	if tr != nil {
+		tr.addLeaf(c, est, l, v)
+	}
+	rep.count(StrategyMask, len(l.Text)-len(ph))
+	rep.UnitsCompressed++
+	return []segments.Edit{{Path: l.Path, Old: l.Text, New: ph}}, true
 }
 
 // protectFunc reports lines a policy's protect patterns match; nil when it

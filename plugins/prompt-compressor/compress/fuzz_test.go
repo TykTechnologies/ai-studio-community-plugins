@@ -103,7 +103,11 @@ func FuzzCompress(f *testing.F) {
 			p.CacheMode = config.CacheSkipCached
 		}
 		p.ProtectRecentTurns = int(flags>>2) % 3
-		p.Level = 1 + int(flags>>4)%2
+		p.Level = 1 + int(flags>>4)%3
+		if p.Level == 3 {
+			p.MaxUnitTokens = 40 + int(flags>>6)*100
+			p.MaskAfterTurns, p.MaskStepTokens = 1, 100
+		}
 		out, rep := c.Compress(Input{Format: format, Body: body, Policy: p})
 		if len(out) > len(body) {
 			t.Fatalf("output grew: %d > %d", len(out), len(body))

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rounding rules | Ledger Developer Docs</title>
+<meta name="description" content="How Ledger rounds monetary amounts across currencies.">
+<link rel="canonical" href="https://docs.example.com/ledger/rounding">
+<link rel="preload" href="/assets/inter-var.woff2" as="font" type="font/woff2" crossorigin>
+[tyk-compressed: head and tail output, 3,048 → 360 tokens]
+<script type="module" src="/assets/chunk-25982ad2.js" integrity="sha384-1EB7qbgEZ3Vy6cfgZhSqJuiIugVx1mhW8gvr3gRJSwZvP2n4ITdwIUd+VzsVRebP" crossorigin="anonymous"></script>
+<script type="module" src="/assets/chunk-05600b8a.js" integrity="sha384-Vc+x27PQfckWFfn0WV0d6Nhn0CXYA3e4HSwG9R2Jg9F+2HCdfz0gQxAIXSB85coh" crossorigin="anonymous"></script>
+<script type="module" src="/assets/chunk-bc7bf76e.js" integrity="sha384-TD8M/7D56/P+lxwjgTc8ExqpITKC3ny7+IGdyY68qGTvuueYQNywUxe8FxK78QPa" crossorigin="anonymous"></script>
+<script type="module" src="/assets/chunk-d9f9afc7.js" integrity="sha384-hfY/LYuNVqokQsv9aE64EuAPV7K5noHmgk7XFVbUFZFYki71GOcFTqrFgLavnVmL" crossorigin="anonymous"></script>
+<script type="module" src="/assets/chunk-916cd05c.js" integrity="sha384-7XMKWY5Za2El9JzXY/fDR4plTrcWrlV7bpX83pqfbA0QBr+XSjxMK+We2v3YDvU1" crossorigin="anonymous"></script>
+<script>document.querySelectorAll('pre code').forEach(function(el){el.classList.add('hl')});</script>
+</body>
+</html>

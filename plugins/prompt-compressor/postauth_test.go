@@ -19,10 +19,11 @@ import (
 type llmGateway struct {
 	*fakeGateway
 	endpoint string
+	filtered bool // the LLM has request filters
 }
 
 func (g *llmGateway) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
-	return &mgmtpb.GetLLMResponse{Llm: &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint}}, nil
+	return &mgmtpb.GetLLMResponse{Llm: &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: g.filtered}}, nil
 }
 
 type llmBroker struct {
@@ -200,6 +201,41 @@ func TestPostAuthFormatFromEndpoint(t *testing.T) {
 
 // The pending map stays bounded under a soak with no response hook taking
 // records, and old records expire.
+// Level 3 is capped at 2 on an LLM with request filters, and on one the
+// plugin knows nothing about yet, unless lossy_with_request_filters is set.
+func TestRequestFilterGuard(t *testing.T) {
+	const level3 = `{"mode":"enforce","default_policy":"p","policies":{"p":{"level":3,"min_unit_tokens":0,"protect_recent_turns":0}}`
+	for _, tc := range []struct {
+		name     string
+		cfg      string
+		filtered bool
+		prime    bool
+		capped   bool
+	}{
+		{"filtered", level3 + `}`, true, true, true},
+		{"unfiltered", level3 + `}`, false, true, false},
+		{"unknown LLM", level3 + `}`, false, false, true},
+		{"filtered, allowed", level3 + `,"lossy_with_request_filters":true}`, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, ctx := hookPlugin(t, tc.cfg)
+			ctx.Services.(*llmBroker).gw.filtered = tc.filtered
+			if tc.prime {
+				p.llms.get(ctx.LLMID)
+				p.llms.inflight.Wait()
+			} else {
+				ctx.LLMID = 99 // never fetched: the request does not wait for it
+				p.llms = newAsyncLookup(llmInfoTTL, llmInfoErrorTTL, llmInfoMaxSize, func(uint32) (llmInfo, error) { return llmInfo{}, errNoBroker })
+			}
+			p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+			rec, _ := p.pending.take("req-1")
+			if rec.Report.RequestFiltersCapped != tc.capped {
+				t.Errorf("capped %v, want %v (record %+v)", rec.Report.RequestFiltersCapped, tc.capped, rec.Report)
+			}
+		})
+	}
+}
+
 func TestPendingBounded(t *testing.T) {
 	p, ctx := hookPlugin(t, `{"mode":"audit"}`)
 	p.compressFn = func(in compress.Input) ([]byte, compress.Report) {

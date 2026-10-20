@@ -148,6 +148,22 @@ plugin loading. The full schema is in `config.schema.json`.
   fits: arrays of 13 items or more, then 5 items kept at each end, then 3, 2
   and 1 (the floor). A budget the output already fits changes nothing, and
   text reducers have no harder setting.
+- **Level 3:** level 2, then cuts for what is still over the size budget
+  (the tool's `max_unit_tokens`, else the policy's, default 6000). Text keeps
+  its first lines (a third of the budget) and its last lines, plus every
+  line a `protect_patterns` regex matches, with a marker between; a text
+  with no short lines is cut by bytes. JSON has its arrays cut to the floor
+  above, then, if still over, becomes its field names and value types
+  (`"string"`, `"number"`, `"boolean"`, one item per array and a count),
+  still JSON. Tool results older than `mask_after_turns` turns become a
+  placeholder (`[tyk-compressed: shell output, 12,345 tokens, masked after 8
+  turns]`); the masking boundary moves only when it would mask at least
+  `mask_step_tokens` more, so each move, which rewrites the cached prefix
+  once, buys a large saving. Results held in several leaves (structured JSON
+  tool results) are not masked. Level 3 is capped at 2 on LLMs with request
+  filters, and on LLMs the plugin has not looked up yet, unless
+  `lossy_with_request_filters` is set (see below); the edge reports request
+  filters from Studio 2.3 on.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses

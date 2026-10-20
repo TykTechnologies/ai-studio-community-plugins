@@ -41,10 +41,11 @@ func lossless(text string) (string, []step) {
 }
 
 // pass is one leaf's strategies at a level: level 1 the lossless ones,
-// level 2 those and a reducer (reducers.go, reducers_json.go). keep reports
-// lines and JSON items a reducer must not drop (protect patterns). budget,
-// when set, is the tool's size budget in tokens: the JSON reducer cuts
-// harder until the output fits.
+// level 2 those and a reducer (reducers.go, reducers_json.go), level 3 those
+// and the size cuts (level3.go). keep reports lines and JSON items a
+// reducer must not drop (protect patterns). budget, when set, is the size
+// budget in tokens: the JSON reducer cuts harder until the output fits,
+// and level 3 cuts what is still over.
 type pass struct {
 	level  int
 	keep   func(string) bool
@@ -68,6 +69,12 @@ func (ps pass) run(text string, depth int) (string, []step) {
 				out = r
 			}
 		}
+		if ps.level >= 3 && ps.budget > 0 && selectionTokens(out) > ps.budget {
+			if r, ok := jsonShape(out); ok {
+				steps = append(steps, step{StrategyJSONShape, len(out) - len(r)})
+				out = r
+			}
+		}
 		return out, steps
 	}
 	var steps []step
@@ -87,6 +94,12 @@ func (ps pass) run(text string, depth int) (string, []step) {
 	if ps.level >= 2 {
 		if out, name := reduce(text, ps.keep); name != "" {
 			steps = append(steps, step{reducerStrategy(name), len(text) - len(out)})
+			text = out
+		}
+	}
+	if ps.level >= 3 {
+		if out, ok := headTail(text, ps.budget, ps.keep); ok {
+			steps = append(steps, step{StrategyHeadTail, len(text) - len(out)})
 			text = out
 		}
 	}

@@ -135,14 +135,18 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 
-	llm, _ := p.llms.getWait(ctx.LLMID, lookupWait)
+	llm, llmKnown := p.llms.getWait(ctx.LLMID, lookupWait)
 	format := requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), llm.Endpoint)
+	// Request filters screen the body the plugin forwards, so lossy levels
+	// stay off where they may run, and where the plugin cannot tell.
+	capLossy := !cfg.LossyWithRequestFilters && (!llmKnown || llm.HasRequestFilters)
 	start := time.Now()
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
 		Body:         r.GetBody(),
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
+		CapLossy:     capLossy,
 	})
 	rec.CompressMicros = time.Since(start).Microseconds()
 	rec.Outcome, rec.Report = string(rep.Outcome), rep
