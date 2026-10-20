@@ -72,6 +72,10 @@ jobs:
           path: _ai-studio
           token: ${{ secrets.CI_SUBMODULE_PAT }}
           submodules: recursive
+          # The PR's plugin code builds and runs in this job: do not leave
+          # the token in _ai-studio/.git/config (or its submodules') for it
+          # to read.
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@v5
