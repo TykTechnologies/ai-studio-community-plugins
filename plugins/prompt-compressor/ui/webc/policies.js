@@ -126,6 +126,7 @@ class PromptCompressorPolicies extends HTMLElement {
     return this._config && JSON.stringify(this._config) !== this._savedJSON;
   }
 
+  // info may be a string or an array of strings and Nodes (a link).
   _setErrors(errors, info) {
     this._messages = { errors: errors || [], info: info || '' };
     this._paint();
@@ -160,7 +161,11 @@ class PromptCompressorPolicies extends HTMLElement {
         return;
       }
       await this._load();
-      this._setErrors([], 'Saved. Edge gateways apply the change after the next configuration push to them (Edge Gateways page).');
+      this._setErrors([], [
+        'Saved. Compression on edge gateways does not change yet: they show as pending and apply it after the next configuration push from ',
+        this._appLink('/admin/edge-gateways', 'Edge Gateways'),
+        '.',
+      ]);
     } catch (error) {
       this._busy = false;
       this._setErrors(['Save failed: ' + error.message]);
@@ -333,13 +338,26 @@ class PromptCompressorPolicies extends HTMLElement {
     }
   }
 
+  // _appLink is an in-app link. The host routes on pushState + popstate; a
+  // plain navigation would reload the whole admin app.
+  _appLink(path, text) {
+    return h('a', {
+      href: path,
+      onClick: (e) => {
+        e.preventDefault();
+        window.history.pushState({}, '', path);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      },
+    }, text);
+  }
+
   _paintMessages() {
     const box = h('div', { 'aria-live': 'polite' });
     const { errors, info } = this._messages;
     if (errors && errors.length) {
       box.appendChild(h('div', { className: 'error', 'data-testid': 'pc-errors' }, h('ul', {}, errors.map((e) => h('li', {}, e)))));
     }
-    if (info) box.appendChild(h('div', { className: 'info' }, info));
+    if (info && info.length) box.appendChild(h('div', { className: 'info', 'data-testid': 'pc-info' }, info));
     return box;
   }
 
