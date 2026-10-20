@@ -49,10 +49,26 @@ jobs:
         with:
           submodules: recursive
 
+      # A plugin change that needs a core change in flight is built against
+      # the ai-studio branch of the same name; everything else against main.
+      - name: Pick the ai-studio branch
+        id: coreref
+        env:
+          CORE_TOKEN: ${{ secrets.CI_SUBMODULE_PAT }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          ref=main
+          if [ -n "$BRANCH" ] && git ls-remote --exit-code --heads "https://x-access-token:${CORE_TOKEN}@github.com/TykTechnologies/ai-studio.git" "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            ref="$BRANCH"
+          fi
+          echo "Building against ai-studio ${ref}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout main repo (for replace directives)
         uses: actions/checkout@v4
         with:
           repository: TykTechnologies/ai-studio
+          ref: ${{ steps.coreref.outputs.ref }}
           path: _ai-studio
           token: ${{ secrets.CI_SUBMODULE_PAT }}
           submodules: recursive
