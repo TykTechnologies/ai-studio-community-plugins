@@ -515,7 +515,7 @@ class PromptCompressorPolicies extends HTMLElement {
         'Replace a repeated tool output with a reference to the earlier one'),
     );
     if (p.level >= 3) {
-      form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Longer tool outputs are cut to their head and tail, with a marker.'));
+      form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Level 3 (not available yet): longer tool outputs are cut to their head and tail, with a marker.'));
       form.appendChild(num('mask_after_turns', 'Mask after turns', 'Tool results older than this become a placeholder.'));
       form.appendChild(num('mask_step_tokens', 'Mask step (tokens)', 'Old turns are masked in steps of at least this many tokens.'));
       if (!this._config.lossy_with_request_filters) {
@@ -579,6 +579,7 @@ class PromptCompressorPolicies extends HTMLElement {
             this._paint();
           },
         }, 'Add override')),
+      h('div', { className: 'muted' }, 'Budget: at level 2, this tool\'s long JSON arrays are cut harder (down to one item at each end) until the output fits. Text outputs ignore it.'),
     );
     return box;
   }
