@@ -12,8 +12,10 @@ package records
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
+	"sync/atomic"
 	"time"
 )
 
@@ -104,6 +106,30 @@ type Nop struct{}
 // Add implements Recorder.
 func (Nop) Add(Request) {}
 
+// Switch is a Recorder whose target can be set while requests are being
+// recorded: the plugin holds one from the start, and the edge's
+// aggregator is plugged in once the runtime is known. Until then, and
+// after Set(nil), records are discarded.
+type Switch struct {
+	target atomic.Pointer[Recorder]
+}
+
+// Set routes records to r (nil discards them).
+func (s *Switch) Set(r Recorder) {
+	if r == nil {
+		s.target.Store(nil)
+		return
+	}
+	s.target.Store(&r)
+}
+
+// Add implements Recorder.
+func (s *Switch) Add(r Request) {
+	if t := s.target.Load(); t != nil {
+		(*t).Add(r)
+	}
+}
+
 // Key identifies one rollup row. Every part is an integer, a hex hash or
 // an outcome constant, so it is safe in a KV key.
 type Key struct {
@@ -164,9 +190,17 @@ type Delta struct {
 	TokensSaved     int64 `json:"tokens_saved"`
 
 	// CostSaved is TokensSaved priced at each request's model input price,
-	// by currency. Requests without a price add to UnpricedTokensSaved.
+	// by currency: an upper bound, since a saved token that would have been
+	// a cache read was only worth the cache-read price. Requests without a
+	// price add to UnpricedTokensSaved.
 	CostSaved           map[string]float64 `json:"cost_saved,omitempty"`
 	UnpricedTokensSaved int64              `json:"unpriced_tokens_saved"`
+	// CostSavedAtCacheRead prices the same saved tokens at the model's
+	// cache-read price, for the cache-adjusted lower bound (with the
+	// cache-read share). Priced requests whose model has no cache-read
+	// price add to NoCacheReadPriceTokensSaved instead.
+	CostSavedAtCacheRead        map[string]float64 `json:"cost_saved_at_cache_read,omitempty"`
+	NoCacheReadPriceTokensSaved int64              `json:"no_cache_read_price_tokens_saved"`
 
 	InputTokens      int64 `json:"input_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
@@ -191,9 +225,17 @@ func KeyOf(r Request) Key {
 	return Key{Hour: HourOf(r.At), AppID: r.AppID, LLMID: r.LLMID, PolicyHash: r.PolicyHash, Outcome: r.Outcome}
 }
 
-// AddRequest adds one request. price is its model's input price per token
-// and currency; ok false leaves the saving unpriced.
-func (d *Delta) AddRequest(r Request, inputPrice float64, currency string, priced bool) {
+// Price is a model's price per token from the edge's price list.
+type Price struct {
+	Input float64
+	// CacheRead is zero when the price list has no cache-read price.
+	CacheRead float64
+	Currency  string
+}
+
+// AddRequest adds one request priced at p; priced false leaves the saving
+// unpriced.
+func (d *Delta) AddRequest(r Request, p Price, priced bool) {
 	d.PolicyName, d.Mode, d.Level = r.PolicyName, r.Mode, r.Level
 	d.Requests++
 	d.UnitsSeen += int64(r.UnitsSeen)
@@ -210,7 +252,15 @@ func (d *Delta) AddRequest(r Request, inputPrice float64, currency string, price
 			if d.CostSaved == nil {
 				d.CostSaved = map[string]float64{}
 			}
-			d.CostSaved[currency] += float64(saved) * inputPrice
+			d.CostSaved[p.Currency] += float64(saved) * p.Input
+			if p.CacheRead > 0 {
+				if d.CostSavedAtCacheRead == nil {
+					d.CostSavedAtCacheRead = map[string]float64{}
+				}
+				d.CostSavedAtCacheRead[p.Currency] += float64(saved) * p.CacheRead
+			} else {
+				d.NoCacheReadPriceTokensSaved += saved
+			}
 		} else {
 			d.UnpricedTokensSaved += saved
 		}
@@ -266,6 +316,13 @@ func (d *Delta) Merge(o *Delta) {
 		d.CostSaved[c] += v
 	}
 	d.UnpricedTokensSaved += o.UnpricedTokensSaved
+	for c, v := range o.CostSavedAtCacheRead {
+		if d.CostSavedAtCacheRead == nil {
+			d.CostSavedAtCacheRead = map[string]float64{}
+		}
+		d.CostSavedAtCacheRead[c] += v
+	}
+	d.NoCacheReadPriceTokensSaved += o.NoCacheReadPriceTokensSaved
 	d.InputTokens += o.InputTokens
 	d.CacheReadTokens += o.CacheReadTokens
 	d.CacheWriteTokens += o.CacheWriteTokens
@@ -322,7 +379,7 @@ func (b *Batch) Validate() error {
 		if len(d.PolicyName) > 64 || len(d.Mode) > 16 {
 			return fmt.Errorf("delta %d: policy name or mode too long", i)
 		}
-		if len(d.Strategies) > 32 || len(d.CostSaved) > 4 || len(d.LatencyBuckets) > len(LatencyBoundsMicros)+1 {
+		if len(d.Strategies) > 32 || len(d.CostSaved) > 4 || len(d.CostSavedAtCacheRead) > 4 || len(d.LatencyBuckets) > len(LatencyBoundsMicros)+1 {
 			return fmt.Errorf("delta %d: too many strategies, currencies or latency buckets", i)
 		}
 		for name, s := range d.Strategies {
@@ -330,13 +387,15 @@ func (b *Batch) Validate() error {
 				return fmt.Errorf("delta %d: bad strategy entry", i)
 			}
 		}
-		for c, v := range d.CostSaved {
-			if len(c) > 8 || v < 0 {
-				return fmt.Errorf("delta %d: bad cost entry", i)
+		for _, costs := range []map[string]float64{d.CostSaved, d.CostSavedAtCacheRead} {
+			for c, v := range costs {
+				if len(c) > 8 || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+					return fmt.Errorf("delta %d: bad cost entry", i)
+				}
 			}
 		}
 		for _, n := range append([]int64{d.Requests, d.UnitsSeen, d.UnitsSelected, d.UnitsCompressed,
-			d.BytesBefore, d.BytesAfter, d.TokensBefore, d.TokensAfter, d.TokensSaved, d.UnpricedTokensSaved,
+			d.BytesBefore, d.BytesAfter, d.TokensBefore, d.TokensAfter, d.TokensSaved, d.UnpricedTokensSaved, d.NoCacheReadPriceTokensSaved,
 			d.InputTokens, d.CacheReadTokens, d.CacheWriteTokens, d.UsageMissing, d.Streaming, d.LatencyMicros},
 			d.LatencyBuckets...) {
 			if n < 0 {

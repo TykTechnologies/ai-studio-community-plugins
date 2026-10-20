@@ -8,9 +8,9 @@ import (
 	"sync"
 )
 
-// PriceFunc returns a model's input price per token and its currency; ok is
-// false when the edge has no price for it.
-type PriceFunc func(vendor, model string) (inputPrice float64, currency string, ok bool)
+// PriceFunc returns a model's prices per token; ok is false when the edge
+// has no input price for it.
+type PriceFunc func(vendor, model string) (p Price, ok bool)
 
 // Aggregator is the edge's Recorder: it merges requests into deltas by key
 // until Flush. It holds at most MaxKeys keys; past that, Add drops the
@@ -45,12 +45,11 @@ func (a *Aggregator) Add(r Request) {
 		return
 	}
 	var (
-		price    float64
-		currency string
-		priced   bool
+		price  Price
+		priced bool
 	)
 	if a.price != nil && r.TokensSaved() > 0 && r.Model != "" {
-		price, currency, priced = a.price(r.Vendor, r.Model)
+		price, priced = a.price(r.Vendor, r.Model)
 	}
 
 	a.mu.Lock()
@@ -64,7 +63,7 @@ func (a *Aggregator) Add(r Request) {
 		d = NewDelta(k)
 		a.deltas[k] = d
 	}
-	d.AddRequest(r, price, currency, priced)
+	d.AddRequest(r, price, priced)
 }
 
 // Full reports whether the aggregator holds its maximum number of keys.

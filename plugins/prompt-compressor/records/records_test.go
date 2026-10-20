@@ -81,11 +81,16 @@ func req(at time.Time, app, llm uint32, hash, outcome string, before, after int)
 	}
 }
 
-func price(vendor, model string) (float64, string, bool) {
-	if model == "claude-x" {
-		return 0.000003, "USD", true
+var claudePrice = Price{Input: 0.000003, CacheRead: 0.0000003, Currency: "USD"}
+
+func price(vendor, model string) (Price, bool) {
+	switch model {
+	case "claude-x":
+		return claudePrice, true
+	case "no-cache-price":
+		return Price{Input: 0.000002, Currency: "USD"}, true
 	}
-	return 0, "", false
+	return Price{}, false
 }
 
 func newStore(now time.Time) (*Store, *memKV) {
@@ -148,12 +153,16 @@ func TestDeltasMergeAcrossEdgesAndDuplicateBatches(t *testing.T) {
 	if requests != 100 || saved != wantSaved {
 		t.Fatalf("totals = %d requests, %d tokens saved; want 100 and %d", requests, saved, wantSaved)
 	}
-	var cost float64
+	var cost, atCacheRead float64
 	for _, d := range rows {
 		cost += d.CostSaved["USD"]
+		atCacheRead += d.CostSavedAtCacheRead["USD"]
 	}
-	if diff := cost - float64(wantSaved)*0.000003; diff > 1e-9 || diff < -1e-9 {
-		t.Errorf("cost saved %v, want %v", cost, float64(wantSaved)*0.000003)
+	if diff := cost - float64(wantSaved)*claudePrice.Input; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("cost saved %v, want %v", cost, float64(wantSaved)*claudePrice.Input)
+	}
+	if diff := atCacheRead - float64(wantSaved)*claudePrice.CacheRead; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("cost saved at cache-read price %v, want %v", atCacheRead, float64(wantSaved)*claudePrice.CacheRead)
 	}
 	if len(markers) != 1 || markers[0].Hash != hashA || markers[0].FirstSeen != HourOf(base) {
 		t.Errorf("markers = %+v", markers)
@@ -389,11 +398,11 @@ func TestDeltaAddAndMergeAgree(t *testing.T) {
 		r := req(base, 1, 1, hashA, OutcomeApplied, 100+i, 50)
 		r.CompressMicros = int64(i * 1000)
 		r.UsageMissing = i%3 == 0
-		one.AddRequest(r, 0.000003, "USD", true)
+		one.AddRequest(r, claudePrice, true)
 		if i%2 == 0 {
-			a.AddRequest(r, 0.000003, "USD", true)
+			a.AddRequest(r, claudePrice, true)
 		} else {
-			b.AddRequest(r, 0.000003, "USD", true)
+			b.AddRequest(r, claudePrice, true)
 		}
 	}
 	a.Merge(b)
@@ -411,14 +420,52 @@ func TestDeltaAddAndMergeAgree(t *testing.T) {
 	}
 }
 
+func TestSwitchRecorder(t *testing.T) {
+	var s Switch
+	s.Add(req(base, 1, 1, hashA, OutcomeApplied, 10, 9)) // discarded: no target yet
+	agg := NewAggregator(nil)
+	var wg sync.WaitGroup
+	for g := 0; g < 4; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				s.Add(req(base, 1, 1, hashA, OutcomeApplied, 10, 9))
+			}
+		}()
+	}
+	s.Set(agg)
+	wg.Wait()
+	s.Add(req(base, 1, 1, hashA, OutcomeApplied, 10, 9))
+	b := agg.Flush()
+	if len(b) != 1 || b[0].Deltas[0].Requests < 1 || b[0].Deltas[0].Requests > 401 {
+		t.Errorf("switch delivered %v", b)
+	}
+	s.Set(nil)
+	s.Add(req(base, 1, 1, hashA, OutcomeApplied, 10, 9))
+	if agg.Flush() != nil {
+		t.Error("records reached the aggregator after Set(nil)")
+	}
+}
+
 func TestUnpricedSavings(t *testing.T) {
 	agg := NewAggregator(price)
 	r := req(base, 1, 1, hashA, OutcomeApplied, 100, 40)
 	r.Model = "unknown-model"
 	agg.Add(r)
 	d := agg.Flush()[0].Deltas[0]
-	if d.UnpricedTokensSaved != 60 || len(d.CostSaved) != 0 {
-		t.Errorf("unpriced = %d, cost = %v", d.UnpricedTokensSaved, d.CostSaved)
+	if d.UnpricedTokensSaved != 60 || len(d.CostSaved) != 0 || len(d.CostSavedAtCacheRead) != 0 {
+		t.Errorf("unpriced = %d, cost = %v / %v", d.UnpricedTokensSaved, d.CostSaved, d.CostSavedAtCacheRead)
+	}
+
+	// A model with an input price but no cache-read price: the upper bound
+	// is priced, the lower bound is not
+	agg = NewAggregator(price)
+	r.Model = "no-cache-price"
+	agg.Add(r)
+	d = agg.Flush()[0].Deltas[0]
+	if d.CostSaved["USD"] == 0 || len(d.CostSavedAtCacheRead) != 0 || d.NoCacheReadPriceTokensSaved != 60 {
+		t.Errorf("no cache-read price: cost %v, at cache read %v, unpriced %d", d.CostSaved, d.CostSavedAtCacheRead, d.NoCacheReadPriceTokensSaved)
 	}
 }
 
