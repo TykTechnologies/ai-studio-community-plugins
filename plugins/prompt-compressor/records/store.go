@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -468,58 +469,190 @@ type policiesDoc struct {
 	Policies map[string]*PolicyMarker `json:"policies"`
 }
 
-// Query returns the rows for hours from..to (inclusive), merged across
-// edges, and the markers of the policies they name.
+// Query returns the hourly rows for hours from..to (inclusive), merged
+// across edges, and the markers of the policies they name.
 func (s *Store) Query(ctx context.Context, from, to int64) ([]*Delta, []PolicyMarker, error) {
-	edges := edgesDoc{}
-	if _, err := s.read(ctx, "pc:edges", &edges); err != nil {
+	res, err := s.QueryWith(ctx, QueryOptions{From: from, To: to})
+	if err != nil {
 		return nil, nil, err
 	}
-	merged := map[string]*Delta{}
+	return res.Rows, res.Markers, nil
+}
+
+// QueryOptions bounds what a query reads and holds.
+type QueryOptions struct {
+	From, To int64 // Unix hours, inclusive
+	// Bucket merges this many hours into one row time (aligned to Unix
+	// time); 0 or 1 is hourly.
+	Bucket int64
+	// AppID and LLMID, when set, keep only that App's or LLM's rows.
+	// Overflow rows cannot be attributed and are left out (and counted).
+	AppID, LLMID uint32
+	// MaxBytes stops reading hour documents past this many bytes, newest
+	// hours first (the result is then Partial); 0 is DefaultQueryBytes.
+	MaxBytes int
+	// MaxRows bounds the merged rows; past it, new rows fold into an
+	// overflow row per bucket and outcome. 0 is DefaultQueryRows.
+	MaxRows int
+}
+
+// Query defaults.
+const (
+	DefaultQueryBytes = 64 << 20
+	DefaultQueryRows  = 50000
+)
+
+// QueryResult is what QueryWith read.
+type QueryResult struct {
+	Rows    []*Delta
+	Markers []PolicyMarker
+	// Partial: MaxBytes stopped the read; hours before ReadFrom are
+	// missing or incomplete.
+	Partial  bool
+	ReadFrom int64
+	// OverflowExcluded counts requests in overflow rows a filter left out.
+	OverflowExcluded int64
+	// Folded counts rows merged into overflow rows past MaxRows.
+	Folded    int64
+	BytesRead int
+}
+
+// QueryWith reads the hours from..to, newest first, merging rows as it
+// goes, within the options' bounds.
+func (s *Store) QueryWith(ctx context.Context, o QueryOptions) (*QueryResult, error) {
+	if o.Bucket <= 1 {
+		o.Bucket = 1
+	}
+	if o.MaxBytes <= 0 {
+		o.MaxBytes = DefaultQueryBytes
+	}
+	if o.MaxRows <= 0 {
+		o.MaxRows = DefaultQueryRows
+	}
+	edges := edgesDoc{}
+	if _, err := s.read(ctx, "pc:edges", &edges); err != nil {
+		return nil, err
+	}
+	type docRef struct {
+		edge string
+		hour int64
+	}
+	var refs []docRef
 	for edge := range edges.Edges {
 		var held []int64
 		if _, err := s.read(ctx, hoursKey(edge), &held); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, h := range held {
-			if h < from || h > to {
-				continue
-			}
-			doc := hourDoc{}
-			if _, err := s.read(ctx, hourKey(edge, h), &doc); err != nil {
-				return nil, nil, err
-			}
-			for row, d := range doc.Rows {
-				if cur := merged[row]; cur != nil {
-					cur.Merge(d)
-				} else {
-					cp := NewDelta(d.Key)
-					cp.Merge(d)
-					merged[row] = cp
-				}
+			if h >= o.From && h <= o.To {
+				refs = append(refs, docRef{edge, h})
 			}
 		}
 	}
-	rows := make([]*Delta, 0, len(merged))
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].hour != refs[j].hour {
+			return refs[i].hour > refs[j].hour
+		}
+		return refs[i].edge < refs[j].edge
+	})
+
+	res := &QueryResult{ReadFrom: o.From}
+	merged := map[string]*Delta{}
+	overflowKey := func(outcome string, hour int64) string {
+		return overflowRow(outcome) + ":" + strconv.FormatInt(hour, 10)
+	}
+	add := func(d *Delta) {
+		k := d.Key
+		k.Hour -= floorMod(k.Hour, o.Bucket)
+		row := k.Row()
+		if d.Overflow {
+			row = overflowKey(d.Outcome, k.Hour)
+		}
+		if cur := merged[row]; cur != nil {
+			cur.Merge(d)
+			return
+		}
+		if d.Overflow || len(merged) >= o.MaxRows {
+			if !d.Overflow {
+				res.Folded++
+			}
+			row = overflowKey(d.Outcome, k.Hour)
+			if cur := merged[row]; cur != nil {
+				cur.mergeKnown(d)
+				return
+			}
+			cp := NewDelta(Key{Hour: k.Hour, Outcome: d.Outcome})
+			cp.Overflow = true
+			cp.mergeKnown(d)
+			cp.PolicyName, cp.Mode, cp.Level = "", "", 0
+			merged[row] = cp
+			return
+		}
+		cp := NewDelta(k)
+		cp.Merge(d)
+		merged[row] = cp
+	}
+	for _, ref := range refs {
+		if res.BytesRead >= o.MaxBytes {
+			// Newest first: everything from this hour back is incomplete
+			res.Partial = true
+			res.ReadFrom = ref.hour + 1
+			break
+		}
+		raw, err := s.kv.Read(ctx, hourKey(ref.edge, ref.hour))
+		if err != nil {
+			if s.notFound != nil && s.notFound(err) {
+				continue
+			}
+			return nil, err
+		}
+		res.BytesRead += len(raw)
+		doc := hourDoc{}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return nil, fmt.Errorf("%s: %w", hourKey(ref.edge, ref.hour), err)
+		}
+		for _, d := range doc.Rows {
+			if o.AppID != 0 || o.LLMID != 0 {
+				if d.Overflow {
+					res.OverflowExcluded += d.Requests
+					continue
+				}
+				if (o.AppID != 0 && d.AppID != o.AppID) || (o.LLMID != 0 && d.LLMID != o.LLMID) {
+					continue
+				}
+			}
+			add(d)
+		}
+	}
+
+	res.Rows = make([]*Delta, 0, len(merged))
 	hashes := map[string]bool{}
 	for _, d := range merged {
-		rows = append(rows, d)
+		res.Rows = append(res.Rows, d)
 		if d.PolicyHash != "" {
 			hashes[d.PolicyHash] = true
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Row() < rows[j].Row() })
+	sort.Slice(res.Rows, func(i, j int) bool { return res.Rows[i].Row() < res.Rows[j].Row() })
 
 	pdoc := policiesDoc{}
 	if _, err := s.read(ctx, policiesKey, &pdoc); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	markers := make([]PolicyMarker, 0, len(hashes))
+	res.Markers = make([]PolicyMarker, 0, len(hashes))
 	for h := range hashes {
 		if m := pdoc.Policies[h]; m != nil {
-			markers = append(markers, *m)
+			res.Markers = append(res.Markers, *m)
 		}
 	}
-	sort.Slice(markers, func(i, j int) bool { return markers[i].FirstSeen < markers[j].FirstSeen })
-	return rows, markers, nil
+	sort.Slice(res.Markers, func(i, j int) bool { return res.Markers[i].FirstSeen < res.Markers[j].FirstSeen })
+	return res, nil
+}
+
+func floorMod(a, b int64) int64 {
+	m := a % b
+	if m < 0 {
+		m += b
+	}
+	return m
 }

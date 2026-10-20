@@ -35,6 +35,8 @@ type telemetry struct {
 
 	// names caches App and LLM names for the savings dashboard (Studio).
 	names nameCache
+	// savings caches dashboard views for a short time (Studio).
+	savings savingsCache
 }
 
 type cachedPrice struct {

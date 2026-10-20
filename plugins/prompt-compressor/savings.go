@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -19,6 +20,23 @@ type savingsQuery struct {
 	RangeHours int    `json:"range_hours"`
 	AppID      uint32 `json:"app_id"`
 	LLMID      uint32 `json:"llm_id"`
+
+	// bucket is the hours per series point (bucketFor the range).
+	bucket int64
+}
+
+// bucketFor picks the series resolution for a range: hourly up to three
+// days, six-hourly up to 30 days, daily beyond, so a long range neither
+// reads nor draws thousands of points.
+func bucketFor(rangeHours int) int64 {
+	switch {
+	case rangeHours <= 72:
+		return 1
+	case rangeHours <= 720:
+		return 6
+	default:
+		return 24
+	}
 }
 
 const (
@@ -113,6 +131,15 @@ type savingsView struct {
 	// they cannot be attributed to an App or LLM.
 	OverflowExcluded int64   `json:"overflow_excluded"`
 	AlertThreshold   float64 `json:"alert_threshold"`
+	// BucketHours is the hours per series point.
+	BucketHours int64 `json:"bucket_hours"`
+	// Partial: the query stopped at its read budget; hours before
+	// PartialFrom are missing or incomplete.
+	Partial     bool  `json:"partial"`
+	PartialFrom int64 `json:"partial_from,omitempty"`
+	// FoldedRows counts rows the query merged into "other" past its row
+	// budget.
+	FoldedRows int64 `json:"folded_rows,omitempty"`
 }
 
 // summarise turns rollup rows into the dashboard view. rows and markers
@@ -270,17 +297,39 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 			short = short[:12]
 		}
 		v.Markers = append(v.Markers, markerView{Hour: m.FirstSeen, Name: m.Name, ShortHash: short, Level: m.Level})
-		if threshold <= 0 {
-			continue
-		}
-		before := windowShare(series, m.FirstSeen-alertBeforeHours, m.FirstSeen-1)
-		after := windowShare(series, m.FirstSeen, m.FirstSeen+1)
-		if before.ok && after.ok && before.share > 0 && after.share < before.share*(1-threshold) {
-			v.Alerts = append(v.Alerts, cacheAlert{Hour: m.FirstSeen, Policy: m.Name, Before: before.share, After: after.share})
-		}
 	}
 	sort.Slice(v.Markers, func(i, j int) bool { return v.Markers[i].Hour < v.Markers[j].Hour })
+	// An hourly series feeds the alert check itself; a bucketed one leaves
+	// it to the caller, which reads the hours around each marker
+	if q.bucket <= 1 {
+		v.Alerts = alertsFor(markers, from, to, series, threshold)
+	}
 	return v
+}
+
+// maxAlertMarkers bounds the policy changes a query checks for a cache
+// drop (each reads its own few hours).
+const maxAlertMarkers = 20
+
+// alertsFor checks each policy change in from..to: the cache-read share in
+// the two hours from it against the alertBeforeHours before it, in an
+// hourly series.
+func alertsFor(markers []records.PolicyMarker, from, to int64, hourly map[int64]*hourPoint, threshold float64) []cacheAlert {
+	alerts := []cacheAlert{}
+	if threshold <= 0 {
+		return alerts
+	}
+	for _, m := range markers {
+		if m.FirstSeen < from || m.FirstSeen > to {
+			continue
+		}
+		before := windowShare(hourly, m.FirstSeen-alertBeforeHours, m.FirstSeen-1)
+		after := windowShare(hourly, m.FirstSeen, m.FirstSeen+1)
+		if before.ok && after.ok && before.share > 0 && after.share < before.share*(1-threshold) {
+			alerts = append(alerts, cacheAlert{Hour: m.FirstSeen, Policy: m.Name, Before: before.share, After: after.share})
+		}
+	}
+	return alerts
 }
 
 type shareResult struct {
@@ -395,21 +444,141 @@ func (p *PromptCompressorPlugin) rpcGetSavings(payload []byte) ([]byte, error) {
 	if q.RangeHours > maxRangeHours {
 		q.RangeHours = maxRangeHours
 	}
+	q.bucket = bucketFor(q.RangeHours)
+	key := fmt.Sprintf("%d/%d/%d", q.RangeHours, q.AppID, q.LLMID)
+	return p.telemetry.savings.do(key, func() ([]byte, error) { return p.querySavings(store, q) })
+}
+
+// querySavings reads the rollups for one dashboard view, within the
+// store's per-query bounds.
+func (p *PromptCompressorPlugin) querySavings(store *records.Store, q savingsQuery) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), editorRPCTTL)
 	defer cancel()
+	threshold := p.state().config.CacheDropAlert
 
 	to := records.HourOf(time.Now())
 	from := to - int64(q.RangeHours) + 1
-	// Read a little earlier than shown, for the cache-drop comparison
-	rows, markers, err := store.Query(ctx, from-alertBeforeHours, to)
+	from -= floorMod(from, q.bucket)
+	opts := records.QueryOptions{From: from, To: to, Bucket: q.bucket, AppID: q.AppID, LLMID: q.LLMID}
+	if q.bucket == 1 {
+		// Read a little earlier than shown, for the cache-drop comparison
+		opts.From -= alertBeforeHours
+	}
+	res, err := store.QueryWith(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 	apps, llms := p.telemetry.names.get(ctx, p.studioAPI())
-	view := summarise(rows, markers, from, to, q, p.state().config.CacheDropAlert, apps, llms)
+	view := summarise(res.Rows, res.Markers, from, to, q, threshold, apps, llms)
+	view.BucketHours = q.bucket
+	view.OverflowExcluded += res.OverflowExcluded
+	view.Partial, view.PartialFrom = res.Partial, res.ReadFrom
+	view.FoldedRows = res.Folded
 	// The comparison window before the range only feeds the alert check
 	view.Series = trimSeries(view.Series, from)
+
+	if q.bucket > 1 && threshold > 0 {
+		// Read the hours around each policy change for the alert check
+		hourly := map[int64]*hourPoint{}
+		checked := 0
+		for _, m := range res.Markers {
+			if m.FirstSeen < from || m.FirstSeen > to || checked >= maxAlertMarkers {
+				continue
+			}
+			checked++
+			win, err := store.QueryWith(ctx, records.QueryOptions{
+				From: m.FirstSeen - alertBeforeHours, To: m.FirstSeen + 1, AppID: q.AppID, LLMID: q.LLMID,
+				MaxBytes: records.DefaultQueryBytes / maxAlertMarkers,
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range win.Rows {
+				pt := hourly[d.Hour]
+				if pt == nil {
+					pt = &hourPoint{Hour: d.Hour}
+					hourly[d.Hour] = pt
+				}
+				pt.InputTokens += d.InputTokens
+				pt.CacheReadTokens += d.CacheReadTokens
+			}
+		}
+		view.Alerts = alertsFor(res.Markers, from, to, hourly, threshold)
+	}
 	return json.Marshal(view)
+}
+
+func floorMod(a, b int64) int64 {
+	m := a % b
+	if m < 0 {
+		m += b
+	}
+	return m
+}
+
+// savingsCache answers the same dashboard view from memory for a short
+// time, and runs one query per view at a time however many viewers ask.
+type savingsCache struct {
+	mu       sync.Mutex
+	entries  map[string]savingsEntry
+	inflight map[string]*savingsCall
+	ttl      time.Duration
+	now      func() time.Time
+}
+
+type savingsEntry struct {
+	data []byte
+	at   time.Time
+}
+
+type savingsCall struct {
+	done chan struct{}
+	data []byte
+	err  error
+}
+
+const (
+	savingsCacheTTL     = 30 * time.Second
+	savingsCacheEntries = 64
+)
+
+func (c *savingsCache) do(key string, query func() ([]byte, error)) ([]byte, error) {
+	c.mu.Lock()
+	if c.entries == nil {
+		c.entries, c.inflight = map[string]savingsEntry{}, map[string]*savingsCall{}
+	}
+	if c.now == nil {
+		c.now = time.Now
+	}
+	if c.ttl == 0 {
+		c.ttl = savingsCacheTTL
+	}
+	if e, ok := c.entries[key]; ok && c.now().Sub(e.at) < c.ttl {
+		c.mu.Unlock()
+		return e.data, nil
+	}
+	if call, ok := c.inflight[key]; ok {
+		c.mu.Unlock()
+		<-call.done
+		return call.data, call.err
+	}
+	call := &savingsCall{done: make(chan struct{})}
+	c.inflight[key] = call
+	c.mu.Unlock()
+
+	call.data, call.err = query()
+
+	c.mu.Lock()
+	delete(c.inflight, key)
+	if call.err == nil {
+		if len(c.entries) >= savingsCacheEntries {
+			c.entries = map[string]savingsEntry{}
+		}
+		c.entries[key] = savingsEntry{data: call.data, at: c.now()}
+	}
+	c.mu.Unlock()
+	close(call.done)
+	return call.data, call.err
 }
 
 func trimSeries(s []hourPoint, from int64) []hourPoint {

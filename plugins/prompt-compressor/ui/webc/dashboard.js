@@ -170,6 +170,14 @@ class PromptCompressorDashboard extends HTMLElement {
       );
       return;
     }
+    if (v.partial) {
+      page.appendChild(
+        h('div', { className: 'banner info', 'data-testid': 'pc-partial' },
+          h('span', { className: 'icon', 'aria-hidden': 'true' }, 'ℹ'),
+          h('strong', {}, 'Partial view: '),
+          `this range holds more data than one view reads, so it covers ${hourLabel(v.partial_from)} onwards. Pick a shorter range, or an App or LLM, for the rest.`),
+      );
+    }
     if (v.audit_only) {
       page.appendChild(
         h('div', { className: 'banner info', 'data-testid': 'pc-audit-only' },
@@ -238,10 +246,18 @@ class PromptCompressorDashboard extends HTMLElement {
   }
 
   // _hours lists every hour of the range, so gaps show as zero.
+  // _hours lists the start hour of every series point (buckets of
+  // bucket_hours), so gaps show as zero.
   _hours(v) {
+    const step = Math.max(1, v.bucket_hours || 1);
     const out = [];
-    for (let hr = v.from; hr <= v.to; hr++) out.push(hr);
+    for (let hr = v.from; hr <= v.to; hr += step) out.push(hr);
     return out;
+  }
+
+  _per(v) {
+    const b = v.bucket_hours || 1;
+    return b === 1 ? 'per hour' : b === 24 ? 'per day' : `per ${b} hours`;
   }
 
   _chartFrame(title, legend) {
@@ -272,7 +288,7 @@ class PromptCompressorDashboard extends HTMLElement {
       hasProjected ? h('span', { className: 'key' }, h('span', { className: 'swatch s2' }), 'Projected (audit)') : null,
       h('span', { className: 'key' }, h('span', { className: 'swatch marker' }), 'Policy change'),
     ];
-    const section = this._chartFrame('Tokens saved per hour', legend);
+    const section = this._chartFrame(`Tokens saved ${this._per(v)}`, legend);
     const byHour = new Map((v.series || []).map((p) => [p.hour, p]));
     const hours = this._hours(v);
     const W = 900, H = 200, L = 56, R = 8, T = 8, B = 24;
@@ -280,7 +296,7 @@ class PromptCompressorDashboard extends HTMLElement {
     const step = (W - L - R) / hours.length;
     const bw = Math.max(1, step - 2);
     const y = (n) => T + (H - T - B) * (1 - n / max);
-    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Tokens saved per hour', 'data-testid': 'pc-savings-chart' });
+    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Tokens saved ${this._per(v)}`, 'data-testid': 'pc-savings-chart' });
     // Recessive grid: baseline and top value
     chart.appendChild(svg('line', { x1: L, x2: W - R, y1: y(0), y2: y(0), class: 'axis' }));
     chart.appendChild(svg('text', { x: L - 6, y: y(max) + 4, class: 'tick', 'text-anchor': 'end' }, fmtInt(max)));
@@ -316,7 +332,7 @@ class PromptCompressorDashboard extends HTMLElement {
   }
 
   _paintShareChart(v) {
-    const section = this._chartFrame('Cache-read share per hour', [
+    const section = this._chartFrame(`Cache-read share ${this._per(v)}`, [
       h('span', { className: 'key' }, h('span', { className: 'swatch s1 line' }), 'Cache reads as a share of prompt tokens'),
       h('span', { className: 'key' }, h('span', { className: 'swatch marker' }), 'Policy change'),
     ]);
@@ -325,7 +341,7 @@ class PromptCompressorDashboard extends HTMLElement {
     const W = 900, H = 160, L = 56, R = 8, T = 8, B = 24;
     const step = (W - L - R) / hours.length;
     const y = (f) => T + (H - T - B) * (1 - f);
-    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Cache-read share per hour', 'data-testid': 'pc-share-chart' });
+    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Cache-read share ${this._per(v)}`, 'data-testid': 'pc-share-chart' });
     for (const f of [0, 0.5, 1]) {
       chart.appendChild(svg('line', { x1: L, x2: W - R, y1: y(f), y2: y(f), class: f === 0 ? 'axis' : 'grid' }));
       chart.appendChild(svg('text', { x: L - 6, y: y(f) + 4, class: 'tick', 'text-anchor': 'end' }, `${f * 100}%`));
@@ -363,9 +379,11 @@ class PromptCompressorDashboard extends HTMLElement {
 
   _paintMarkers(chart, v, hours, L, step, top, bottom) {
     for (const m of v.markers || []) {
-      const i = hours.indexOf(m.hour);
-      if (i < 0) continue;
-      const x = L + i * step;
+      // Within its bucket, the marker sits at the hour it was first seen
+      const bucket = Math.max(1, v.bucket_hours || 1);
+      const offset = (m.hour - v.from) / bucket;
+      if (offset < 0 || offset >= hours.length) continue;
+      const x = L + offset * step;
       const g = svg('g', { class: 'marker', 'data-testid': 'pc-policy-marker' },
         svg('line', { x1: x, x2: x, y1: top, y2: bottom }),
         svg('title', {}, `Policy ${m.name || m.short_hash} (${m.short_hash}, level ${m.level}) first seen ${hourLabel(m.hour)}`));
