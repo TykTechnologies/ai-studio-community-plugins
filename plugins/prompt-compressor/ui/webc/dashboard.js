@@ -32,7 +32,7 @@ function h(tag, props, ...children) {
       el[key] = value;
     }
   }
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined || child === false) continue;
     el.appendChild(typeof child === 'string' || typeof child === 'number' ? document.createTextNode(String(child)) : child);
   }
@@ -44,7 +44,7 @@ function svg(tag, attrs, ...children) {
   for (const [key, value] of Object.entries(attrs || {})) {
     if (value !== undefined && value !== null) el.setAttribute(key, String(value));
   }
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined || child === false) continue;
     el.appendChild(typeof child === 'string' || typeof child === 'number' ? document.createTextNode(String(child)) : child);
   }
