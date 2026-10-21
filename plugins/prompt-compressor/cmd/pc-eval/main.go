@@ -4,6 +4,7 @@
 //
 //	pc-eval replay -levels 0,1,2 -out /tmp/pc-report        # the plugin's corpus
 //	pc-eval replay -bodies ./captured -levels 0,1           # your own bodies: <format>/<name>.json
+//	pc-eval replay -policy mask8.json -levels 0,3           # policy settings other than the defaults
 //
 // It writes report.json and report.md: token reduction per tool kind and
 // level, and the projected cost of the 30-turn sessions including prompt
@@ -69,6 +70,7 @@ func compressOne(args []string) error {
 	out := fs.String("out", "", "write the compressed body here (default: stdout)")
 	format := fs.String("format", "openai", "request filter format")
 	level := fs.Int("level", 1, "level")
+	pf := fs.String("policy", "", policyUsage)
 	fs.Parse(args)
 	if *in == "" {
 		return errors.New("-in is required")
@@ -77,7 +79,11 @@ func compressOne(args []string) error {
 	if err != nil {
 		return err
 	}
-	res, rep := compress.New(compress.Options{}).Compress(compress.Input{Format: *format, Body: body, Policy: levelPolicy(*level)})
+	base, err := loadPolicy(*pf)
+	if err != nil {
+		return err
+	}
+	res, rep := compress.New(compress.Options{}).Compress(compress.Input{Format: *format, Body: body, Policy: atLevel(base, *level)})
 	rj, _ := json.Marshal(rep)
 	fmt.Fprintln(os.Stderr, string(rj))
 	if *out == "" {
@@ -87,10 +93,31 @@ func compressOne(args []string) error {
 	return os.WriteFile(*out, res, 0o644)
 }
 
-func levelPolicy(level int) *config.Policy {
-	p := config.DefaultPolicy()
-	p.Level = level
-	return p
+const policyUsage = `JSON file with one policy as the plugin config holds it (e.g. {"mask_after_turns": 8}); unset fields keep the defaults, and the level comes from the level flag`
+
+// loadPolicy reads a policy through the plugin's own config parser, so it
+// is validated and defaulted as the plugin would; "" is the default policy.
+func loadPolicy(path string) (*config.Policy, error) {
+	if path == "" {
+		return config.DefaultPolicy(), nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	c, err := config.ParseJSON([]byte(`{"policies":{"eval":` + string(raw) + `}}`))
+	if err != nil {
+		return nil, fmt.Errorf("-policy: %w", err)
+	}
+	p, _ := c.Policy("eval")
+	return p, nil
+}
+
+// atLevel is a copy of p at level; parsed policies are shared and read-only.
+func atLevel(p *config.Policy, level int) *config.Policy {
+	cp := *p
+	cp.Level = level
+	return &cp
 }
 
 func levels(s string) ([]int, error) {
@@ -118,8 +145,16 @@ func replay(args []string) error {
 	out := fs.String("out", "", "write report.json and report.md here (default: print Markdown)")
 	comp := fs.String("compressor", "library", "library (the plugin's compress package) | identity")
 	toks := fs.String("tokens", "library", "library (the compress package's per-format estimator) | bytes (bytes/4)")
-	protect := fs.Int("protect", 1, "the policy's protect_recent_turns, so results leaving that window count as late compressions")
+	protect := fs.Int("protect", -1, "the policy's protect_recent_turns, so results leaving that window count as late compressions (default: the policy's)")
+	pf := fs.String("policy", "", policyUsage)
 	fs.Parse(args)
+	base, err := loadPolicy(*pf)
+	if err != nil {
+		return err
+	}
+	if *protect < 0 {
+		*protect = base.ProtectRecentTurns
+	}
 
 	ls, err := levels(*lv)
 	if err != nil {
@@ -141,7 +176,12 @@ func replay(args []string) error {
 	opts := eval.Options{Levels: ls, Prices: p, OutputTokens: *outTok, ProtectRecentTurns: *protect}
 	switch *comp {
 	case "library":
-		opts.Compressor = eval.NewLibrary()
+		lib := eval.NewLibrary()
+		if *pf != "" {
+			lib.Policy = func(level int) *config.Policy { return atLevel(base, level) }
+			lib.Label = "policy " + filepath.Base(*pf)
+		}
+		opts.Compressor = lib
 	case "identity":
 		opts.Compressor = eval.Identity{}
 	default:

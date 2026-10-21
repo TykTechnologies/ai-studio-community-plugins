@@ -12,6 +12,8 @@ type Library struct {
 	// Policy returns the policy for a level; nil uses config.DefaultPolicy
 	// with that level.
 	Policy func(level int) *config.Policy
+	// Label names Policy in reports.
+	Label string
 	// Outcomes counts the library's outcomes over the replay (the replay
 	// calls it from one goroutine).
 	Outcomes map[compress.Outcome]int
@@ -22,7 +24,12 @@ func NewLibrary() *Library {
 	return &Library{c: compress.New(compress.Options{}), Outcomes: map[compress.Outcome]int{}}
 }
 
-func (l *Library) Name() string { return "compress (plugin library, default policy)" }
+func (l *Library) Name() string {
+	if l.Label != "" {
+		return "compress (plugin library, " + l.Label + ")"
+	}
+	return "compress (plugin library, default policy)"
+}
 
 // Compress compresses body at level. A rewrite rejected by the library's
 // post-check returns the original body and an error the report classifies.

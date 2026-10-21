@@ -8,7 +8,12 @@
 go run ./cmd/pc-eval replay -levels 0,1,2 -out /tmp/pc-report     # the plugin's test corpus
 go run ./cmd/pc-eval replay -bodies ./captured -levels 0,1         # your own bodies
 go run ./cmd/pc-eval replay -prices my-prices.json -output-tokens 600
+go run ./cmd/pc-eval replay -policy mask8.json -levels 0,3        # {"mask_after_turns": 8}
 ```
+
+`-policy` takes one policy as the plugin config holds it. The plugin's config
+parser validates it, unset fields keep the defaults, and `-levels` sets the
+level. `pc-eval compress` takes it too.
 
 `-bodies` reads `<dir>/<format>/<name>.json`, one request body per file.
 `<format>` is the request filter format: `openai`, `anthropic`, `bedrock`,
