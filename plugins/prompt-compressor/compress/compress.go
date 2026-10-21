@@ -410,7 +410,10 @@ func (c *Compressor) selectUnits(in Input, doc *segments.Doc, p *config.Policy, 
 		if level >= 3 && budget == 0 {
 			budget = p.MaxUnitTokens
 		}
-		mask := level >= 3 && u.Kind == guardrails.KindToolResult && u.Turn < maskBefore
+		// A vendor's own result is compressed, with compress_server_tool_results,
+		// but never replaced by a placeholder: the live check (eac.56) covered
+		// edited results, not removed ones.
+		mask := level >= 3 && u.Kind == guardrails.KindToolResult && !u.ServerTool && u.Turn < maskBefore
 		if tr != nil {
 			tr.Level, tr.Capped, tr.Budget, tr.Masked = level, capped, budget, mask
 		}

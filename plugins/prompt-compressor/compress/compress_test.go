@@ -525,6 +525,53 @@ func TestServerToolResultsOptIn(t *testing.T) {
 	}
 }
 
+// Level-3 masking never replaces a vendor's own result: with the switch
+// off the old server results stay byte for byte while the client's old
+// result is masked, and with it on they are compressed but not masked.
+func TestMaskingLeavesServerToolResults(t *testing.T) {
+	noisy := strings.Repeat("result line   \n\n\n", 100)
+	var input []any
+	for turn := 0; turn < 6; turn++ {
+		input = append(input,
+			map[string]any{"type": "code_interpreter_call", "id": fmt.Sprintf("ci%d", turn), "code": "x", "outputs": []any{map[string]any{"type": "logs", "logs": noisy + fmt.Sprint(turn)}}},
+			map[string]any{"type": "function_call", "name": "shell", "call_id": fmt.Sprintf("c%d", turn), "arguments": "{}"},
+			map[string]any{"type": "function_call_output", "call_id": fmt.Sprintf("c%d", turn), "output": noisy + "client" + fmt.Sprint(turn)},
+			map[string]any{"role": "assistant", "content": "ok"},
+			map[string]any{"role": "user", "content": "next"},
+		)
+	}
+	body := mustJSON(t, map[string]any{"input": input})
+	before, _ := segments.ExtractUnits("openai_responses", body)
+	server := map[string]string{}
+	for _, u := range before {
+		if u.ServerTool {
+			server[u.ToolCallID] = u.Text
+		}
+	}
+	for _, on := range []bool{false, true} {
+		p := config.DefaultPolicy()
+		p.Level, p.ProtectRecentTurns, p.MaskAfterTurns, p.MaskStepTokens, p.CompressServerToolResults = 3, 0, 1, 1, on
+		out, rep := New(Options{}).Compress(Input{Format: "openai_responses", Body: body, Policy: p})
+		if rep.Strategies[StrategyMask].Leaves == 0 {
+			t.Fatalf("switch %v: nothing was masked: %+v", on, rep)
+		}
+		units, _ := segments.ExtractUnits("openai_responses", out)
+		for _, u := range units {
+			if !u.ServerTool {
+				continue
+			}
+			switch {
+			case strings.Contains(u.Text, "masked") || strings.Contains(u.Text, "omitted"):
+				t.Errorf("switch %v: server result %s was masked: %q", on, u.ToolCallID, u.Text)
+			case !on && u.Text != server[u.ToolCallID]:
+				t.Errorf("switch off: server result %s changed", u.ToolCallID)
+			case on && u.Text == server[u.ToolCallID]:
+				t.Errorf("switch on: server result %s was not compressed", u.ToolCallID)
+			}
+		}
+	}
+}
+
 // Tool results the vendor produced are never selected; the client's own are.
 func TestServerToolResultsNotSelected(t *testing.T) {
 	noisy := strings.Repeat("result line   \n\n\n", 100)

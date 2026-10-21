@@ -273,7 +273,10 @@ plugin loading. The full schema is in `config.schema.json`.
   the model reads the edited text, also with OpenAI's encrypted reasoning
   replayed. MCP connector results, the older code execution and text
   editor results and Google's code execution results were not checked and
-  are always left as sent. Thinking blocks, signatures and tool call ids
+  are always left as sent. Level 3 never masks a vendor's result (the check
+  covered edited results, not removed ones). With an engine policy, the
+  selected vendor results go to the engine like the client's own tool
+  output. Thinking blocks, signatures and tool call ids
   are never rewritten. The model's own text is rewritten only when a
   policy's `roles` includes `assistant`.
 
