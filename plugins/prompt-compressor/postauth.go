@@ -179,7 +179,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		CapLossy:     capLossy,
-		Engine:       p.engineFor(ctx, cfg, res, failClosed),
+		Engine:       p.engineFor(ctx, cfg, res, failClosed, llm.StoresBodies),
 	})
 	rec.CompressMicros = time.Since(start).Microseconds()
 	rec.Outcome, rec.Report = string(rep.Outcome), rep
@@ -205,8 +205,9 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 
 // engineFor returns the compressor's engine hook for a policy that names
 // an engine; nil otherwise. Clients, and so their memos, live across
-// requests, one per engine setting.
-func (p *PromptCompressorPlugin) engineFor(ctx plugin_sdk.Context, cfg *config.Config, res config.Resolution, failClosed bool) compress.EngineFunc {
+// requests, one per engine setting. storeText is the LLM's
+// stores_request_bodies (false while unknown).
+func (p *PromptCompressorPlugin) engineFor(ctx plugin_sdk.Context, cfg *config.Config, res config.Resolution, failClosed, storeText bool) compress.EngineFunc {
 	if res.Policy == nil || res.Policy.Engine == nil {
 		return nil
 	}
@@ -231,7 +232,7 @@ func (p *PromptCompressorPlugin) engineFor(ctx plugin_sdk.Context, cfg *config.C
 	if base == nil {
 		base = context.Background()
 	}
-	return c.(*engine.Client).Run(base, kv, p.logger().Warn, res.Hash, mode)
+	return c.(*engine.Client).Run(base, kv, p.logger().Warn, res.Hash, mode, storeText)
 }
 
 // headerValue looks a header up whatever its case.

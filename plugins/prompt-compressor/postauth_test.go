@@ -23,10 +23,11 @@ type llmGateway struct {
 	endpoint string
 	filtered bool // the LLM has request filters
 	oldHost  bool // the host predates has_request_filters and leaves it out
+	stores   *bool
 }
 
 func (g *llmGateway) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
-	info := &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: proto.Bool(g.filtered)}
+	info := &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: proto.Bool(g.filtered), StoresRequestBodies: g.stores}
 	if g.oldHost {
 		info.HasRequestFilters = nil
 	}
@@ -257,10 +258,11 @@ func TestRequestFilterGuard(t *testing.T) {
 type studioLLMs struct {
 	plugin_sdk.StudioServices
 	filters *bool
+	stores  *bool
 }
 
 func (s studioLLMs) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
-	return &studiopb.GetLLMResponse{Llm: &studiopb.LLMInfo{Id: llmID, ApiEndpoint: "https://api.openai.com/v1", HasRequestFilters: s.filters}}, nil
+	return &studiopb.GetLLMResponse{Llm: &studiopb.LLMInfo{Id: llmID, ApiEndpoint: "https://api.openai.com/v1", HasRequestFilters: s.filters, StoresRequestBodies: s.stores}}, nil
 }
 
 type studioBroker struct {
@@ -288,6 +290,25 @@ func TestLLMInfoFromOlderHosts(t *testing.T) {
 		edge, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}}, 4)
 		if err != nil || edge.HasRequestFilters != tc.want {
 			t.Errorf("edge %v: %+v, %v", tc.filters, edge, err)
+		}
+	}
+}
+
+// stores_request_bodies is read as sent on both runtimes, and an LLMInfo
+// without it (an older host) reads as not stored (eac.66).
+func TestLLMInfoStoresBodies(t *testing.T) {
+	for _, tc := range []struct {
+		stores *bool
+		want   bool
+	}{{nil, false}, {proto.Bool(true), true}, {proto.Bool(false), false}} {
+		studio, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeStudio, Services: studioBroker{studio: studioLLMs{stores: tc.stores}}}, 4)
+		if err != nil || studio.StoresBodies != tc.want {
+			t.Errorf("Studio %v: %+v, %v", tc.stores, studio, err)
+		}
+		gw := &llmGateway{fakeGateway: &fakeGateway{}, endpoint: "e", stores: tc.stores}
+		edge, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}}, 4)
+		if err != nil || edge.StoresBodies != tc.want {
+			t.Errorf("edge %v: %+v, %v", tc.stores, edge, err)
 		}
 	}
 }

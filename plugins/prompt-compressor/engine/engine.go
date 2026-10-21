@@ -166,7 +166,13 @@ func usableURL(raw string) (*url.URL, bool) {
 // failureMode open a failed job is memoised as a passthrough and the call
 // never fails; with closed the first failure fails the call (nothing is
 // memoised, since nothing is sent).
-func (c *Client) Run(ctx context.Context, kv KV, log Logger, policyHash string, failureMode config.FailureMode) compress.EngineFunc {
+//
+// storeText says whether the engine's compressed text may be kept in KV:
+// only when the host keeps the LLM's request bodies (LLMInfo
+// stores_request_bodies), since it is mostly the client's tool output.
+// Otherwise the text is memoised in process only, and KV keeps just the
+// passthrough decisions, which hold no text (eac.66).
+func (c *Client) Run(ctx context.Context, kv KV, log Logger, policyHash string, failureMode config.FailureMode, storeText bool) compress.EngineFunc {
 	return func(model string, jobs []compress.EngineJob) ([]compress.EngineResult, error) {
 		out := make([]compress.EngineResult, len(jobs))
 		var (
@@ -180,7 +186,7 @@ func (c *Client) Run(ctx context.Context, kv KV, log Logger, policyHash string, 
 			sem <- struct{}{}
 			go func(i int, j compress.EngineJob) {
 				defer func() { <-sem; wg.Done() }()
-				r, err := c.one(ctx, kv, log, policyHash, failureMode, model, j)
+				r, err := c.one(ctx, kv, log, policyHash, failureMode, storeText, model, j)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
@@ -201,7 +207,7 @@ func (c *Client) Run(ctx context.Context, kv KV, log Logger, policyHash string, 
 }
 
 // one compresses one job through the memo.
-func (c *Client) one(ctx context.Context, kv KV, log Logger, policyHash string, failureMode config.FailureMode, model string, j compress.EngineJob) (compress.EngineResult, error) {
+func (c *Client) one(ctx context.Context, kv KV, log Logger, policyHash string, failureMode config.FailureMode, storeText bool, model string, j compress.EngineJob) (compress.EngineResult, error) {
 	key := c.memoKey(policyHash, j.Text)
 	hit, failed := true, false
 	r, err := c.memo.Do(key, func() (result, error) {
@@ -230,7 +236,9 @@ func (c *Client) one(ctx context.Context, kv KV, log Logger, policyHash string, 
 		default:
 			r = result{Text: text}
 		}
-		c.writeKV(kv, key, r)
+		if r.Passthrough || storeText {
+			c.writeKV(kv, key, r)
+		}
 		return r, nil
 	})
 	if err != nil {

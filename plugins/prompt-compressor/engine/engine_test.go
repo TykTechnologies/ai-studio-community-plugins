@@ -168,7 +168,7 @@ func run(t *testing.T, c *Client, kv KV, l *logs, mode config.FailureMode, jobs 
 	if l != nil {
 		lg = l.log
 	}
-	return c.Run(context.Background(), kv, lg, "hash1", mode)("gpt-4o", jobs)
+	return c.Run(context.Background(), kv, lg, "hash1", mode, true)("gpt-4o", jobs)
 }
 
 func TestEngineOutcomes(t *testing.T) {
@@ -263,6 +263,57 @@ func TestEngineMemo(t *testing.T) {
 	}
 }
 
+// Where the LLM's request bodies are not kept, the engine's text stays in
+// process: KV gets only the passthrough decisions, which hold no text, so a
+// failed unit still reads as passthrough after a restart (eac.66).
+func TestEngineMemoKeepsTextOutOfKV(t *testing.T) {
+	f := newFakeEngine(t)
+	kv := &mapKV{}
+	c := client(f, config.EngineHeadroom)
+	runWith := func(c *Client, j compress.EngineJob) compress.EngineResult {
+		t.Helper()
+		res, err := c.Run(context.Background(), kv, nil, "hash1", config.FailOpen, false)("gpt-4o", []compress.EngineJob{j})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res[0]
+	}
+	first := runWith(c, job)
+	if !first.Changed || runWith(c, job) != first || f.calls.Load() != 1 {
+		t.Fatalf("the in-process memo did not answer: %+v, %d calls", first, f.calls.Load())
+	}
+	other := compress.EngineJob{Role: "tool", Text: strings.Repeat("another output\n", 20)}
+	f.set("500")
+	if r := runWith(c, other); !r.Failed {
+		t.Fatalf("not failed: %+v", r)
+	}
+	time.Sleep(50 * time.Millisecond) // the KV write is in the background
+	kv.mu.Lock()
+	for k, v := range kv.m {
+		var r result
+		if json.Unmarshal(v, &r) != nil || !r.Passthrough || r.Text != "" {
+			t.Errorf("KV entry %s holds %s", k, v)
+		}
+	}
+	entries := len(kv.m)
+	kv.mu.Unlock()
+	if entries != 1 {
+		t.Fatalf("%d KV entries, want the one passthrough", entries)
+	}
+
+	// A new process: the passthrough comes from KV, the text is asked for
+	// again.
+	f.set("ok")
+	fresh := client(f, config.EngineHeadroom)
+	if r := runWith(fresh, other); r.Changed || r.Text != other.Text || fresh.Stats.KVHits.Load() != 1 {
+		t.Errorf("passthrough after restart: %+v (%d KV hits)", r, fresh.Stats.KVHits.Load())
+	}
+	calls := f.calls.Load()
+	if r := runWith(fresh, job); !r.Changed || f.calls.Load() != calls+1 {
+		t.Errorf("text after restart: %+v, %d calls", r, f.calls.Load()-calls)
+	}
+}
+
 func TestEngineCredentials(t *testing.T) {
 	f := newFakeEngine(t)
 	run(t, client(f, config.EngineHeadroom), nil, nil, config.FailOpen, job)
@@ -337,7 +388,7 @@ func TestSystemPromptNeverSent(t *testing.T) {
 	p := enginePolicy()
 	body := openaiBody("SYSTEM-CANARY "+strings.Repeat("rules ", 100), strings.Repeat("tool output line\n", 50), "NEWEST-CANARY "+strings.Repeat("please ", 100))
 	out, rep := compress.New(compress.Options{}).Compress(compress.Input{Format: "openai", Body: body, Policy: p,
-		Engine: c.Run(context.Background(), nil, nil, p.Hash(), config.FailOpen)})
+		Engine: c.Run(context.Background(), nil, nil, p.Hash(), config.FailOpen, true)})
 	f.mu.Lock()
 	sent := strings.Join(f.bodies, "\n")
 	f.mu.Unlock()
@@ -361,7 +412,7 @@ func TestCompressFailureModes(t *testing.T) {
 	for _, mode := range []config.FailureMode{config.FailOpen, config.FailClosed} {
 		c := client(f, config.EngineHeadroom)
 		out, rep := compress.New(compress.Options{}).Compress(compress.Input{Format: "openai", Body: body, Policy: p,
-			Engine: c.Run(context.Background(), nil, nil, p.Hash(), mode)})
+			Engine: c.Run(context.Background(), nil, nil, p.Hash(), mode, true)})
 		switch mode {
 		case config.FailOpen:
 			if rep.Outcome != compress.OutcomeCompressed || rep.EngineFailed < 1 || bytes.Equal(out, body) {
@@ -405,7 +456,7 @@ func TestSessionsCacheStableWithEngine(t *testing.T) {
 				f.set("500") // the outage
 			}
 			out, rep := cmp.Compress(compress.Input{Format: s.Format, Body: body, Policy: p,
-				Engine: c.Run(context.Background(), kv, nil, p.Hash(), config.FailOpen)})
+				Engine: c.Run(context.Background(), kv, nil, p.Hash(), config.FailOpen, true)})
 			if rep.Outcome == compress.OutcomeRejected || rep.Outcome == compress.OutcomeEngineFailed {
 				t.Fatalf("%s turn %d: %s", s.Name, k, rep.Outcome)
 			}

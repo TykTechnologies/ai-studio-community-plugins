@@ -138,11 +138,18 @@ hold the compression settings; bindings pick a policy per LLM or App.
   level 3 is capped. Protect-pattern matches go with each call (as
   LLMLingua-2 force tokens) and an answer that drops one, or is not
   shorter, is not used. Redirects are not followed. Every answer is
-  memoised by the text sent, the policy hash and the engine, in process and
-  then in the edge's KV (7 days), so a unit already sent compresses to the
-  same bytes on every later turn even when the engine is down or not
-  deterministic. KV is per edge: two edges may answer differently for the
-  same unit unless the engine is deterministic.
+  memoised by the text sent, the policy hash and the engine, in process, so
+  a unit already sent compresses to the same bytes on every later turn even
+  when the engine is down or not deterministic. The memo is also kept in
+  the edge's KV (7 days), so it survives a restart, but its compressed
+  text, which is mostly the client's tool output, only where the host keeps
+  the LLM's request bodies (`ANALYTICS_STORE_REQUESTS` on an edge, and the
+  LLM not set to `dont_log_bodies`; a host too old to say counts as not).
+  Elsewhere KV keeps only the passthrough decisions, which hold no text,
+  and after a restart a unit is sent to the engine again: with an engine
+  that is not deterministic its bytes may change once, a one-off
+  prompt-cache miss. KV is per edge: two edges may answer differently for
+  the same unit unless the engine is deterministic.
 - **failure_mode:** `open` (the default) forwards a unit the engine failed
   on at levels 1–3 and memoises that, so a later success cannot rewrite
   what the vendor has cached; `closed` refuses the request with a 502

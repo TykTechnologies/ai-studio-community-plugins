@@ -12,10 +12,15 @@ import (
 // llmInfo is what the post-auth hook needs to know about an LLM that its
 // context does not carry: the API endpoint, which decides an operation's
 // canonical path and so the request format (requestformat.For), and
-// whether request filters screen its bodies (lossy levels are capped then).
+// whether request filters screen its bodies (lossy levels are capped then),
+// and whether the host may keep its request bodies (an engine's compressed
+// text is kept in KV only then).
 type llmInfo struct {
 	Endpoint          string
 	HasRequestFilters bool
+	// StoresBodies is stores_request_bodies; a host too old to report it
+	// leaves it out, which reads as false, so request text is not kept.
+	StoresBodies bool
 }
 
 const (
@@ -68,7 +73,8 @@ func fetchLLMInfo(ctx plugin_sdk.Context, llmID uint32) (llmInfo, error) {
 		if !ok {
 			return llmInfo{}, errUnexpectedResponse
 		}
-		return llmInfo{Endpoint: r.GetLlm().GetApiEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters)}, nil
+		return llmInfo{Endpoint: r.GetLlm().GetApiEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters),
+			StoresBodies: r.GetLlm().GetStoresRequestBodies()}, nil
 	}
 	gw := ctx.Services.Gateway()
 	if gw == nil {
@@ -82,7 +88,8 @@ func fetchLLMInfo(ctx plugin_sdk.Context, llmID uint32) (llmInfo, error) {
 	if !ok {
 		return llmInfo{}, errUnexpectedResponse
 	}
-	return llmInfo{Endpoint: r.GetLlm().GetEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters)}, nil
+	return llmInfo{Endpoint: r.GetLlm().GetEndpoint(), HasRequestFilters: mayHaveFilters(r.GetLlm().HasRequestFilters),
+		StoresBodies: r.GetLlm().GetStoresRequestBodies()}, nil
 }
 
 // mayHaveFilters reads has_request_filters. Hosts that know it always set
