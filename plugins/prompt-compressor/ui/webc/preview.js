@@ -22,6 +22,13 @@ const SKIP_REASONS = {
   below_min_tokens: 'smaller than min_unit_tokens',
   cached: 'before the last cache breakpoint (cache_mode skip_cached)',
 };
+const TOOL_REASONS = {
+  dropped: 'On the drop list',
+  not_listed: 'Not on the drop list',
+  in_history: 'On the drop list, but kept: a tool call in the history names it',
+  tool_choice: 'On the drop list, but kept: tool_choice names it',
+  would_empty: 'On the drop list, but kept: dropping it would leave no tools while the history holds tool calls',
+};
 const CAP_REASONS = {
   native_context_management: 'the request asks the vendor to manage context (level 1 at most)',
   tool_override: 'a per-tool level override',
@@ -360,11 +367,28 @@ class PromptCompressorPreview extends HTMLElement {
           h('tbody', {}, Object.entries(rep.strategies).map(([name, s]) =>
             h('tr', {}, h('td', {}, h('code', {}, name)), h('td', { className: 'num' }, fmtInt(s.leaves)), h('td', { className: 'num' }, fmtInt(s.bytes_saved))))))));
     }
+    if ((rep.tool_decisions || []).length) box.appendChild(this._paintToolDecisions(rep.tool_decisions));
     box.appendChild(this._paintUnits(r.units || []));
     box.appendChild(h('section', {}, h('h2', {}, 'Output body'),
       h('p', { className: 'muted' }, r.changed ? 'What an edge in enforce mode would forward. Markers are highlighted.' : 'Unchanged: an edge would forward the body as it came.'),
       h('details', { open: false }, h('summary', {}, 'Show the output body'), h('pre', { className: 'body', 'data-testid': 'pc-preview-output' }, withMarkers(r.output || '')))));
     return box;
+  }
+
+  // _paintToolDecisions shows what the policy's drop_tools did with each
+  // tool definition in the body. Tool names come from the pasted body and
+  // are text nodes.
+  _paintToolDecisions(decisions) {
+    const dropped = decisions.filter((d) => d.dropped).length;
+    return h('section', { 'data-testid': 'pc-preview-tools' }, h('h2', {}, 'Tool definitions'),
+      h('p', { className: 'muted' }, `${fmtInt(dropped)} of ${fmtInt(decisions.length)} dropped by the policy's drop list.`),
+      h('table', {},
+        h('thead', {}, h('tr', {}, ['Tool', 'Decision', 'Why'].map((c) => h('th', {}, c)))),
+        h('tbody', {}, decisions.map((d) =>
+          h('tr', { className: d.dropped ? '' : 'skipped', 'data-testid': d.dropped ? 'pc-preview-tool-dropped' : 'pc-preview-tool-kept' },
+            h('td', {}, h('code', {}, d.name)),
+            h('td', {}, d.dropped ? 'Dropped' : 'Kept'),
+            h('td', {}, TOOL_REASONS[d.reason] || d.reason || ''))))));
   }
 
   _paintUnits(units) {

@@ -33,6 +33,11 @@ const POLICY_DEFAULTS = {
 };
 const RESERVED = ['off'];
 const NAME_PATTERN = /^[a-z0-9]+([-_][a-z0-9]+)*$/;
+// A drop_tools entry: a tool name, or a prefix ending in '*' (as the
+// plugin's config check reads it).
+const DROP_TOOL_PATTERN = /^[A-Za-z0-9_.:-]{1,64}\*?$|^[A-Za-z0-9_.:-]{0,63}\*$/;
+const MAX_DROP_TOOLS = 256;
+const SUGGEST_RANGE_HOURS = 168;
 const CACHE_WARNING =
   'Changing the mode, a policy or a binding changes the compressed prompt for every session it affects. ' +
   'Each of those sessions misses the provider\'s prompt cache once on its next request. Save now?';
@@ -201,9 +206,32 @@ class PromptCompressorPolicies extends HTMLElement {
       originalName: name || null,
       name: name || '',
       policy: Object.assign(clone(POLICY_DEFAULTS), clone(existing || {})),
+      originalDrop: JSON.stringify((existing && existing.drop_tools) || []),
     };
     this._messages = { errors: [], info: '' };
     this._paint();
+    this._loadDropSuggestions();
+  }
+
+  // _loadDropSuggestions reads the tools each App offered but never called
+  // in the last week (getSavings), once per page, for users who may see the
+  // savings. They are only suggestions: nothing is added unless picked.
+  async _loadDropSuggestions() {
+    if (this._dropSuggestions !== undefined) return;
+    if (!this.pluginAPI || (this.pluginAPI.can && !this.pluginAPI.can('savings:read'))) {
+      this._dropSuggestions = null;
+      return;
+    }
+    this._dropSuggestions = 'loading';
+    try {
+      const view = await this.pluginAPI.call('getSavings', { range_hours: SUGGEST_RANGE_HOURS });
+      this._dropSuggestions = (view.tools || [])
+        .filter((a) => (a.never_called || []).length)
+        .map((a) => ({ app: a.name || `App #${a.id}`, names: a.never_called }));
+    } catch (error) {
+      this._dropSuggestions = null;
+    }
+    if (this._editing) this._paint();
   }
 
   _applyEdit() {
@@ -216,6 +244,11 @@ class PromptCompressorPolicies extends HTMLElement {
     if (RESERVED.includes(name)) errors.push('"off" is reserved: bind "off" to turn compression off.');
     if (name !== ed.originalName && this._config.policies[name]) errors.push(`A policy named "${name}" already exists.`);
     if (!ed.policy.roles || ed.policy.roles.length === 0) errors.push('Select at least one role.');
+    const drop = ed.policy.drop_tools || [];
+    if (drop.length > MAX_DROP_TOOLS) errors.push(`The drop list has ${drop.length} entries; at most ${MAX_DROP_TOOLS} are allowed.`);
+    for (const entry of drop) {
+      if (!DROP_TOOL_PATTERN.test(entry)) errors.push(`"${entry}" is not a tool name: letters, digits, "_", ".", ":" or "-", at most 64, optionally ending in "*".`);
+    }
     if (errors.length) {
       this._setErrors(errors);
       return;
@@ -238,6 +271,7 @@ class PromptCompressorPolicies extends HTMLElement {
     for (const [key, value] of Object.entries(policy)) {
       if (key in POLICY_DEFAULTS && JSON.stringify(POLICY_DEFAULTS[key]) === JSON.stringify(value)) continue;
       if (key === 'protect_patterns' && (!value || value.length === 0)) continue;
+      if (key === 'drop_tools' && (!value || value.length === 0)) continue;
       if (key === 'tool_overrides' && (!value || Object.keys(value).length === 0)) continue;
       out[key] = value;
     }
@@ -538,7 +572,7 @@ class PromptCompressorPolicies extends HTMLElement {
         'Replace a repeated tool output with a reference to the earlier one'),
     );
     if (p.level >= 3) {
-      form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Level 3 (not available yet): longer tool outputs are cut to their head and tail, with a marker.'));
+      form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Level 3: longer tool outputs are cut to their head and tail, with a marker.'));
       form.appendChild(num('mask_after_turns', 'Mask after turns', 'Tool results older than this become a placeholder.'));
       form.appendChild(num('mask_step_tokens', 'Mask step (tokens)', 'Old turns are masked in steps of at least this many tokens.'));
       if (!this._config.lossy_with_request_filters) {
@@ -554,6 +588,7 @@ class PromptCompressorPolicies extends HTMLElement {
         h('span', { className: 'muted' }, 'Text matching these (ticket IDs, account numbers) is never removed by lossy levels. RE2 syntax.')),
     );
     form.appendChild(this._paintToolOverrides(p));
+    form.appendChild(this._paintDropTools(p, ed.originalDrop));
     if (p.engine) {
       form.appendChild(h('div', { className: 'note' }, `This policy sends selected units to external engine "${p.engine.name}" after levels 1–3. Its credentials are set in the plugin's configuration form; the engine setting is kept as it is here.`));
     }
@@ -604,6 +639,53 @@ class PromptCompressorPolicies extends HTMLElement {
         }, 'Add override')),
       h('div', { className: 'muted' }, 'Budget: at level 2, this tool\'s long JSON arrays are cut harder (down to one item at each end) until the output fits. Text outputs ignore it.'),
     );
+    return box;
+  }
+
+  // _paintDropTools edits the policy's drop_tools: tool definitions removed
+  // from requests. Suggestions are the tools an App's models never called;
+  // tool names come from clients and are text nodes.
+  _paintDropTools(p, originalDrop) {
+    const list = p.drop_tools || [];
+    const box = h('fieldset', { 'data-testid': 'pc-drop-tools-field' }, h('legend', {}, 'Drop tool definitions'),
+      h('textarea', {
+        rows: 3, value: list.join('\n'), spellcheck: false, 'data-testid': 'pc-drop-tools',
+        onChange: (e) => { p.drop_tools = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); this._paint(); },
+      }),
+      h('div', { className: 'muted' },
+        'One tool name per line, or a prefix ending in "*". Matching definitions are removed from every request on this policy, '
+        + 'except a tool that a tool call in the conversation or tool_choice names, and except when removing them would leave no tools while the conversation holds tool calls.'));
+    if (JSON.stringify(list) !== originalDrop) {
+      box.appendChild(h('div', { className: 'note', role: 'status', 'data-testid': 'pc-drop-tools-warning' },
+        'Changing the drop list changes the tools every App on this policy sends, so each of their sessions misses the prompt cache once. '
+        + 'Bind a separate policy to an App (app: binding or App metadata) to change only that App.'));
+    }
+
+    // undefined or 'loading': not read yet; null: not available to this
+    // user; an array: what the savings records hold.
+    const suggestions = this._dropSuggestions;
+    if (suggestions === undefined || suggestions === 'loading') {
+      box.appendChild(h('div', { className: 'muted' }, 'Loading suggestions…'));
+    } else if (Array.isArray(suggestions) && suggestions.length) {
+      const present = new Set(list);
+      const rows = [];
+      for (const s of suggestions) {
+        const names = s.names.filter((n) => !present.has(n));
+        if (!names.length) continue;
+        rows.push(h('div', { className: 'suggest-row' },
+          h('span', { className: 'suggest-app' }, s.app),
+          names.map((n) => h('button', {
+            className: 'chip', type: 'button', 'data-testid': 'pc-drop-suggestion',
+            onClick: () => { p.drop_tools = [...(p.drop_tools || []), n]; this._paint(); },
+          }, '+ ', n))));
+      }
+      if (rows.length) {
+        box.appendChild(h('div', { className: 'suggest', 'data-testid': 'pc-drop-suggestions' },
+          h('div', { className: 'muted' }, 'Offered but never called in the last 7 days (from the savings records). Click to add:'), rows));
+      }
+    } else if (Array.isArray(suggestions)) {
+      box.appendChild(h('div', { className: 'muted' }, 'No App offered a tool it never called in the last 7 days.'));
+    }
     return box;
   }
 
@@ -746,6 +828,10 @@ const STYLES = `
   .note { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; font-size: 13px; }
   .actions { margin-top: 8px; display: flex; align-items: center; gap: 4px; }
   code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+  .suggest { margin-top: 8px; }
+  .suggest-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+  .suggest-app { font-size: 12px; color: #374151; margin-right: 4px; }
+  button.chip { padding: 1px 8px; font-size: 12px; border-radius: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 `;
 
 if (!customElements.get('prompt-compressor-policies')) {
