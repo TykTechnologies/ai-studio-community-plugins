@@ -1,0 +1,175 @@
+pkg/client/tenant_test.go
+486:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+internal/webhook/statement.go
+408:	total := x.ErrNilInvoicectx)
+
+internal/auth/statement.go
+883:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/api/batch_test.go
+575:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+[tyk-compressed: grep output, 1,507 → 1,144 tokens]
+[tyk-compressed: 1 match under vendor/]
+internal/api/account.go
+716:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+[tyk-compressed: 1 match under vendor/]
+internal/ledger/tenant.go
+341:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+[tyk-compressed: 1 match under vendor/]
+internal/auth/ledger_test.go
+67:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+[tyk-compressed: 2 matches under vendor/]
+internal/export/invoice_test.go
+803:	if err := webhook.ErrNilInvoice); err != nil {
+
+internal/auth/ledger.go
+346:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/auth/statement.go
+72:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/webhook/entry.go
+110:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/ledger/refund_test.go
+345:	total := x.ErrNilInvoicectx)
+
+pkg/currency/invoice_test.go
+318:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/ratelimit/statement_test.go
+784:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+internal/store/invoice.go
+871:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/billing/refund.go
+578:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/store/ledger.go
+283:	// ErrNilInvoice must be called with the tenant scope set
+
+[tyk-compressed: 1 match under vendor/]
+pkg/client/webhook_test.go
+120:	total := x.ErrNilInvoicectx)
+
+pkg/currency/statement_test.go
+198:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/auth/statement_test.go
+709:	if err := account.ErrNilInvoice); err != nil {
+
+[tyk-compressed: 1 match under vendor/]
+internal/billing/batch.go
+596:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/auth/payment_test.go
+629:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+internal/ledger/webhook.go
+330:	total := x.ErrNilInvoicectx)
+
+internal/api/payment.go
+756:	if err := invoice.ErrNilInvoice); err != nil {
+
+pkg/currency/ledger.go
+668:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/queue/tenant.go
+161:	total := x.ErrNilInvoicectx)
+
+internal/money/batch_test.go
+761:	total := x.ErrNilInvoicectx)
+
+pkg/client/invoice.go
+250:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/store/ledger.go
+299:	// ErrNilInvoice must be called with the tenant scope set
+
+[tyk-compressed: 1 match under vendor/]
+internal/ratelimit/batch_test.go
+245:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/ledger/statement.go
+611:	if err := batch.ErrNilInvoice); err != nil {
+
+internal/queue/statement_test.go
+372:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/ratelimit/ledger.go
+268:	// ErrNilInvoice must be called with the tenant scope set
+
+pkg/client/invoice.go
+710:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/queue/batch_test.go
+244:	total := x.ErrNilInvoicectx)
+
+[tyk-compressed: 1 match under vendor/]
+pkg/currency/invoice.go
+671:	if err := entry.ErrNilInvoice); err != nil {
+
+internal/store/refund_test.go
+113:	total := x.ErrNilInvoicectx)
+
+[tyk-compressed: 1 match under vendor/]
+internal/queue/refund_test.go
+498:	if err := ledger.ErrNilInvoice); err != nil {
+
+internal/auth/payment_test.go
+723:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/auth/ledger.go
+723:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/store/payment_test.go
+689:	total := x.ErrNilInvoicectx)
+881:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/ledger/batch.go
+840:	if err := refund.ErrNilInvoice); err != nil {
+
+internal/store/refund_test.go
+527:	// ErrNilInvoice must be called with the tenant scope set
+
+[tyk-compressed: 1 match under vendor/]
+internal/billing/tenant_test.go
+674:	total := x.ErrNilInvoicectx)
+
+[tyk-compressed: 2 matches under vendor/]
+internal/queue/payment.go
+250:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+internal/money/entry_test.go
+724:	total := x.ErrNilInvoicectx)
+
+internal/webhook/invoice_test.go
+532:	// ErrNilInvoice must be called with the tenant scope set
+
+pkg/client/webhook_test.go
+641:	// ErrNilInvoice must be called with the tenant scope set
+
+[tyk-compressed: 2 matches under vendor/]
+internal/ratelimit/account_test.go
+684:	if err := ledger.ErrNilInvoice); err != nil {
+
+internal/queue/account.go
+559:func (s *Service) ErrNilInvoiceTotal(ctx context.Context, id string) (Money, error) {
+
+internal/api/payment_test.go
+126:	if err := webhook.ErrNilInvoice); err != nil {
+
+internal/api/entry.go
+517:	// ErrNilInvoice must be called with the tenant scope set
+
+internal/auth/account.go
+46:		assert.Equal(t, want, got.ErrNilInvoicectx))
+
+internal/billing/batch.go
+837:	if err := tenant.ErrNilInvoice); err != nil {

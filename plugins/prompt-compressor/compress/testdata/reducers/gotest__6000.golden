@@ -1,0 +1,25 @@
+[tyk-compressed: go test output, 1,826 → 178 tokens; 1 failure kept]
+    statement_test.go:184:
+        	Error Trace:	/home/dev/src/ledger/internal/ledger/statement_test.go:115
+        	Error:      	Not equal:
+        	            	expected: "1234.50"
+        	            	actual  : "1234.5"
+
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-1234.50
+        	            	+1234.5
+        	Test:       	TestStatement_PaginatesByCursor
+--- FAIL: TestStatement_PaginatesByCursor (0.42s)
+[tyk-compressed: 14 lines]
+FAIL
+FAIL	git.example.com/acme/ledger/internal/ledger	2.843s
+[tyk-compressed: 64 lines]
+PASS
+ok  	git.example.com/acme/ledger/internal/ratelimit	2.642s
+[tyk-compressed: 46 lines]
+PASS
+ok  	git.example.com/acme/ledger/internal/auth	1.226s
+FAIL

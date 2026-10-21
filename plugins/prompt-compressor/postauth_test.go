@@ -1,0 +1,349 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
+	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
+	pb "github.com/TykTechnologies/midsommar/v2/proto"
+	studiopb "github.com/TykTechnologies/midsommar/v2/proto/ai_studio_management"
+	mgmtpb "github.com/TykTechnologies/midsommar/v2/proto/microgateway_management"
+	"google.golang.org/protobuf/proto"
+)
+
+// llmGateway answers GetLLM with an endpoint, on top of fakeGateway.
+type llmGateway struct {
+	*fakeGateway
+	endpoint string
+	filtered bool // the LLM has request filters
+	oldHost  bool // the host predates has_request_filters and leaves it out
+	stores   *bool
+}
+
+func (g *llmGateway) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
+	info := &mgmtpb.LLMInfo{Id: llmID, Endpoint: g.endpoint, HasRequestFilters: proto.Bool(g.filtered), StoresRequestBodies: g.stores}
+	if g.oldHost {
+		info.HasRequestFilters = nil
+	}
+	return &mgmtpb.GetLLMResponse{Llm: info}, nil
+}
+
+type llmBroker struct {
+	plugin_sdk.ServiceBroker
+	gw *llmGateway
+}
+
+func (b *llmBroker) Gateway() plugin_sdk.GatewayServices { return b.gw }
+func (b *llmBroker) Logger() plugin_sdk.LogService       { return nil }
+func (b *llmBroker) KV() plugin_sdk.KVService            { return nil }
+
+// hookPlugin is a gateway plugin with configJSON and a request context for
+// an OpenAI LLM.
+func hookPlugin(t *testing.T, configJSON string) (*PromptCompressorPlugin, plugin_sdk.Context) {
+	t.Helper()
+	gw := &llmGateway{fakeGateway: &fakeGateway{metadata: map[uint32]string{}}, endpoint: "https://api.openai.com/v1"}
+	ctx := plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}, Context: context.Background()}
+	p := NewPromptCompressorPlugin()
+	if err := p.Initialize(ctx, hostConfig(t, configJSON)); err != nil {
+		t.Fatal(err)
+	}
+	ctx.RequestID, ctx.LLMID, ctx.LLMSlug, ctx.Vendor = "req-1", 4, "gpt", "openai"
+	return p, ctx
+}
+
+// noisyBody is a chat request whose tool output level 1 compresses.
+func noisyBody(t *testing.T) []byte {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"model": "gpt-4o", "messages": []any{
+		map[string]any{"role": "user", "content": "run it"},
+		map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "c1", "type": "function", "function": map[string]any{"name": "shell", "arguments": "{}"}}}},
+		map[string]any{"role": "tool", "tool_call_id": "c1", "content": strings.Repeat("\u001b[32mok\u001b[0m line   \n\n\n", 200)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func request(body []byte, headers map[string]string) *pb.EnrichedRequest {
+	if headers == nil {
+		headers = map[string]string{"Authorization": "Bearer secret", "Content-Type": "application/json"}
+	}
+	return &pb.EnrichedRequest{Request: &pb.PluginRequest{Method: "POST", Path: "/llm/rest/gpt/v1/chat/completions", Headers: headers, Body: body}, AppId: "1", Authenticated: true}
+}
+
+func TestPostAuthModes(t *testing.T) {
+	body := noisyBody(t)
+	for _, tc := range []struct {
+		mode      string
+		modified  bool
+		outcome   string
+		forwarded bool
+	}{
+		{"off", false, "", false},
+		{"audit", false, "compressed", false},
+		{"enforce", true, "compressed", true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			p, ctx := hookPlugin(t, `{"mode":"`+tc.mode+`"}`)
+			resp, err := p.HandlePostAuth(ctx, request(body, nil))
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
+			if resp.Modified != tc.modified || resp.Headers != nil || resp.Block {
+				t.Fatalf("response %+v", resp)
+			}
+			if tc.modified {
+				res, _ := p.resolvePolicy(ctx)
+				want, _ := compress.New(compress.Options{}).Compress(compress.Input{Format: "openai", Body: body, Policy: res.Policy})
+				if !bytes.Equal(resp.Body, want) || len(resp.Body) >= len(body) {
+					t.Fatal("enforce did not forward the compress output")
+				}
+			} else if len(resp.Body) != 0 {
+				t.Fatal("an unmodified response carries a body")
+			}
+			rec, ok := p.pending.take("req-1")
+			if tc.outcome == "" {
+				if ok {
+					t.Fatalf("off mode recorded %+v", rec)
+				}
+				return
+			}
+			if !ok || rec.Outcome != tc.outcome || rec.Forwarded != tc.forwarded || rec.PolicyHash == "" || rec.LLMID != 4 || rec.Report.TokensSaved() <= 0 {
+				t.Fatalf("pending record %+v", rec)
+			}
+		})
+	}
+}
+
+func TestPostAuthBypass(t *testing.T) {
+	body := noisyBody(t)
+	hdr := map[string]string{"x-tyk-compression": " OFF ", "Authorization": "Bearer secret"}
+
+	p, ctx := hookPlugin(t, `{"mode":"enforce","allow_client_bypass":true}`)
+	resp, _ := p.HandlePostAuth(ctx, request(body, hdr))
+	rec, _ := p.pending.take("req-1")
+	if resp.Modified || rec.Outcome != OutcomeBypassed || rec.Report.Reason != ReasonClientBypass {
+		t.Fatalf("bypass allowed: %+v, %+v", resp, rec)
+	}
+
+	p, ctx = hookPlugin(t, `{"mode":"enforce","allow_client_bypass":false}`)
+	resp, _ = p.HandlePostAuth(ctx, request(body, hdr))
+	if !resp.Modified {
+		t.Fatal("the bypass header was honoured while allow_client_bypass is false")
+	}
+	// Bypass is off by default (eac.82).
+	p, ctx = hookPlugin(t, `{"mode":"enforce"}`)
+	resp, _ = p.HandlePostAuth(ctx, request(body, hdr))
+	if !resp.Modified {
+		t.Fatal("the bypass header was honoured with allow_client_bypass unset")
+	}
+	// No other value of the header does anything.
+	p, ctx = hookPlugin(t, `{"mode":"enforce","allow_client_bypass":true}`)
+	resp, _ = p.HandlePostAuth(ctx, request(body, map[string]string{"X-Tyk-Compression": "max"}))
+	if !resp.Modified {
+		t.Fatal("an unknown header value changed the outcome")
+	}
+}
+
+// A panic inside the compressor fails open: the request continues
+// unchanged, with no error, and the outcome is recorded.
+func TestPostAuthPanicFailsOpen(t *testing.T) {
+	p, ctx := hookPlugin(t, `{"mode":"enforce"}`)
+	p.compressFn = func(compress.Input) ([]byte, compress.Report) { panic("boom with request text") }
+	resp, err := p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+	if err != nil || resp == nil || resp.Modified || resp.Headers != nil {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	rec, ok := p.pending.take("req-1")
+	if !ok || rec.Outcome != OutcomeFailedOpen {
+		t.Fatalf("record %+v", rec)
+	}
+	if p.counters.failedOpen.Load() != 1 {
+		t.Error("failed_open not counted")
+	}
+}
+
+func TestPostAuthSkips(t *testing.T) {
+	p, ctx := hookPlugin(t, `{"mode":"enforce","max_body_bytes":100}`)
+	resp, _ := p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+	rec, _ := p.pending.take("req-1")
+	if resp.Modified || rec.Outcome != "skipped" || rec.Report.Reason != compress.ReasonTooLarge {
+		t.Fatalf("oversized: %+v %+v", resp, rec)
+	}
+
+	p, ctx = hookPlugin(t, `{"mode":"enforce"}`)
+	ctx.Vendor = "huggingface"
+	resp, _ = p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+	rec, _ = p.pending.take("req-1")
+	if resp.Modified || rec.Report.Reason != compress.ReasonUnsupportedFormat {
+		t.Fatalf("unknown format: %+v %+v", resp, rec)
+	}
+
+	// A policy bound to "off" compresses nothing.
+	p, ctx = hookPlugin(t, `{"mode":"enforce","bindings":{"llm:gpt":"off"}}`)
+	resp, _ = p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+	rec, _ = p.pending.take("req-1")
+	if resp.Modified || rec.Report.Reason != compress.ReasonOff {
+		t.Fatalf("off policy: %+v %+v", resp, rec)
+	}
+}
+
+// The LLM's endpoint decides the format: a Responses call through an LLM
+// whose endpoint carries /v1 is read as Responses.
+func TestPostAuthFormatFromEndpoint(t *testing.T) {
+	p, ctx := hookPlugin(t, `{"mode":"enforce"}`)
+	body, _ := json.Marshal(map[string]any{"model": "gpt-5", "input": []any{
+		map[string]any{"type": "function_call", "name": "shell", "call_id": "c1", "arguments": "{}"},
+		map[string]any{"type": "function_call_output", "call_id": "c1", "output": strings.Repeat("log line   \n\n\n", 200)},
+	}})
+	req := request(body, nil)
+	req.Request.Path = "/llm/rest/gpt/responses"
+	p.llms.get(ctx.LLMID) // the endpoint is known before the request
+	p.llms.inflight.Wait()
+	resp, _ := p.HandlePostAuth(ctx, req)
+	rec, _ := p.pending.take("req-1")
+	if !resp.Modified || rec.Report.Format != "openai_responses" {
+		t.Fatalf("resp modified %v, record %+v", resp.Modified, rec)
+	}
+}
+
+// The pending map stays bounded under a soak with no response hook taking
+// records, and old records expire.
+// Level 3 is capped at 2 on an LLM with request filters, and on one the
+// plugin knows nothing about yet, unless lossy_with_request_filters is set.
+func TestRequestFilterGuard(t *testing.T) {
+	const level3 = `{"mode":"enforce","default_policy":"p","policies":{"p":{"level":3,"min_unit_tokens":0,"protect_recent_turns":0}}`
+	for _, tc := range []struct {
+		name     string
+		cfg      string
+		filtered bool
+		oldHost  bool
+		prime    bool
+		capped   bool
+	}{
+		{"filtered", level3 + `}`, true, false, true, true},
+		{"unfiltered", level3 + `}`, false, false, true, false},
+		{"unknown LLM", level3 + `}`, false, false, false, true},
+		{"old host", level3 + `}`, false, true, true, true},
+		{"filtered, allowed", level3 + `,"lossy_with_request_filters":true}`, true, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, ctx := hookPlugin(t, tc.cfg)
+			ctx.Services.(*llmBroker).gw.filtered = tc.filtered
+			ctx.Services.(*llmBroker).gw.oldHost = tc.oldHost
+			if tc.prime {
+				p.llms.get(ctx.LLMID)
+				p.llms.inflight.Wait()
+			} else {
+				ctx.LLMID = 99 // never fetched: the request does not wait for it
+				p.llms = newAsyncLookup(llmInfoTTL, llmInfoErrorTTL, llmInfoMaxSize, func(uint32) (llmInfo, error) { return llmInfo{}, errNoBroker })
+			}
+			p.HandlePostAuth(ctx, request(noisyBody(t), nil))
+			rec, _ := p.pending.take("req-1")
+			if rec.Report.RequestFiltersCapped != tc.capped {
+				t.Errorf("capped %v, want %v (record %+v)", rec.Report.RequestFiltersCapped, tc.capped, rec.Report)
+			}
+		})
+	}
+}
+
+// studioLLMs answers Studio's GetLLM, with or without has_request_filters.
+type studioLLMs struct {
+	plugin_sdk.StudioServices
+	filters *bool
+	stores  *bool
+}
+
+func (s studioLLMs) GetLLM(ctx context.Context, llmID uint32) (interface{}, error) {
+	return &studiopb.GetLLMResponse{Llm: &studiopb.LLMInfo{Id: llmID, ApiEndpoint: "https://api.openai.com/v1", HasRequestFilters: s.filters, StoresRequestBodies: s.stores}}, nil
+}
+
+type studioBroker struct {
+	plugin_sdk.ServiceBroker
+	studio studioLLMs
+}
+
+func (b studioBroker) Studio() plugin_sdk.StudioServices { return b.studio }
+
+// On both runtimes an LLMInfo without has_request_filters (an older host)
+// reads as filtered, so lossy levels stay capped.
+func TestLLMInfoFromOlderHosts(t *testing.T) {
+	for _, tc := range []struct {
+		filters *bool
+		want    bool
+	}{{nil, true}, {proto.Bool(true), true}, {proto.Bool(false), false}} {
+		studio, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeStudio, Services: studioBroker{studio: studioLLMs{filters: tc.filters}}}, 4)
+		if err != nil || studio.HasRequestFilters != tc.want || studio.Endpoint == "" {
+			t.Errorf("Studio %v: %+v, %v", tc.filters, studio, err)
+		}
+		gw := &llmGateway{fakeGateway: &fakeGateway{}, endpoint: "e", oldHost: tc.filters == nil}
+		if tc.filters != nil {
+			gw.filtered = *tc.filters
+		}
+		edge, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}}, 4)
+		if err != nil || edge.HasRequestFilters != tc.want {
+			t.Errorf("edge %v: %+v, %v", tc.filters, edge, err)
+		}
+	}
+}
+
+// stores_request_bodies is read as sent on both runtimes, and an LLMInfo
+// without it (an older host) reads as not stored (eac.66).
+func TestLLMInfoStoresBodies(t *testing.T) {
+	for _, tc := range []struct {
+		stores *bool
+		want   bool
+	}{{nil, false}, {proto.Bool(true), true}, {proto.Bool(false), false}} {
+		studio, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeStudio, Services: studioBroker{studio: studioLLMs{stores: tc.stores}}}, 4)
+		if err != nil || studio.StoresBodies != tc.want {
+			t.Errorf("Studio %v: %+v, %v", tc.stores, studio, err)
+		}
+		gw := &llmGateway{fakeGateway: &fakeGateway{}, endpoint: "e", stores: tc.stores}
+		edge, err := fetchLLMInfo(plugin_sdk.Context{Runtime: plugin_sdk.RuntimeGateway, Services: &llmBroker{gw: gw}}, 4)
+		if err != nil || edge.StoresBodies != tc.want {
+			t.Errorf("edge %v: %+v, %v", tc.stores, edge, err)
+		}
+	}
+}
+
+func TestPendingBounded(t *testing.T) {
+	p, ctx := hookPlugin(t, `{"mode":"audit"}`)
+	p.compressFn = func(in compress.Input) ([]byte, compress.Report) {
+		return in.Body, compress.Report{Outcome: compress.OutcomeUnchanged}
+	}
+	body := noisyBody(t)
+	for i := 0; i < 10000; i++ {
+		ctx.RequestID = fmt.Sprintf("req-%d", i)
+		if _, err := p.HandlePostAuth(ctx, request(body, nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := p.pending.len(); n > pendingMaxSize {
+		t.Fatalf("pending holds %d records", n)
+	}
+	if _, ok := p.pending.take("req-9999"); !ok {
+		t.Error("the newest record was dropped")
+	}
+
+	c := newPendingCache(time.Minute, 100)
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	c.put(pendingRecord{RequestID: "old"})
+	now = now.Add(2 * time.Minute)
+	if _, ok := c.take("old"); ok {
+		t.Error("an expired record was returned")
+	}
+	c.put(pendingRecord{RequestID: "a"})
+	now = now.Add(2 * time.Minute)
+	c.put(pendingRecord{RequestID: "b"})
+	if c.len() != 1 {
+		t.Errorf("expired records kept: %d", c.len())
+	}
+}

@@ -1,0 +1,215 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Prompt Compressor Configuration",
+  "description": "One config for every LLM the plugin is attached to. Named policies hold the compression settings; bindings pick a policy per LLM or App. An App can override its policy with the metadata key prompt_compressor.policy.",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "off does nothing. audit compresses and records the savings but forwards the original body. enforce forwards the compressed body.",
+      "enum": ["off", "audit", "enforce"],
+      "default": "audit"
+    },
+    "default_policy": {
+      "type": "string",
+      "title": "Default policy",
+      "description": "The policy for requests no binding matches. \"default\" is level 1 on tool outputs when no policy of that name is defined; \"off\" turns compression off.",
+      "default": "default",
+      "maxLength": 64
+    },
+    "policies": {
+      "type": "object",
+      "title": "Policies",
+      "description": "Named policies. Each one starts from the defaults and lists only what it changes. The name \"off\" is reserved.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9]+([-_][a-z0-9]+)*$",
+        "maxLength": 64
+      },
+      "maxProperties": 64,
+      "additionalProperties": { "$ref": "#/definitions/policy" },
+      "default": {}
+    },
+    "bindings": {
+      "type": "object",
+      "title": "Bindings",
+      "description": "Policy by LLM or App: keys llm:<slug>, llm_id:<id> or app:<id>, values a policy name or \"off\". Precedence: App metadata, app:, llm_id:, llm:, then the default policy.",
+      "propertyNames": {
+        "pattern": "^(llm:.+|llm_id:[1-9][0-9]*|app:[1-9][0-9]*)$"
+      },
+      "maxProperties": 10000,
+      "additionalProperties": { "type": "string", "maxLength": 64 },
+      "default": {}
+    },
+    "allow_client_bypass": {
+      "type": "boolean",
+      "title": "Allow client bypass",
+      "description": "Honour the request header X-Tyk-Compression: off, which lets a client skip compression (and drop_tools) for its own requests. Off by default: turn it on for clients that must sometimes send a body exactly as written.",
+      "default": false
+    },
+    "failure_mode": {
+      "type": "string",
+      "title": "Engine failure mode",
+      "description": "What happens when an external engine call fails: open forwards the request, closed answers 502. Every other failure always passes the request through unchanged.",
+      "enum": ["open", "closed"],
+      "default": "open"
+    },
+    "lossy_with_request_filters": {
+      "type": "boolean",
+      "title": "Lossy levels with request filters",
+      "description": "Run level 3 and engines on LLMs that have request filters. Off by default, because the filters would screen the compressed body rather than the original.",
+      "default": false
+    },
+    "max_body_bytes": {
+      "type": "integer",
+      "title": "Maximum body size (bytes)",
+      "description": "Bodies larger than this pass through uncompressed. Limits are by size, never by time, so load never changes the output. Compressing a body allocates about 10-20 times its size, so it is capped at 16 MiB.",
+      "minimum": 1,
+      "maximum": 16777216,
+      "default": 4194304
+    },
+    "max_in_flight_bytes": {
+      "type": "integer",
+      "title": "In-flight budget (bytes)",
+      "description": "The body bytes compressed at once, all requests together. A request that would go over it passes through uncompressed (reason over_budget), so memory stays bounded under concurrency; such a request may cost a prompt-cache rewrite. At least max_body_bytes, at most 256 MiB.",
+      "minimum": 1,
+      "maximum": 268435456,
+      "default": 16777216
+    },
+    "cache_drop_alert": {
+      "type": "number",
+      "title": "Cache-drop warning",
+      "description": "The dashboard warns when the cache-read share falls by more than this fraction (0.25 is a quarter of its value before) within an hour of a policy change. 0 turns the warning off.",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.25
+    }
+  },
+  "patternProperties": {
+    "^engine_[a-z0-9]+(_[a-z0-9]+)*_(url|token)$": {
+      "type": "string",
+      "description": "Engine credentials, engine_<name>_url and engine_<name>_token, for a policy's external engine. Use a $SECRET/ reference."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "policy": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "title": "Level",
+          "description": "0 off, 1 lossless, 2 noise reduction, 3 aggressive. Cumulative.",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 1
+        },
+        "roles": {
+          "type": "array",
+          "title": "Roles",
+          "description": "Which messages are compressed. Tool outputs by default.",
+          "items": { "type": "string", "enum": ["tool", "user", "assistant", "system"] },
+          "uniqueItems": true,
+          "minItems": 1,
+          "default": ["tool"]
+        },
+        "min_unit_tokens": {
+          "type": "integer",
+          "title": "Minimum unit size (tokens)",
+          "description": "Smaller units are left alone.",
+          "minimum": 0,
+          "default": 300
+        },
+        "protect_recent_turns": {
+          "type": "integer",
+          "title": "Protected recent turns",
+          "description": "The newest turns stay at level 1 at most, so the model reads its latest tool output in full.",
+          "minimum": 0,
+          "default": 1
+        },
+        "cache_mode": {
+          "type": "string",
+          "title": "Cache mode",
+          "description": "deterministic compresses everything selected, the same way every turn. skip_cached leaves everything up to the last cache breakpoint alone.",
+          "enum": ["deterministic", "skip_cached"],
+          "default": "deterministic"
+        },
+        "dedupe_references": {
+          "type": "boolean",
+          "title": "Replace repeated tool outputs with a reference",
+          "description": "A tool output identical to an earlier one in the same request becomes a reference to it.",
+          "default": false
+        },
+        "tool_overrides": {
+          "type": "object",
+          "title": "Per-tool overrides",
+          "description": "By tool name: exclude the tool, or set its level or size budget.",
+          "maxProperties": 256,
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "exclude": { "type": "boolean", "title": "Exclude" },
+              "level": { "type": "integer", "title": "Level", "minimum": 0, "maximum": 3 },
+              "max_unit_tokens": { "type": "integer", "title": "Size budget (tokens)", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "protect_patterns": {
+          "type": "array",
+          "title": "Protect patterns",
+          "description": "Regular expressions (RE2) whose matches lossy levels keep verbatim, such as ticket IDs.",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "maxItems": 64
+        },
+        "compress_server_tool_results": {
+          "type": "boolean",
+          "title": "Compress vendor tool results",
+          "description": "Also compress results of the vendor's own tools replayed in history: Anthropic web search, web fetch and code execution, OpenAI Responses file search and code interpreter. Both vendors accept these edited and the model reads the edited text (checked live). MCP connector results and Google code execution results are always left as sent.",
+          "default": false
+        },
+        "drop_tools": {
+          "type": "array",
+          "title": "Drop tools",
+          "description": "Tool definitions to remove from requests: a name, or a prefix ending in '*'. Tools the conversation already called, or that tool_choice names, are always kept. Changing the list is a one-off prompt-cache miss for the Apps it applies to. Saves tokens; not an access control: clients can keep tools via history, tool_choice or the bypass header. Use App tool access or filters to restrict tools.",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{0,64}\\*?$", "minLength": 1, "maxLength": 65 },
+          "maxItems": 256
+        },
+        "max_unit_tokens": {
+          "type": "integer",
+          "title": "Maximum unit size (tokens, level 3)",
+          "description": "Level 3 cuts longer tool outputs to their head and tail, with a marker.",
+          "minimum": 0,
+          "default": 6000
+        },
+        "mask_after_turns": {
+          "type": "integer",
+          "title": "Mask after turns (level 3)",
+          "description": "Level 3 replaces tool results older than this many turns with a placeholder; 0 turns masking off. Each masking step rewrites the vendor's prompt cache, so it pays where cached input is not much cheaper than input (OpenAI chat models with a 50% cache discount) and costs more than it saves where cache reads are very cheap (Anthropic, GPT-5). Off by default.",
+          "minimum": 0,
+          "default": 0
+        },
+        "mask_step_tokens": {
+          "type": "integer",
+          "title": "Mask step (tokens, level 3)",
+          "description": "Level 3 masks old turns in steps of at least this many tokens, so each one-off cache rewrite buys a large saving.",
+          "minimum": 0,
+          "default": 20000
+        },
+        "engine": {
+          "type": "object",
+          "title": "External engine",
+          "description": "Sends selected units to an external engine (Headroom /v1/compress or LLMLingua-2) after levels 1–3; failure_mode decides what an engine failure does. Credentials come from engine_<name>_url and engine_<name>_token.",
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$", "maxLength": 64 },
+            "kind": { "type": "string", "enum": ["headroom", "llmlingua2"] },
+            "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 60000, "default": 2000 }
+          },
+          "required": ["name", "kind"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

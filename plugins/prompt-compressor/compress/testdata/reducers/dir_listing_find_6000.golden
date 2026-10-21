@@ -1,0 +1,119 @@
+[tyk-compressed: listing output, 1,504 → 492 tokens]
+./internal/testdata/docs/refund.go
+./scripts/scripts/invoice.sql
+./testdata/invoice.rs
+./testdata/tenant.go
+[tyk-compressed: 1 line]
+./migrations/migrations/payment.tsx
+[tyk-compressed: 1 line]
+./web/batch.json
+[tyk-compressed: 2 lines]
+./web/worker/batch.yaml
+./internal/pkg/cmd/webhook.yaml
+[tyk-compressed: 1 line]
+./cmd/testdata/worker/tenant.sql
+[tyk-compressed: 3 lines]
+./pkg/internal/migrations/refund.py
+./internal/payment.py
+[tyk-compressed: 1 line]
+./web/testdata/tenant.go
+[tyk-compressed: 1 line]
+./pkg/web/batch.md
+./migrations/migrations/statement.json
+./scripts/batch.sql
+./internal/entry_test.go
+[tyk-compressed: 1 line]
+./testdata/reports/docs/tenant.go
+[tyk-compressed: 1 line]
+./deploy/docs/docs/statement.py
+[tyk-compressed: 2 lines]
+./parser/batch_test.go
+./docs/internal/entry.java
+./docs/cmd/statement.py
+[tyk-compressed: 6 lines]
+./reports/scripts/migrations/refund_test.go
+[tyk-compressed: 1 line]
+./migrations/scripts/ledger.json
+[tyk-compressed: 1 line]
+./testdata/tenant_test.go
+./testdata/refund.go
+[tyk-compressed: 4 lines]
+./parser/cmd/refund.go
+./cmd/invoice.tsx
+./web/pkg/scripts/invoice.json
+[tyk-compressed: 1 line]
+./scripts/scripts/scripts/refund.yaml
+[tyk-compressed: 1 line]
+./cmd/cmd/internal/batch.py
+[tyk-compressed: 1 line]
+./reports/account.go
+./pkg/migrations/parser/refund.ts
+[tyk-compressed: 1 line]
+./testdata/account.java
+./parser/docs/pkg/invoice.py
+[tyk-compressed: 1 line]
+./testdata/batch.yaml
+[tyk-compressed: 2 lines]
+./scripts/entry_test.go
+[tyk-compressed: 1 line]
+./internal/worker/scripts/statement.tsx
+[tyk-compressed: 1 line]
+./scripts/invoice.java
+[tyk-compressed: 2 lines]
+./pkg/pkg/batch.yaml
+./cmd/deploy/invoice.json
+[tyk-compressed: 1 line]
+./pkg/docs/batch.py
+[tyk-compressed: 1 line]
+./pkg/web/deploy/entry.tsx
+./parser/docs/web/refund.go
+./reports/entry.rs
+./internal/account.ts
+[tyk-compressed: 1 line]
+./internal/account.rs
+[tyk-compressed: 2 lines]
+./pkg/statement.md
+[tyk-compressed: 6 lines]
+./reports/worker/parser/payment.go
+[tyk-compressed: 2 lines]
+./parser/invoice.json
+[tyk-compressed: 2 lines]
+./deploy/testdata/webhook_test.go
+./web/cmd/batch.go
+./worker/scripts/account.md
+./parser/account.ts
+[tyk-compressed: 1 line]
+./web/pkg/webhook.md
+[tyk-compressed: 2 lines]
+./deploy/migrations/web/ledger.yaml
+./scripts/webhook.py
+[tyk-compressed: 1 line]
+./cmd/testdata/tenant.ts
+./migrations/scripts/webhook.tsx
+./cmd/statement_test.go
+[tyk-compressed: 1 line]
+./cmd/docs/statement.sql
+./testdata/reports/ledger.json
+[tyk-compressed: 2 lines]
+./internal/reports/internal/account.sql
+[tyk-compressed: 2 lines]
+./worker/cmd/web/tenant.rs
+./web/webhook.md
+[tyk-compressed: 2 lines]
+./reports/migrations/ledger.go
+[tyk-compressed: 2 lines]
+./pkg/testdata/payment.ts
+[tyk-compressed: 1 line]
+./deploy/deploy/refund.go
+[tyk-compressed: 5 lines]
+./cmd/web/refund.tsx
+[tyk-compressed: 1 line]
+./pkg/invoice.go
+[tyk-compressed: 2 lines]
+./pkg/parser/batch.ts
+./parser/entry.java
+[tyk-compressed: 2 lines]
+./migrations/internal/deploy/webhook.rs
+[tyk-compressed: 3 lines]
+./parser/webhook.go
+./pkg/web/statement.json

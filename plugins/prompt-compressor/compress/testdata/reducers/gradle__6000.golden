@@ -1,0 +1,62 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+[tyk-compressed: gradle output, 1,704 → 405 tokens; 3 failures kept]
+> Task :core:processResources
+[tyk-compressed: 13 lines]
+> Task :export:processResources
+[tyk-compressed: 4 lines]
+> Task :export:testClasses
+[tyk-compressed: 4 lines]
+> Task :api:compileTestJava
+[tyk-compressed: 3 lines]
+> Task :app:processResources
+[tyk-compressed: 3 lines]
+> Task :app:processTestResources
+[tyk-compressed: 8 lines]
+> Task :integrations-reports1:compileJava
+[tyk-compressed: 9 lines]
+> Task :libs-export1:jar
+> Task :libs-export1:compileTestJava
+[tyk-compressed: 1 line]
+> Task :libs-export1:testClasses
+[tyk-compressed: 3 lines]
+> Task :libs-api1:jar
+[tyk-compressed: 7 lines]
+> Task :libs-app1:compileTestJava
+[tyk-compressed: 6 lines]
+> Task :integrations-core2:compileTestJava
+[tyk-compressed: 2 lines]
+
+> Task :app:test
+
+AuditTrailTest > convertsAtSpotRate() FAILED
+    org.opentest4j.AssertionFailedError at AuditTrailTest.java:86
+
+AuditTrailTest > exportsUtf8Bom() FAILED
+    org.opentest4j.AssertionFailedError at AuditTrailTest.java:85
+
+AuditTrailTest > rejectsNegativeAmount() FAILED
+    org.opentest4j.AssertionFailedError at AuditTrailTest.java:39
+
+[tyk-compressed: 57 lines]
+
+800 tests completed, 3 failed, 3 skipped
+
+> Task :app:test FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:test'.
+> There were failing tests. See the report at: file:///home/dev/src/ledger/app/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.10.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 57s
+47 actionable tasks: 5 executed, 26 up-to-date
