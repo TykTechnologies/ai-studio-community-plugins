@@ -88,6 +88,32 @@ type Request struct {
 	CacheWriteTokens int64
 	UsageMissing     bool
 	Streaming        bool
+
+	// Tool definitions the request offered (eac.39): names and sizes only,
+	// never schemas or descriptions. ToolDefTokens is their size in tokens
+	// (UTF-8 bytes / 4); ToolListHash identifies the list version.
+	ToolDefs      int
+	ToolDefTokens int64
+	ToolListHash  string
+	OfferedTools  []OfferedTool
+	// CalledTools are the distinct tool names the model called (never
+	// arguments).
+	CalledTools []string
+}
+
+// OfferedTool is one tool definition a request offered.
+type OfferedTool struct {
+	Name   string
+	Tokens int64
+}
+
+// ToolStats counts one tool in a row: requests that offered it, requests
+// whose response called it, and its definition's tokens summed over the
+// requests that offered it.
+type ToolStats struct {
+	Offered   int64 `json:"offered"`
+	Called    int64 `json:"called"`
+	DefTokens int64 `json:"def_tokens"`
 }
 
 // TokensSaved is the estimated saving (zero when nothing was saved).
@@ -223,6 +249,22 @@ type Delta struct {
 	// (len(LatencyBoundsMicros)+1 entries).
 	LatencyBuckets []int64 `json:"latency_buckets"`
 	LatencyMicros  int64   `json:"latency_micros"`
+
+	// Tool definitions (eac.39). ToolRequests counts requests that offered
+	// at least one tool; ToolDefTokens their definitions' tokens, priced in
+	// ToolDefCost at the model's input price and in ToolDefCostAtCacheRead
+	// at its cache-read price (unpriced requests add to neither).
+	ToolRequests           int64              `json:"tool_requests,omitempty"`
+	ToolDefs               int64              `json:"tool_defs,omitempty"`
+	ToolDefTokens          int64              `json:"tool_def_tokens,omitempty"`
+	ToolDefCost            map[string]float64 `json:"tool_def_cost,omitempty"`
+	ToolDefCostAtCacheRead map[string]float64 `json:"tool_def_cost_at_cache_read,omitempty"`
+	// Tools counts each tool by name, at most MaxToolsPerRow names; a name
+	// past the bound, or not shaped like a tool name, adds to OtherTool.
+	Tools map[string]ToolStats `json:"tools,omitempty"`
+	// ToolLists counts requests per tool list version (hash), at most
+	// MaxToolListsPerRow; others add to OtherTool.
+	ToolLists map[string]int64 `json:"tool_lists,omitempty"`
 }
 
 // NewDelta returns an empty delta for k.
@@ -285,6 +327,95 @@ func (d *Delta) AddRequest(r Request, p Price, priced bool) {
 		d.Reasons = addReason(d.Reasons, r.Reason, 1, true)
 	}
 	d.observeLatency(r.CompressMicros)
+	d.addTools(r, p, priced)
+}
+
+// addTools adds a request's tool definitions and calls.
+func (d *Delta) addTools(r Request, p Price, priced bool) {
+	if r.ToolDefs > 0 {
+		d.ToolRequests++
+		d.ToolDefs += int64(r.ToolDefs)
+		d.ToolDefTokens += r.ToolDefTokens
+		if priced && r.ToolDefTokens > 0 {
+			d.ToolDefCost = addCost(d.ToolDefCost, p.Currency, float64(r.ToolDefTokens)*p.Input, true)
+			if p.CacheRead > 0 {
+				d.ToolDefCostAtCacheRead = addCost(d.ToolDefCostAtCacheRead, p.Currency, float64(r.ToolDefTokens)*p.CacheRead, true)
+			}
+		}
+		if r.ToolListHash != "" {
+			d.ToolLists = addToolList(d.ToolLists, r.ToolListHash, 1, true)
+		}
+	}
+	offered := map[string]bool{}
+	for _, t := range r.OfferedTools {
+		name := toolName(t.Name)
+		s := ToolStats{DefTokens: max(t.Tokens, 0)}
+		if !offered[name] {
+			offered[name] = true
+			s.Offered = 1
+		}
+		d.Tools = addTool(d.Tools, name, s, true)
+	}
+	called := map[string]bool{}
+	for _, n := range r.CalledTools {
+		name := toolName(n)
+		if !called[name] {
+			called[name] = true
+			d.Tools = addTool(d.Tools, name, ToolStats{Called: 1}, true)
+		}
+	}
+}
+
+// Bounds on a row's tool maps. Tool names are chosen by clients.
+const (
+	MaxToolsPerRow     = 64
+	MaxToolListsPerRow = 8
+	OtherTool          = "other"
+)
+
+var toolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
+
+// toolName is name when it is shaped like a tool name, else OtherTool.
+func toolName(name string) string {
+	if !toolNamePattern.MatchString(name) {
+		return OtherTool
+	}
+	return name
+}
+
+// addTool adds s under name. With allowNew false, or with the map full, a
+// name the map does not hold yet goes to OtherTool.
+func addTool(m map[string]ToolStats, name string, s ToolStats, allowNew bool) map[string]ToolStats {
+	if m == nil {
+		m = map[string]ToolStats{}
+	}
+	name = toolName(name)
+	if _, ok := m[name]; !ok && name != OtherTool && (!allowNew || len(m) >= MaxToolsPerRow-1) {
+		name = OtherTool
+	}
+	cur := m[name]
+	cur.Offered += s.Offered
+	cur.Called += s.Called
+	cur.DefTokens += s.DefTokens
+	m[name] = cur
+	return m
+}
+
+var toolListHash = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
+
+// addToolList adds n requests under a tool list hash, the same way.
+func addToolList(m map[string]int64, hash string, n int64, allowNew bool) map[string]int64 {
+	if m == nil {
+		m = map[string]int64{}
+	}
+	if !toolListHash.MatchString(hash) {
+		hash = OtherTool
+	}
+	if _, ok := m[hash]; !ok && hash != OtherTool && (!allowNew || len(m) >= MaxToolListsPerRow-1) {
+		hash = OtherTool
+	}
+	m[hash] += n
+	return m
 }
 
 // MaxReasonsPerRow bounds a row's reason names; further names add to
@@ -410,6 +541,21 @@ func (d *Delta) merge(o *Delta, allowNew bool) {
 		}
 	}
 	d.LatencyMicros += o.LatencyMicros
+	d.ToolRequests += o.ToolRequests
+	d.ToolDefs += o.ToolDefs
+	d.ToolDefTokens += o.ToolDefTokens
+	for c, v := range o.ToolDefCost {
+		d.ToolDefCost = addCost(d.ToolDefCost, c, v, allowNew)
+	}
+	for c, v := range o.ToolDefCostAtCacheRead {
+		d.ToolDefCostAtCacheRead = addCost(d.ToolDefCostAtCacheRead, c, v, allowNew)
+	}
+	for name, s := range o.Tools {
+		d.Tools = addTool(d.Tools, name, s, allowNew)
+	}
+	for h, n := range o.ToolLists {
+		d.ToolLists = addToolList(d.ToolLists, h, n, allowNew)
+	}
 }
 
 // Batch is one payload from an edge.
@@ -462,7 +608,20 @@ func (b *Batch) Validate() error {
 				return fmt.Errorf("delta %d: bad reason entry", i)
 			}
 		}
-		for _, costs := range []map[string]float64{d.CostSaved, d.CostSavedAtCacheRead} {
+		if len(d.Tools) > MaxToolsPerRow || len(d.ToolLists) > MaxToolListsPerRow || len(d.ToolDefCost) > MaxCurrenciesPerRow || len(d.ToolDefCostAtCacheRead) > MaxCurrenciesPerRow {
+			return fmt.Errorf("delta %d: too many tools, tool lists or currencies", i)
+		}
+		for name, s := range d.Tools {
+			if (name != OtherTool && !toolNamePattern.MatchString(name)) || s.Offered < 0 || s.Called < 0 || s.DefTokens < 0 {
+				return fmt.Errorf("delta %d: bad tool entry", i)
+			}
+		}
+		for h, n := range d.ToolLists {
+			if (h != OtherTool && !toolListHash.MatchString(h)) || n < 0 {
+				return fmt.Errorf("delta %d: bad tool list entry", i)
+			}
+		}
+		for _, costs := range []map[string]float64{d.CostSaved, d.CostSavedAtCacheRead, d.ToolDefCost, d.ToolDefCostAtCacheRead} {
 			for c, v := range costs {
 				if !currencyCode.MatchString(c) || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 					return fmt.Errorf("delta %d: bad cost entry", i)
@@ -471,7 +630,8 @@ func (b *Batch) Validate() error {
 		}
 		for _, n := range append([]int64{d.Requests, d.UnitsSeen, d.UnitsSelected, d.UnitsCompressed,
 			d.BytesBefore, d.BytesAfter, d.TokensBefore, d.TokensAfter, d.TokensSaved, d.UnpricedTokensSaved, d.NoCacheReadPriceTokensSaved,
-			d.InputTokens, d.CacheReadTokens, d.CacheWriteTokens, d.UsageMissing, d.Streaming, d.LatencyMicros},
+			d.InputTokens, d.CacheReadTokens, d.CacheWriteTokens, d.UsageMissing, d.Streaming, d.LatencyMicros,
+			d.ToolRequests, d.ToolDefs, d.ToolDefTokens},
 			d.LatencyBuckets...) {
 			if n < 0 {
 				return fmt.Errorf("delta %d: negative count", i)

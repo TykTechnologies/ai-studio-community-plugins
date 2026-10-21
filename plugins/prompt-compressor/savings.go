@@ -145,6 +145,126 @@ type savingsView struct {
 	// FoldedRows counts rows the query merged into "other" past its row
 	// budget.
 	FoldedRows int64 `json:"folded_rows,omitempty"`
+	// Tools is the tool-definition cost per App (eac.39), the Apps whose
+	// definitions cost most first.
+	Tools []appTools `json:"tools"`
+}
+
+// appTools is what one App's tool definitions cost in the range, and
+// which tools its models never called.
+type appTools struct {
+	ID   uint32 `json:"id"`
+	Name string `json:"name"`
+	// Requests offered at least one tool; ToolDefs and ToolDefTokens sum
+	// their definitions, InputTokens the App's prompt tokens.
+	Requests      int64 `json:"requests"`
+	ToolDefs      int64 `json:"tool_defs"`
+	ToolDefTokens int64 `json:"tool_def_tokens"`
+	InputTokens   int64 `json:"input_tokens"`
+	// Share is ToolDefTokens / InputTokens, when the vendor reported usage.
+	Share      float64   `json:"share"`
+	ShareKnown bool      `json:"share_known"`
+	Tools      []toolRow `json:"tools"`
+	// NeverCalled are the tools offered but never called in the range
+	// ("other", the folded names, is never listed).
+	NeverCalled          []string `json:"never_called"`
+	NeverCalledDefTokens int64    `json:"never_called_def_tokens"`
+	// EstimatedSaving is the never-called tools' share of the definitions'
+	// cost at the model's input price, and at its cache-read price, by
+	// currency: what dropping them would have saved.
+	EstimatedSaving            map[string]float64 `json:"estimated_saving"`
+	EstimatedSavingAtCacheRead map[string]float64 `json:"estimated_saving_at_cache_read"`
+	// ToolLists is the number of tool list versions seen (a change breaks
+	// the prompt cache).
+	ToolLists int `json:"tool_lists"`
+}
+
+type toolRow struct {
+	Name      string `json:"name"`
+	Offered   int64  `json:"offered"`
+	Called    int64  `json:"called"`
+	DefTokens int64  `json:"def_tokens"`
+}
+
+// Bounds on the tools section.
+const (
+	maxToolApps    = 50
+	maxToolsPerApp = 100
+)
+
+// toolAcc sums one App's tool rows.
+type toolAcc struct {
+	v      appTools
+	tools  map[string]records.ToolStats
+	cost   map[string]float64
+	costCR map[string]float64
+	lists  map[string]bool
+}
+
+func (a *toolAcc) add(d *records.Delta) {
+	a.v.InputTokens += d.InputTokens
+	if d.ToolRequests == 0 {
+		return
+	}
+	a.v.Requests += d.ToolRequests
+	a.v.ToolDefs += d.ToolDefs
+	a.v.ToolDefTokens += d.ToolDefTokens
+	for n, s := range d.Tools {
+		cur := a.tools[n]
+		cur.Offered += s.Offered
+		cur.Called += s.Called
+		cur.DefTokens += s.DefTokens
+		a.tools[n] = cur
+	}
+	for c, x := range d.ToolDefCost {
+		a.cost[c] += x
+	}
+	for c, x := range d.ToolDefCostAtCacheRead {
+		a.costCR[c] += x
+	}
+	for h := range d.ToolLists {
+		a.lists[h] = true
+	}
+}
+
+func (a *toolAcc) view() appTools {
+	v := a.v
+	v.ToolLists = len(a.lists)
+	if v.InputTokens > 0 {
+		v.Share, v.ShareKnown = float64(v.ToolDefTokens)/float64(v.InputTokens), true
+	}
+	v.Tools, v.NeverCalled = []toolRow{}, []string{}
+	for n, s := range a.tools {
+		v.Tools = append(v.Tools, toolRow{Name: n, Offered: s.Offered, Called: s.Called, DefTokens: s.DefTokens})
+		if s.Offered > 0 && s.Called == 0 && n != records.OtherTool {
+			v.NeverCalled = append(v.NeverCalled, n)
+			v.NeverCalledDefTokens += s.DefTokens
+		}
+	}
+	sort.Slice(v.Tools, func(i, j int) bool {
+		if v.Tools[i].DefTokens != v.Tools[j].DefTokens {
+			return v.Tools[i].DefTokens > v.Tools[j].DefTokens
+		}
+		return v.Tools[i].Name < v.Tools[j].Name
+	})
+	if len(v.Tools) > maxToolsPerApp {
+		v.Tools = v.Tools[:maxToolsPerApp]
+	}
+	sort.Strings(v.NeverCalled)
+	if len(v.NeverCalled) > maxToolsPerApp {
+		v.NeverCalled = v.NeverCalled[:maxToolsPerApp]
+	}
+	v.EstimatedSaving, v.EstimatedSavingAtCacheRead = map[string]float64{}, map[string]float64{}
+	if v.ToolDefTokens > 0 {
+		share := float64(v.NeverCalledDefTokens) / float64(v.ToolDefTokens)
+		for c, x := range a.cost {
+			v.EstimatedSaving[c] = x * share
+		}
+		for c, x := range a.costCR {
+			v.EstimatedSavingAtCacheRead[c] = x * share
+		}
+	}
+	return v
 }
 
 // summarise turns rollup rows into the dashboard view. rows and markers
@@ -154,8 +274,9 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 	v := &savingsView{
 		From: from, To: to, ByOutcome: map[string]int64{}, ByReason: map[string]int64{}, Strategies: map[string]records.StrategyStats{},
 		Series: []hourPoint{}, ByApp: []groupRow{}, ByLLM: []groupRow{}, Markers: []markerView{}, Alerts: []cacheAlert{},
-		AlertThreshold: threshold,
+		AlertThreshold: threshold, Tools: []appTools{},
 	}
+	toolApps := map[uint32]*toolAcc{}
 	t := &v.Totals
 	t.CostAtInput, t.ProjectedCostAtInput = map[string]float64{}, map[string]float64{}
 	adjusted := map[string]float64{}
@@ -237,6 +358,15 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 			g.InputTokens += d.InputTokens
 			g.CacheReadTokens += d.CacheReadTokens
 		}
+		if !d.Overflow {
+			acc := toolApps[d.AppID]
+			if acc == nil {
+				acc = &toolAcc{v: appTools{ID: d.AppID, Name: appNames[d.AppID]}, tools: map[string]records.ToolStats{},
+					cost: map[string]float64{}, costCR: map[string]float64{}, lists: map[string]bool{}}
+				toolApps[d.AppID] = acc
+			}
+			acc.add(d)
+		}
 
 		if !applied && !audit {
 			continue
@@ -301,6 +431,20 @@ func summarise(rows []*records.Delta, markers []records.PolicyMarker, from, to i
 	}
 	sort.Slice(v.Series, func(i, j int) bool { return v.Series[i].Hour < v.Series[j].Hour })
 	v.ByApp, v.ByLLM = sortedGroups(apps), sortedGroups(llms)
+	for _, acc := range toolApps {
+		if acc.v.Requests > 0 {
+			v.Tools = append(v.Tools, acc.view())
+		}
+	}
+	sort.Slice(v.Tools, func(i, j int) bool {
+		if v.Tools[i].ToolDefTokens != v.Tools[j].ToolDefTokens {
+			return v.Tools[i].ToolDefTokens > v.Tools[j].ToolDefTokens
+		}
+		return v.Tools[i].ID < v.Tools[j].ID
+	})
+	if len(v.Tools) > maxToolApps {
+		v.Tools = v.Tools[:maxToolApps]
+	}
 
 	for _, m := range markers {
 		// A marker belongs to the view only if its policy served a request

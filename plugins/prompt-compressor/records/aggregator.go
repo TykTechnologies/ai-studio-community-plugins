@@ -48,7 +48,7 @@ func (a *Aggregator) Add(r Request) {
 		price  Price
 		priced bool
 	)
-	if a.price != nil && r.TokensSaved() > 0 && r.Model != "" {
+	if a.price != nil && (r.TokensSaved() > 0 || r.ToolDefTokens > 0) && r.Model != "" {
 		price, priced = a.price(r.Vendor, r.Model)
 	}
 

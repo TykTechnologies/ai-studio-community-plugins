@@ -106,11 +106,14 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 	p.counters.seen.Add(1)
+	// The tool definitions are measured whatever happens to the body: the
+	// vendor's format is enough to read them.
+	tools := parseOfferedTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), r.GetBody())
 
 	if cfg.AllowClientBypass && strings.EqualFold(strings.TrimSpace(headerValue(r.GetHeaders(), BypassHeader)), "off") {
 		p.counters.count(OutcomeBypassed)
 		p.pending.put(pendingRecord{RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode, Outcome: OutcomeBypassed,
-			Report: compress.Report{Reason: ReasonClientBypass}})
+			Report: compress.Report{Reason: ReasonClientBypass}, Tools: tools})
 		return passThrough, nil
 	}
 
@@ -120,6 +123,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 			RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor, Mode: cfg.Mode,
 			Outcome: string(compress.OutcomeSkipped),
 			Report:  compress.Report{Outcome: compress.OutcomeSkipped, Reason: unknown},
+			Tools:   tools,
 		}
 		p.counters.count(rec.Outcome)
 		p.pending.put(rec)
@@ -127,7 +131,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	}
 	rec := pendingRecord{
 		RequestID: ctx.RequestID, LLMID: ctx.LLMID, AppID: ctx.AppID, Vendor: ctx.Vendor,
-		Mode: cfg.Mode, PolicyName: res.Name, PolicyHash: res.Hash,
+		Mode: cfg.Mode, PolicyName: res.Name, PolicyHash: res.Hash, Tools: tools,
 	}
 	if res.Policy != nil {
 		rec.Level = res.Policy.Level
@@ -163,7 +167,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		rec.Outcome = OutcomeFailedClosed
 		p.counters.count(rec.Outcome)
 		// No upstream response follows, so the record completes now.
-		p.complete(rec, usage{}, false, false)
+		p.complete(rec, usage{}, false, false, nil)
 		return &pb.PluginResponse{Block: true, StatusCode: http.StatusBadGateway,
 			Headers: map[string]string{"Content-Type": "application/json"},
 			Body:    []byte(`{"error":{"message":"request compression is unavailable","type":"compression_engine_unavailable"}}`)}, nil

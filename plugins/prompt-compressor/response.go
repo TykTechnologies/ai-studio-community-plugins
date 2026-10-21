@@ -88,7 +88,7 @@ func (p *PromptCompressorPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.R
 	}
 	if rec, ok := p.pending.take(ctx.RequestID); ok {
 		u, found := parseUsage(req.GetBody())
-		p.complete(rec, u, found, false)
+		p.complete(rec, u, found, false, parseCalledTools(req.GetBody()))
 	}
 	return nil, nil
 }
@@ -106,13 +106,14 @@ func (p *PromptCompressorPlugin) OnStreamComplete(ctx plugin_sdk.Context, req *p
 	}()
 	if rec, ok := p.pending.take(ctx.RequestID); ok {
 		u, found := parseStreamUsage(req.GetAccumulatedResponse())
-		p.complete(rec, u, found, true)
+		p.complete(rec, u, found, true, parseStreamCalledTools(req.GetAccumulatedResponse()))
 	}
 	return nil, nil
 }
 
-// complete hands a finished request to the recorder.
-func (p *PromptCompressorPlugin) complete(rec pendingRecord, u usage, found, streaming bool) {
+// complete hands a finished request to the recorder. called are the tools
+// the response called.
+func (p *PromptCompressorPlugin) complete(rec pendingRecord, u usage, found, streaming bool, called []string) {
 	rep := rec.Report
 	r := records.Request{
 		At: rec.Created, AppID: rec.AppID, LLMID: rec.LLMID, Vendor: rec.Vendor, Model: rep.Model,
@@ -127,6 +128,14 @@ func (p *PromptCompressorPlugin) complete(rec pendingRecord, u usage, found, str
 	if found {
 		r.InputTokens, r.CacheReadTokens, r.CacheWriteTokens = u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens
 	}
+	if t := rec.Tools; len(t.Tools) > 0 {
+		r.ToolDefs, r.ToolDefTokens, r.ToolListHash = len(t.Tools), t.Tokens, t.Hash
+		r.OfferedTools = make([]records.OfferedTool, len(t.Tools))
+		for i, o := range t.Tools {
+			r.OfferedTools[i] = records.OfferedTool{Name: o.Name, Tokens: o.Tokens}
+		}
+	}
+	r.CalledTools = called
 	if len(rep.Strategies) > 0 {
 		r.Strategies = make(map[string]records.StrategyStats, len(rep.Strategies))
 		for name, s := range rep.Strategies {

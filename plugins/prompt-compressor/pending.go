@@ -42,6 +42,8 @@ type pendingRecord struct {
 	Forwarded bool
 	// CompressMicros is the time the Compress call took.
 	CompressMicros int64
+	// Tools is what the request offered (tools.go).
+	Tools toolsInfo
 }
 
 // Pending records live this long, or until the response hook takes them.

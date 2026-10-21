@@ -267,6 +267,18 @@ next flush.
   strategy names, compression time and the vendor's usage counts. No prompt
   or tool text leaves the edge. The model name is used to look up its price
   at the edge and is not sent.
+- **Tool definitions.** Every request's tool definitions are measured,
+  whatever happens to its body: how many, their size in tokens (UTF-8
+  bytes / 4 of each definition's JSON), a hash of the tool list (a new list
+  breaks the prompt cache), and the tool names the model called, read from
+  the buffered response or the stream (OpenAI chat and Responses,
+  Anthropic, Google, Bedrock Converse). Only names and counts leave the
+  edge, never schemas, descriptions or arguments; a name not shaped like
+  a tool name (letters, digits, `_ . : -`, up to 64) and names past 64 per
+  row count as "other". The dashboard shows each App's tool-definition
+  tokens and their share of the prompt, the tools never called in the
+  range, and what dropping them would have saved at the input and
+  cache-read prices.
 - **Prices.** Saved tokens are priced at the model's input price (an upper
   bound) and at its cache-read price, so the dashboard can show both next to
   the cache-read share.
