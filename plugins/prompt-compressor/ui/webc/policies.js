@@ -657,7 +657,7 @@ class PromptCompressorPolicies extends HTMLElement {
         + 'except a tool that a tool call in the conversation or tool_choice names, and except when removing them would leave no tools while the conversation holds tool calls.'),
       h('div', { className: 'note', 'data-testid': 'pc-drop-tools-not-acl' },
         'This saves tokens; it is not an access control. A client can keep any tool: by naming it in its conversation history or tool_choice, '
-        + 'by sending X-Tyk-Compression: off while client bypass is allowed, and whenever a request passes through uncompressed (audit mode, errors). '
+        + 'by sending X-Tyk-Compression: off where an admin has allowed client bypass, and whenever a request passes through uncompressed (audit mode, errors). '
         + 'To keep a tool from a model, remove the App\'s access to it, or block its calls with a filter or a guardrail.'));
     if (JSON.stringify(list) !== originalDrop) {
       box.appendChild(h('div', { className: 'note', role: 'status', 'data-testid': 'pc-drop-tools-warning' },
@@ -766,7 +766,7 @@ class PromptCompressorPolicies extends HTMLElement {
         h('span', {}, label), h('div', { className: 'muted' }, help));
     return h('details', {},
       h('summary', {}, 'Advanced settings'),
-      bool('allow_client_bypass', 'Allow client bypass', 'Honour the request header X-Tyk-Compression: off.', true),
+      bool('allow_client_bypass', 'Allow client bypass', 'Honour the request header X-Tyk-Compression: off, which lets a client skip compression (and drop_tools) for its own requests. Off by default: turn it on for clients that must sometimes send a body exactly as written.', false),
       bool('lossy_with_request_filters', 'Run lossy levels on LLMs with request filters',
         'Off by default: level 3 and engines are skipped there, so the filters screen the original text and not the compressed body.', false),
       h('label', { className: 'field' }, 'Engine failure mode',
