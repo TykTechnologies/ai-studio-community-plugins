@@ -9,9 +9,10 @@ Microgateway before they reach the vendor, starting with tool outputs.
 - **Measured:** it reports tokens and money saved next to the cache-read share.
 - **Fails open:** any error passes the request through unchanged.
 
-> **Status:** level 1 (lossless) compression on the Microgateway in `audit`
-> and `enforce` modes. Higher levels, the response-phase records and the
-> dashboard land in later versions.
+> **Status:** levels 1 to 3 and the external engines on the Microgateway in
+> `audit` and `enforce` modes, with savings records, the dashboard, the
+> Policies page and the preview tool in Studio. User docs:
+> `docs/site/docs/prompt-compressor.md` in the AI Studio repo.
 
 ## Hooks
 
@@ -203,7 +204,9 @@ plugin loading. The full schema is in `config.schema.json`.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
-  built-in tools) are never rewritten, nor is anything the model wrote.
+  built-in tools) are never rewritten, nor are thinking blocks, signatures
+  or tool call ids. The model's own text is rewritten only when a policy's
+  `roles` includes `assistant`.
 
 A reducer's cut leaves an inline marker, in a fixed format:
 
