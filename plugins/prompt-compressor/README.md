@@ -34,7 +34,13 @@ except Bedrock, which they call directly.
 | `/llm/rest`, `/llm/stream`, `/llm/call` (vendor-native bodies) | Yes |
 | `/ai/`, unified `/v1`, `/router/` to a non-Bedrock LLM | Yes, on the internal `/llm/call/` hop (vendor-native body) |
 | `/ai/` and `/anthropic/` to a Bedrock LLM | **No**: these call AWS directly and run no `post_auth`, until the core `pre_upstream` hook exists |
+| `/llm/stream` Bedrock `converse-stream` | Compressed, but **not labelled or recorded**: the native Bedrock stream runs no response hooks yet (eac.83) |
 | Studio Chat | No: Chat does not go through the gateway |
+
+A cache hit from Advanced LLM Cache attached before the compressor skips
+compression and is not recorded, but it replays the stored response's
+`X-Tyk-Compression-*` headers. The Phase 1 end-to-end run that checked all of
+this is in `e2e/` (`e2e/phase1.sh`, results in `e2e/runs/`).
 
 The request format comes from the LLM's vendor, the path and the LLM's
 endpoint (`pkg/requestformat`); the plugin reads the endpoint with `llms.read`
