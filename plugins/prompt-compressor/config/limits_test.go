@@ -15,3 +15,29 @@ func TestMaxBodyBytesIsBounded(t *testing.T) {
 		}
 	}
 }
+
+// max_in_flight_bytes is bounded, and never below max_body_bytes, whose
+// largest bodies would otherwise never fit.
+func TestMaxInFlightBytesIsBounded(t *testing.T) {
+	for _, tc := range []struct {
+		cfg string
+		ok  bool
+	}{
+		{`{}`, true},
+		{`{"max_in_flight_bytes": 4194304}`, true},
+		{`{"max_in_flight_bytes": 268435456}`, true},
+		{`{"max_in_flight_bytes": 268435457}`, false},
+		{`{"max_in_flight_bytes": 0}`, false},
+		{`{"max_in_flight_bytes": 4194303}`, false},
+		{`{"max_body_bytes": 16777216, "max_in_flight_bytes": 16777216}`, true},
+		{`{"max_body_bytes": 16777216, "max_in_flight_bytes": 8388608}`, false},
+	} {
+		c, err := ParseJSON([]byte(tc.cfg))
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: %v", tc.cfg, err)
+		}
+		if tc.cfg == `{}` && c.MaxInFlightBytes != DefaultMaxInFlightBytes {
+			t.Errorf("default %d", c.MaxInFlightBytes)
+		}
+	}
+}

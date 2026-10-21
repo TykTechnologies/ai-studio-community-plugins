@@ -80,6 +80,16 @@ hold the compression settings; bindings pick a policy per LLM or App.
   It is not a security control: bypass can only turn compression off, so the
   vendor gets exactly the body the client sent, as without the plugin. The
   header can never pick a policy or raise a level.
+- **max_in_flight_bytes** (default 16 MiB, at most 256 MiB, never below
+  `max_body_bytes`) bounds the body bytes the plugin parses and compresses
+  at once, all requests together. Compressing a body allocates about 10-20
+  times its size and concurrency multiplies that, so at the default the
+  worst case stays near 250 MiB. A request that would go over is forwarded
+  unchanged at once with reason `over_budget`, never queued; like any
+  uncompressed turn between compressed ones it can cost a prompt-cache
+  rewrite, so a dashboard showing `over_budget` means the budget is too
+  small for the edge's traffic. It is not on the Policies page:
+  `policies:write` cannot raise it.
 - **Policies** start from the defaults (level 1, tool outputs only,
   `min_unit_tokens` 300, `protect_recent_turns` 1, `cache_mode`
   deterministic) and list only what they change. `off` is a reserved policy
@@ -232,8 +242,8 @@ plugin loading. The full schema is in `config.schema.json`.
   history (which the client writes) or by `tool_choice` is kept,
   `X-Tyk-Compression: off` skips the policy while `allow_client_bypass` is
   on (the default), and the request passes through whole in `audit` mode,
-  while an App's metadata is unknown, over `max_body_bytes`, or on any
-  error. To keep a tool away from a model, don't give the App access to it,
+  while an App's metadata is unknown, over `max_body_bytes` or
+  `max_in_flight_bytes`, or on any error. To keep a tool away from a model, don't give the App access to it,
   or block the call with a filter or a guardrail on tool calls.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
@@ -307,7 +317,9 @@ next flush.
   leaf allocated hundreds of times the body); other vendors use a fixed
   characters-per-token ratio. Counts never change what is compressed.
   `max_body_bytes` (default 4 MiB) is capped at 16 MiB: compressing a body
-  allocates about 10-20 times its size, and a larger body is never parsed.
+  allocates about 10-20 times its size, and a larger body is never parsed;
+  `max_in_flight_bytes` bounds the total across requests. An external
+  engine's answer is read up to twice the text sent plus 64 KiB.
 - **Tool definitions.** Every request's tool definitions are measured,
   whatever happens to its body: how many, their size in tokens (UTF-8
   bytes / 4 of each definition's JSON), a hash of the tool list (a new list

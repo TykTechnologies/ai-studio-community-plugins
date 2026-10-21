@@ -106,11 +106,18 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 	p.counters.seen.Add(1)
+	// Every parse of the body holds its share of the in-flight budget
+	// (max_in_flight_bytes) until the hook returns. A body larger than
+	// max_body_bytes, or one the budget has no room for, is never parsed.
+	size := len(r.GetBody())
+	held := size <= cfg.MaxBodyBytes && p.budget.acquire(size, cfg.MaxInFlightBytes)
+	if held {
+		defer p.budget.release(size)
+	}
 	// The tool definitions are measured whatever happens to the body (the
-	// vendor's format is enough to read them), within max_body_bytes: a
-	// larger body is never parsed.
+	// vendor's format is enough to read them).
 	var tools toolsInfo
-	if len(r.GetBody()) <= cfg.MaxBodyBytes {
+	if held {
 		tools = parseOfferedTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), r.GetBody())
 	}
 
@@ -143,6 +150,15 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	if res.Off() {
 		rec.Outcome = string(compress.OutcomeSkipped)
 		rec.Report = compress.Report{Outcome: compress.OutcomeSkipped, Reason: compress.ReasonOff, PolicyHash: res.Hash}
+		p.counters.count(rec.Outcome)
+		p.pending.put(rec)
+		return passThrough, nil
+	}
+	// Over budget: forwarded unchanged rather than queued, so load never
+	// holds a request back (Compress itself skips an oversized body).
+	if !held && size <= cfg.MaxBodyBytes {
+		rec.Outcome = string(compress.OutcomeSkipped)
+		rec.Report = compress.Report{Outcome: compress.OutcomeSkipped, Reason: ReasonOverBudget, PolicyHash: res.Hash, Level: rec.Level}
 		p.counters.count(rec.Outcome)
 		p.pending.put(rec)
 		return passThrough, nil

@@ -66,6 +66,9 @@ type PromptCompressorPlugin struct {
 	llms       *asyncLookup[uint32, llmInfo]
 	appMeta    *asyncLookup[uint32, string]
 	counters   hookCounters
+	// budget bounds the body bytes parsed or compressed at once
+	// (max_in_flight_bytes).
+	budget byteBudget
 	// appScopeMissing: the host refused the last App lookup (apps.read is
 	// not approved), so App traffic is forwarded uncompressed.
 	appScopeMissing atomic.Bool

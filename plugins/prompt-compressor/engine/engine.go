@@ -43,8 +43,13 @@ const RefusedCredential = "refused-credential-reference"
 const (
 	// maxConcurrent bounds one request's engine calls in flight.
 	maxConcurrent = 8
-	// maxResponseBytes bounds an engine's answer.
+	// An engine's answer is read up to answerFactor times the text sent
+	// plus answerSlack, and never past maxResponseBytes: only a shorter text
+	// is used, and a longer answer would hold memory the in-flight budget
+	// does not count.
 	maxResponseBytes = 16 << 20
+	answerFactor     = 2
+	answerSlack      = 64 << 10
 	// memoEntries and memoBytes bound the in-process memo.
 	memoEntries = 20000
 	memoBytes   = 64 << 20
@@ -335,7 +340,8 @@ func (c *Client) call(ctx context.Context, model string, j compress.EngineJob) (
 		return "", ErrUnreachable
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	limit := answerLimit(len(j.Text))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", ErrTimeout
@@ -345,10 +351,15 @@ func (c *Client) call(ctx context.Context, model string, j compress.EngineJob) (
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", fmt.Errorf("%w %d", ErrStatus, resp.StatusCode)
 	}
-	if len(raw) > maxResponseBytes {
+	if len(raw) > limit {
 		return "", ErrMalformed
 	}
 	return c.parse(raw)
+}
+
+// answerLimit is the most of an answer read for a job of n bytes of text.
+func answerLimit(n int) int {
+	return min(maxResponseBytes, answerFactor*n+answerSlack)
 }
 
 func (c *Client) parse(raw []byte) (string, error) {

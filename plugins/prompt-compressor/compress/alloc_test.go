@@ -11,7 +11,7 @@ import (
 // Compress allocates in proportion to the body, never hundreds of times it
 // (eac.78: tiktoken over every leaf made a 3.4 MB body allocate 1.2 GB). The
 // bound is per call, cold memo (the worst case), for a small, a typical and
-// a near-max_body_bytes body at every level.
+// a preview-sized (~2 MiB) and a near-max_body_bytes body at every level.
 func TestCompressAllocationIsBounded(t *testing.T) {
 	if raceEnabled {
 		// The race detector defeats sync.Pool (regexp's machines among
@@ -24,7 +24,7 @@ func TestCompressAllocationIsBounded(t *testing.T) {
 	for _, size := range []struct {
 		name             string
 		turns, toolBytes int
-	}{{"small", 2, 4096}, {"typical", 12, 163840}, {"large", 40, 3400000}} {
+	}{{"small", 2, 4096}, {"typical", 12, 163840}, {"preview", 20, 1700000}, {"large", 40, 3400000}} {
 		body := agentBody(size.turns, size.toolBytes)
 		if len(body) > config.DefaultMaxBodyBytes {
 			t.Fatalf("%s body is %d bytes, over max_body_bytes", size.name, len(body))

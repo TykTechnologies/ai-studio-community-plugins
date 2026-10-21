@@ -68,6 +68,14 @@
       "maximum": 16777216,
       "default": 4194304
     },
+    "max_in_flight_bytes": {
+      "type": "integer",
+      "title": "In-flight budget (bytes)",
+      "description": "The body bytes compressed at once, all requests together. A request that would go over it passes through uncompressed (reason over_budget), so memory stays bounded under concurrency; such a request may cost a prompt-cache rewrite. At least max_body_bytes, at most 256 MiB.",
+      "minimum": 1,
+      "maximum": 268435456,
+      "default": 16777216
+    },
     "cache_drop_alert": {
       "type": "number",
       "title": "Cache-drop warning",
@@ -157,7 +165,7 @@
         "drop_tools": {
           "type": "array",
           "title": "Drop tools",
-          "description": "Tool definitions to remove from requests: a name, or a prefix ending in '*'. Tools the conversation already called, or that tool_choice names, are always kept. Changing the list is a one-off prompt-cache miss for the Apps it applies to.",
+          "description": "Tool definitions to remove from requests: a name, or a prefix ending in '*'. Tools the conversation already called, or that tool_choice names, are always kept. Changing the list is a one-off prompt-cache miss for the Apps it applies to. Saves tokens; not an access control: clients can keep tools via history, tool_choice or the bypass header. Use App tool access or filters to restrict tools.",
           "items": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{0,64}\\*?$", "minLength": 1, "maxLength": 65 },
           "maxItems": 256
         },

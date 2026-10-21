@@ -89,6 +89,12 @@ func (f *fakeEngine) serve(w http.ResponseWriter, r *http.Request) {
 	case "redirect":
 		http.Redirect(w, r, "http://169.254.169.254/latest", http.StatusFound)
 		return
+	case "huge":
+		// A usable answer behind 1 MiB of padding: read in full it would be
+		// accepted.
+		json.NewEncoder(w).Encode(map[string]any{"padding": strings.Repeat("p", 1<<20),
+			"messages": []any{map[string]string{"role": "tool", "content": out}}})
+		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/compressPrompt") {
 		json.NewEncoder(w).Encode(map[string]any{"compressed_prompt": out})
@@ -181,6 +187,8 @@ func TestEngineOutcomes(t *testing.T) {
 		{"malformed", config.FailOpen, false, false, true, nil},
 		{"longer", config.FailOpen, false, false, false, nil},
 		{"redirect", config.FailOpen, false, false, true, nil},
+		{"huge", config.FailOpen, false, false, true, nil}, // read up to 2x the job + 64 KiB (eac.77)
+		{"huge", config.FailClosed, true, false, false, ErrMalformed},
 		{"slow", config.FailClosed, true, false, false, ErrTimeout},
 		{"500", config.FailClosed, true, false, false, ErrStatus},
 		{"malformed", config.FailClosed, true, false, false, ErrMalformed},
@@ -206,6 +214,14 @@ func TestEngineOutcomes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnswerLimit(t *testing.T) {
+	for n, want := range map[int]int{0: 64 << 10, 1 << 10: 66 << 10, 1 << 20: 2<<20 + 64<<10, 16 << 20: maxResponseBytes} {
+		if got := answerLimit(n); got != want {
+			t.Errorf("answerLimit(%d) = %d, want %d", n, got, want)
+		}
 	}
 }
 

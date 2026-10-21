@@ -115,11 +115,11 @@ func TestSchemaDefaultsMatchTheGoDefaults(t *testing.T) {
 	}
 	d := Default()
 	if c.Mode != d.Mode || c.DefaultPolicy != d.DefaultPolicy || c.AllowClientBypass != d.AllowClientBypass ||
-		c.FailureMode != d.FailureMode || c.LossyWithRequestFilters != d.LossyWithRequestFilters || c.MaxBodyBytes != d.MaxBodyBytes || c.CacheDropAlert != d.CacheDropAlert {
+		c.FailureMode != d.FailureMode || c.LossyWithRequestFilters != d.LossyWithRequestFilters || c.MaxBodyBytes != d.MaxBodyBytes || c.MaxInFlightBytes != d.MaxInFlightBytes || c.CacheDropAlert != d.CacheDropAlert {
 		t.Errorf("schema top-level defaults %s differ from Default()", fromSchema)
 	}
-	if len(defaults) != 7 {
-		t.Errorf("schema has defaults for %d top-level settings, want 7", len(defaults))
+	if len(defaults) != 8 {
+		t.Errorf("schema has defaults for %d top-level settings, want 8", len(defaults))
 	}
 
 	policyJSON, err := json.Marshal(policyDefaults)

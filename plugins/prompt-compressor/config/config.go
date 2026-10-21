@@ -101,6 +101,14 @@ const (
 // 10-20 times its size (compress TestCompressAllocationIsBounded).
 const MaxMaxBodyBytes = 16 << 20
 
+// The in-flight budget bounds the body bytes the plugin compresses at once,
+// across requests: concurrency multiplies the per-body allocation, so at
+// the default the worst case stays in the low hundreds of MiB.
+const (
+	DefaultMaxInFlightBytes = 16 << 20
+	MaxMaxInFlightBytes     = 256 << 20
+)
+
 // Limits on admin input.
 const (
 	MaxLevel              = 3
@@ -137,6 +145,11 @@ type Config struct {
 	// MaxBodyBytes skips bodies larger than this. Limits are by size, never
 	// by time, so load never changes the output.
 	MaxBodyBytes int `json:"max_body_bytes"`
+	// MaxInFlightBytes bounds the body bytes being compressed at once, all
+	// requests together. A request that would go over it is forwarded
+	// unchanged (ReasonOverBudget). Not a policy key, so policies:write
+	// cannot raise it (editor.go).
+	MaxInFlightBytes int `json:"max_in_flight_bytes"`
 	// CacheDropAlert is the fall in the cache-read share, as a fraction of
 	// the share before, that makes the dashboard warn within an hour of a
 	// policy change. 0 turns the warning off.
@@ -225,6 +238,7 @@ func Default() *Config {
 		AllowClientBypass: true,
 		FailureMode:       FailOpen,
 		MaxBodyBytes:      DefaultMaxBodyBytes,
+		MaxInFlightBytes:  DefaultMaxInFlightBytes,
 		CacheDropAlert:    DefaultCacheDropAlert,
 		Engines:           map[string]EngineCredentials{},
 	}
@@ -320,6 +334,8 @@ func parse(m map[string]string, strict bool) (*Config, error) {
 			c.LossyWithRequestFilters, err = parseBool(v)
 		case "max_body_bytes":
 			c.MaxBodyBytes, err = parseInt(v)
+		case "max_in_flight_bytes":
+			c.MaxInFlightBytes, err = parseInt(v)
 		case "cache_drop_alert":
 			c.CacheDropAlert, err = parseFloat(v)
 		default:
@@ -474,6 +490,10 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxBodyBytes <= 0 || c.MaxBodyBytes > MaxMaxBodyBytes {
 		add("max_body_bytes: must be 1-%d", MaxMaxBodyBytes)
+	}
+	// Below max_body_bytes, the largest bodies allowed would never fit.
+	if c.MaxInFlightBytes < c.MaxBodyBytes || c.MaxInFlightBytes > MaxMaxInFlightBytes {
+		add("max_in_flight_bytes: must be at least max_body_bytes and at most %d", MaxMaxInFlightBytes)
 	}
 	if !(c.CacheDropAlert >= 0 && c.CacheDropAlert <= 1) {
 		add("cache_drop_alert: must be between 0 and 1")

@@ -104,7 +104,10 @@ type previewResponse struct {
 	EngineNotRun bool `json:"engine_not_run,omitempty"`
 }
 
-var errPreviewTooLarge = errors.New("the input is larger than 2 MiB; preview a smaller body")
+var (
+	errPreviewTooLarge = errors.New("the input is larger than 2 MiB; preview a smaller body")
+	errPreviewBusy     = errors.New("the plugin is compressing as much as max_in_flight_bytes allows; try again shortly")
+)
 
 // rpcPreview runs one preview.
 func (p *PromptCompressorPlugin) rpcPreview(payload []byte) ([]byte, error) {
@@ -128,6 +131,10 @@ func (p *PromptCompressorPlugin) rpcPreview(payload []byte) ([]byte, error) {
 	}
 
 	cfg := p.state().config
+	if !p.budget.acquire(len(body), cfg.MaxInFlightBytes) {
+		return nil, errPreviewBusy
+	}
+	defer p.budget.release(len(body))
 	// No engine is called from Studio
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
