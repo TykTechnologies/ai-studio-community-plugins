@@ -499,17 +499,19 @@ class PromptCompressorDashboard extends HTMLElement {
       h('p', { className: 'muted' },
         'Every request carries the definitions of the tools it offers. Tools that were offered but never called are candidates to drop; '
         + 'the saving is estimated at the input price and at the cache-read price, since definitions usually sit in the cached prefix. '
-        + 'Changing a tool list makes the prompt cache miss once.'));
+        + 'Changing a tool list makes the prompt cache miss once. Definitions a policy\'s drop_tools removed were not sent, so they are not counted here; '
+        + 'their saving is under the drop_tools strategy.'));
     if (!apps || apps.length === 0) {
       section.appendChild(h('p', { className: 'muted' }, 'No request in this range offered tools.'));
       return section;
     }
     const table = h('table', { 'data-testid': 'pc-tools-table' },
-      h('thead', {}, h('tr', {}, ['App', 'Requests with tools', 'Definition tokens', 'Share of prompt tokens', 'Tool lists', 'Never called', 'Estimated saving']
+      h('thead', {}, h('tr', {}, ['App', 'Requests with tools', 'Definition tokens sent', 'Share of prompt tokens', 'Tool lists', 'Never called', 'Estimated saving', 'Dropped by policy']
         .map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
     const body = h('tbody');
     for (const a of apps) {
       const never = a.never_called || [];
+      const dropped = a.dropped_by_policy || [];
       const saving = fmtMoney(a.estimated_saving);
       const atCache = fmtMoney(a.estimated_saving_at_cache_read);
       body.appendChild(h('tr', { 'data-testid': 'pc-tools-app' },
@@ -519,8 +521,9 @@ class PromptCompressorDashboard extends HTMLElement {
         h('td', { className: 'num' }, a.share_known ? fmtPct(a.share) : '—'),
         h('td', { className: 'num', title: 'Distinct tool lists offered; each change misses the prompt cache once' }, fmtInt(a.tool_lists)),
         h('td', { className: 'num' }, never.length ? `${fmtInt(never.length)} (${fmtInt(a.never_called_def_tokens)} tokens)` : '0'),
-        h('td', { className: 'num' }, never.length ? `${saving} at input · ${atCache} at cache read` : '—')));
-      body.appendChild(h('tr', { className: 'detail' }, h('td', { colSpan: 7 }, this._paintToolList(a))));
+        h('td', { className: 'num' }, never.length ? `${saving} at input · ${atCache} at cache read` : '—'),
+        h('td', { className: 'num', title: 'Tools drop_tools removed from every request that offered them' }, fmtInt(dropped.length))));
+      body.appendChild(h('tr', { className: 'detail' }, h('td', { colSpan: 8 }, this._paintToolList(a))));
     }
     table.appendChild(body);
     section.appendChild(table);
@@ -529,17 +532,31 @@ class PromptCompressorDashboard extends HTMLElement {
 
   _paintToolList(a) {
     const never = new Set(a.never_called || []);
+    const droppedAll = new Set(a.dropped_by_policy || []);
     const tools = a.tools || [];
-    const details = h('details', { 'data-testid': 'pc-tools-list' },
-      h('summary', {}, never.size
-        ? `${fmtInt(tools.length)} tools · never called: ${[...never].slice(0, 5).join(', ')}${never.size > 5 ? ` and ${fmtInt(never.size - 5)} more` : ''}`
-        : `${fmtInt(tools.length)} tools, all called`));
+    const list = (names) => `${[...names].slice(0, 5).join(', ')}${names.size > 5 ? ` and ${fmtInt(names.size - 5)} more` : ''}`;
+    const parts = [`${fmtInt(tools.length)} tools`];
+    if (never.size) parts.push(`never called: ${list(never)}`);
+    if (droppedAll.size) parts.push(`dropped by policy: ${list(droppedAll)}`);
+    if (!never.size && !droppedAll.size) parts.push('all called');
+    const details = h('details', { 'data-testid': 'pc-tools-list' }, h('summary', {}, parts.join(' · ')));
     const table = h('table', {},
-      h('thead', {}, h('tr', {}, ['Tool', 'Offered', 'Called', 'Definition tokens'].map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
+      h('thead', {}, h('tr', {}, ['Tool', 'Offered', 'Called', 'Definition tokens sent'].map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
     const body = h('tbody');
     for (const t of tools) {
-      body.appendChild(h('tr', never.has(t.name) ? { 'data-testid': 'pc-tool-never-called' } : {},
-        h('td', {}, t.name === 'other' ? 'Other (names not listed, or called but not offered)' : h('code', {}, t.name), never.has(t.name) ? h('span', { className: 'tag' }, 'never called') : null),
+      const dropped = t.dropped || 0;
+      let note = null;
+      if (droppedAll.has(t.name)) {
+        note = h('span', { className: 'tag dropped', 'data-testid': 'pc-tool-dropped' }, 'dropped by policy');
+      } else if (never.has(t.name)) {
+        note = h('span', { className: 'tag' }, 'never called');
+      }
+      const partly = dropped > 0 && dropped < t.offered
+        ? h('div', { className: 'muted' }, `dropped on ${fmtInt(dropped)} of ${fmtInt(t.offered)} requests; kept where the conversation or tool_choice named it`)
+        : null;
+      const testid = droppedAll.has(t.name) ? {} : never.has(t.name) ? { 'data-testid': 'pc-tool-never-called' } : {};
+      body.appendChild(h('tr', testid,
+        h('td', {}, t.name === 'other' ? 'Other (names not listed, or called but not offered)' : h('code', {}, t.name), note, partly),
         h('td', { className: 'num' }, fmtInt(t.offered)),
         h('td', { className: 'num' }, fmtInt(t.called)),
         h('td', { className: 'num' }, fmtInt(t.def_tokens))));
@@ -647,6 +664,7 @@ const STYLES = `
   details summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
   details table { margin-top: 6px; }
   .tag { margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--warning-border); background: var(--warning-bg); color: var(--warning-fg); }
+  .tag.dropped { border-color: var(--info-border); background: var(--info-bg); color: var(--info-fg); }
 `;
 
 if (!customElements.get('prompt-compressor-dashboard')) {
