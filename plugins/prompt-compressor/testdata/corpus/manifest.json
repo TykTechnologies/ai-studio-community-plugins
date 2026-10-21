@@ -535,6 +535,98 @@
       "tool_pairing": "paired"
     },
     {
+      "name": "openai_diff_lockfiles",
+      "file": "bodies/openai/openai_diff_lockfiles.json",
+      "format": "openai",
+      "path": "/v1/chat/completions",
+      "description": "A dependency bump's git diff: the code changes plus web/package-lock.json and go.sum hunks.",
+      "expect": "extract",
+      "tools": [
+        {
+          "kind": "git_diff",
+          "variant": "lock",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 16014
+        }
+      ],
+      "shapes": [
+        "tool_result_string"
+      ],
+      "cache_breakpoints": 0,
+      "native_context_management": false,
+      "tool_pairing": "paired"
+    },
+    {
+      "name": "anthropic_rg_vendor",
+      "file": "bodies/anthropic/anthropic_rg_vendor.json",
+      "format": "anthropic",
+      "path": "/v1/messages",
+      "description": "ripgrep from the repo root without a glob: most hits under vendor/ and web/node_modules/, one test file matching many times.",
+      "expect": "extract",
+      "tools": [
+        {
+          "kind": "ripgrep",
+          "variant": "deps",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 12025
+        }
+      ],
+      "shapes": [
+        "tool_result_string"
+      ],
+      "cache_breakpoints": 0,
+      "native_context_management": false,
+      "tool_pairing": "paired"
+    },
+    {
+      "name": "anthropic_html_app",
+      "file": "bodies/anthropic/anthropic_html_app.json",
+      "format": "anthropic",
+      "path": "/v1/messages",
+      "description": "A docs page served by a React framework: an inline SVG sprite and a large __NEXT_DATA__ JSON script around the prose.",
+      "expect": "extract",
+      "tools": [
+        {
+          "kind": "html",
+          "variant": "app",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 30283
+        }
+      ],
+      "shapes": [
+        "tool_result_string"
+      ],
+      "cache_breakpoints": 0,
+      "native_context_management": false,
+      "tool_pairing": "paired"
+    },
+    {
+      "name": "openai_mcp_search_100",
+      "file": "bodies/openai/openai_mcp_search_100.json",
+      "format": "openai",
+      "path": "/v1/chat/completions",
+      "description": "An MCP issue search at its limit of 100: a long issues array, as text and as structuredContent.",
+      "expect": "extract",
+      "tools": [
+        {
+          "kind": "mcp",
+          "marker": "structuredContent",
+          "via": "tool_result",
+          "bytes": 63106
+        }
+      ],
+      "shapes": [
+        "mcp_result",
+        "tool_result_string"
+      ],
+      "cache_breakpoints": 0,
+      "native_context_management": false,
+      "tool_pairing": "paired"
+    },
+    {
       "name": "bedrock_converse_cachepoint",
       "file": "bodies/bedrock/bedrock_converse_cachepoint.json",
       "format": "bedrock",

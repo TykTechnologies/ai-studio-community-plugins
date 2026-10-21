@@ -77,9 +77,9 @@ func Make(g *R, kind Kind, variant string, size int) Output {
 	case TerraformPlan:
 		o = terraformPlan(g, size)
 	case GitDiff:
-		o = gitDiff(g, size)
+		o = gitDiff(g, size, variant == "lock")
 	case Ripgrep:
-		o = ripgrep(g, size, variant == "heading")
+		o = ripgrep(g, size, variant == "heading", variant == "deps")
 	case DirListing:
 		o = dirListing(g, variant, size)
 	case JSONAPI:
@@ -87,7 +87,7 @@ func Make(g *R, kind Kind, variant string, size int) Output {
 	case CSV:
 		o = csvExport(g, size)
 	case HTML:
-		o = htmlPage(g, size)
+		o = htmlPage(g, size, variant == "app")
 	case MCP:
 		o = mcpResult(g, size)
 	default:
@@ -659,16 +659,32 @@ func terraformPlan(g *R, size int) Output {
 	return Output{Text: b.String(), Marker: "Terraform will perform the following actions:", Command: "cd deploy/terraform/prod && terraform plan -no-color"}
 }
 
-func gitDiff(g *R, size int) Output {
+// gitDiff is `git diff` output at the default 3 lines of context. The lock
+// variant is a dependency bump: the changed code plus the lock files that
+// came with it (web/package-lock.json, go.sum), as such a diff shows them.
+func gitDiff(g *R, size int, lock bool) Output {
 	var b strings.Builder
 	files := []string{}
 	for i := 0; i < 12; i++ {
 		files = append(files, Pick(g, goPackages)+"/"+strings.ToLower(Pick(g, goTypes))+Pick(g, []string{".go", "_test.go"}))
 	}
 	files = append(files, "web/package-lock.json")
+	if lock {
+		files = append([]string{files[0], "web/package-lock.json", files[1], "go.sum"}, files[2:12]...)
+	}
 	for i := 0; b.Len() < size || i < 2; i++ {
 		f := files[i%len(files)]
 		fmt.Fprintf(&b, "diff --git a/%s b/%s\nindex %s..%s 100644\n--- a/%s\n+++ b/%s\n", f, f, g.Hex(7), g.Hex(7), f, f)
+		if f == "go.sum" {
+			start := g.N(20, 200)
+			fmt.Fprintf(&b, "@@ -%d,24 +%d,24 @@\n", start, start)
+			for k := 0; k < 12; k++ {
+				mod := Pick(g, []string{"git.example.com/acme/money", "git.example.com/acme/tenancy", "golang.org/x/text", "golang.org/x/sync", "google.golang.org/protobuf", "github.com/example/decimal"})
+				fmt.Fprintf(&b, "-%s v1.%d.0 h1:%s=\n-%s v1.%d.0/go.mod h1:%s=\n+%s v1.%d.1 h1:%s=\n+%s v1.%d.1/go.mod h1:%s=\n",
+					mod, k, g.B64(32), mod, k, g.B64(32), mod, k, g.B64(32), mod, k, g.B64(32))
+			}
+			continue
+		}
 		if strings.HasSuffix(f, ".json") {
 			start := g.N(1000, 9000)
 			fmt.Fprintf(&b, "@@ -%d,40 +%d,40 @@\n", start, start)
@@ -693,14 +709,31 @@ func gitDiff(g *R, size int) Output {
 	return Output{Text: b.String(), Marker: "diff --git a/", Command: "git diff HEAD~3"}
 }
 
-func ripgrep(g *R, size int, heading bool) Output {
+// ripgrep is `rg -n` output. The deps variant is a search run at the repo
+// root without a --glob, as agents often do: most hits are in vendored Go
+// modules and the web app's node_modules, and a few files match many times.
+func ripgrep(g *R, size int, heading, deps bool) Output {
 	var b strings.Builder
 	sym := Pick(g, []string{"Subtotal(", "RoundHalfEven", "ErrNilInvoice", "tenantID", "ctx.Done()"})
 	last := ""
+	hot := ""
 	for b.Len() < size {
 		f := Pick(g, goPackages) + "/" + strings.ToLower(Pick(g, goTypes)) + Pick(g, []string{".go", "_test.go"})
 		if g.P(0.15) {
 			f = "vendor/git.example.com/acme/money/" + strings.ToLower(Pick(g, goTypes)) + ".go"
+		}
+		if deps {
+			switch p := g.F(0, 1); {
+			case p < 0.35:
+				f = "vendor/" + Pick(g, []string{"git.example.com/acme/money", "git.example.com/acme/tenancy", "github.com/example/decimal"}) + "/" + strings.ToLower(Pick(g, goTypes)) + ".go"
+			case p < 0.6:
+				f = "web/node_modules/" + Pick(g, []string{"@acme/money/dist/index.js", "@acme/money/dist/round.d.ts", "decimal.js/decimal.js", ".pnpm/decimal.js@10.4.3/node_modules/decimal.js/decimal.mjs"})
+			case p < 0.75:
+				if hot == "" {
+					hot = f
+				}
+				f = hot // the test file that matches on every other line
+			}
 		}
 		ln := g.N(5, 900)
 		line := Pick(g, []string{
@@ -877,8 +910,15 @@ func csvExport(g *R, size int) Output {
 	return Output{Text: b.String(), Marker: "order_id,tenant_id,region", Command: "ledgerctl export orders --since 2026-06-01 --format csv"}
 }
 
-func htmlPage(g *R, size int) Output {
+// htmlPage is a fetched docs page. The app variant is the same page served
+// by a React framework: an inline SVG icon sprite and the page's data as a
+// __NEXT_DATA__ JSON script make up most of the bytes, as on such sites.
+func htmlPage(g *R, size int, app bool) Output {
 	var b strings.Builder
+	prose := size * 3 / 4
+	if app {
+		prose = size * 2 / 5
+	}
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Rounding rules | Ledger Developer Docs</title>\n<meta name=\"description\" content=\"How Ledger rounds monetary amounts across currencies.\">\n<link rel=\"canonical\" href=\"https://docs.example.com/ledger/rounding\">\n<link rel=\"preload\" href=\"/assets/inter-var.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>\n")
 	fmt.Fprintf(&b, "<link rel=\"stylesheet\" href=\"/assets/app.%s.css\">\n<script>window.__CONFIG__={\"env\":\"prod\",\"release\":\"%s\",\"analytics\":false};</script>\n", g.Hex(8), g.Hex(12))
 	b.WriteString("<style>\n:root{--fg:#1d1d1f;--bg:#fff;--accent:#3355ff}\n.sidebar{position:sticky;top:0;max-height:100vh;overflow:auto}\n.toc a{color:var(--fg);text-decoration:none}\n.callout{border-left:4px solid var(--accent);padding:.5rem 1rem}\n</style>\n</head>\n<body>\n<header class=\"site-header\"><a class=\"logo\" href=\"/\">Ledger Docs</a>\n<nav aria-label=\"Main\"><ul>")
@@ -891,7 +931,7 @@ func htmlPage(g *R, size int) Output {
 		fmt.Fprintf(&b, "<li><a href=\"/ledger/%s\">%s</a></li>\n", strings.ToLower(strings.ReplaceAll(t, " ", "-")), t)
 	}
 	b.WriteString("</ul></aside>\n<main id=\"content\"><article>\n<h1>Rounding rules</h1>\n<p class=\"lead\">Ledger stores every amount in minor units and rounds half to even at the boundaries listed below.</p>\n")
-	for b.Len() < size*3/4 {
+	for b.Len() < prose {
 		fmt.Fprintf(&b, "<h2 id=\"%s\">%s</h2>\n<p>%s %s</p>\n", g.Lower(6), title(g.Words(g.N(2, 5))), g.Sentence(g.N(12, 30)), g.Sentence(g.N(8, 25)))
 		if g.P(0.4) {
 			fmt.Fprintf(&b, "<div class=\"callout\"><strong>Note</strong><p>%s</p></div>\n", g.Sentence(g.N(8, 20)))
@@ -912,6 +952,20 @@ func htmlPage(g *R, size int) Output {
 		fmt.Fprintf(&b, "<li><a href=\"/%s\">%s</a></li>", strings.ToLower(s), s)
 	}
 	b.WriteString("</ul></footer>\n")
+	if app {
+		b.WriteString("<svg xmlns=\"http://www.w3.org/2000/svg\" style=\"display:none\" aria-hidden=\"true\">\n")
+		for _, icon := range []string{"search", "copy", "check", "chevron-right", "chevron-down", "external", "github", "menu", "close", "sun", "moon", "info", "warning", "anchor"} {
+			fmt.Fprintf(&b, "<symbol id=\"icon-%s\" viewBox=\"0 0 24 24\"><path d=\"M%d %dl%d %d%s\"/></symbol>\n", icon, g.N(1, 20), g.N(1, 20), g.N(1, 9), g.N(1, 9), strings.Repeat(fmt.Sprintf("c%d.%d %d.%d %d %d", g.N(0, 9), g.N(0, 9), g.N(0, 9), g.N(0, 9), g.N(-9, 9), g.N(-9, 9)), g.N(6, 14)))
+		}
+		b.WriteString("</svg>\n")
+		var nav []any
+		for len(Encode(O("nav", nav), Compact)) < (size-b.Len())*3/4 {
+			t := title(g.Words(g.N(2, 4)))
+			nav = append(nav, O("title", t, "href", "/ledger/"+strings.ToLower(strings.ReplaceAll(t, " ", "-")), "section", Pick(g, []string{"Guides", "API reference", "SDKs"}), "updatedAt", g.Time(4000*time.Hour).Format(time.RFC3339), "excerpt", g.Sentence(g.N(8, 20))))
+		}
+		data := O("props", O("pageProps", O("slug", "rounding", "locale", "en", "nav", nav)), "page", "/[...slug]", "buildId", g.Hex(20), "isFallback", false, "gsp", true)
+		fmt.Fprintf(&b, "<script id=\"__NEXT_DATA__\" type=\"application/json\">%s</script>\n", Encode(data, Compact))
+	}
 	for b.Len() < size {
 		fmt.Fprintf(&b, "<script type=\"module\" src=\"/assets/chunk-%s.js\" integrity=\"sha384-%s\" crossorigin=\"anonymous\"></script>\n", g.Hex(8), g.B64(48))
 	}

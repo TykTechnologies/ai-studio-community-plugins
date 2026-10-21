@@ -400,6 +400,36 @@ func Entries() []Entry {
 			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 
+	// ---- Outputs the git diff, grep, html and json reducers are for ----
+	{
+		b := newBuilder("openai_diff_lockfiles", "openai")
+		s1 := b.step("", b.out(GitDiff, "lock", 16000))
+		c := b.convo(modelGPT, "Review the decimal library bump before I merge it.", s1)
+		add(b.entry("openai_diff_lockfiles", "openai", pathOpenAIChat, "A dependency bump's git diff: the code changes plus web/package-lock.json and go.sum hunks.",
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
+	}
+	{
+		b := newBuilder("anthropic_rg_vendor", "anthropic")
+		s1 := b.step("Searching the whole repo.", b.out(Ripgrep, "deps", 12000))
+		c := b.convo(modelClaude, "Where do we call RoundHalfEven, and is it ever called without a currency?", s1)
+		add(b.entry("anthropic_rg_vendor", "anthropic", pathAnthropic, "ripgrep from the repo root without a glob: most hits under vendor/ and web/node_modules/, one test file matching many times.",
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{}), ShapeToolResultString))
+	}
+	{
+		b := newBuilder("anthropic_html_app", "anthropic")
+		s1 := b.step("Fetching the docs page.", b.out(HTML, "app", 30000))
+		c := b.convo(modelClaude, "Check the published rounding rules against our implementation.", s1)
+		add(b.entry("anthropic_html_app", "anthropic", pathAnthropic, "A docs page served by a React framework: an inline SVG sprite and a large __NEXT_DATA__ JSON script around the prose.",
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{}), ShapeToolResultString))
+	}
+	{
+		b := newBuilder("openai_mcp_search_100", "openai")
+		s1 := b.step("", b.out(MCP, "", 60000))
+		c := b.convo(modelGPT, "List every open rounding issue in the tracker.", s1)
+		add(b.entry("openai_mcp_search_100", "openai", pathOpenAIChat, "An MCP issue search at its limit of 100: a long issues array, as text and as structuredContent.",
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeMCPResult, ShapeToolResultString))
+	}
+
 	// ---- Bedrock Converse ----
 	{
 		b := newBuilder("bedrock_converse_cachepoint", "bedrock")
