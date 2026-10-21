@@ -13,7 +13,7 @@ const MARKER = /\[tyk-compressed:[^\]\n]*\]/g;
 const DIFF_LINE_LIMIT = 1500;
 
 const SKIP_REASONS = {
-  server_tool: 'a result the vendor produced; replayed as it was',
+  server_tool: 'a result the vendor\'s own tool produced; left as sent unless the policy compresses vendor tool results (MCP connector and Google results always are)',
   undecodable: 'content that cannot be decoded',
   no_text: 'no text to compress',
   role: 'its role is not selected by the policy',

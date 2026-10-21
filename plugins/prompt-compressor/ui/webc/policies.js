@@ -27,6 +27,7 @@ const POLICY_DEFAULTS = {
   protect_recent_turns: 1,
   cache_mode: 'deterministic',
   dedupe_references: false,
+  compress_server_tool_results: false,
   max_unit_tokens: 6000,
   mask_after_turns: 0,
   mask_step_tokens: 20000,
@@ -571,6 +572,14 @@ class PromptCompressorPolicies extends HTMLElement {
         h('input', { type: 'checkbox', checked: !!p.dedupe_references, onChange: (e) => { p.dedupe_references = e.target.checked; } }),
         'Replace a repeated tool output with a reference to the earlier one'),
     );
+    form.appendChild(
+      h('label', { className: 'inline' },
+        h('input', { type: 'checkbox', checked: !!p.compress_server_tool_results, 'data-testid': 'pc-compress-server-tools', onChange: (e) => { p.compress_server_tool_results = e.target.checked; } }),
+        'Compress vendor tool results'),
+    );
+    form.appendChild(h('div', { className: 'muted' },
+      'Off by default. Also compresses results of the vendor\'s own tools replayed in the conversation: Anthropic web search, web fetch and code execution, '
+      + 'OpenAI Responses file search and code interpreter. MCP connector results and Google code execution results are always left as sent.'));
     if (p.level >= 3) {
       form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Level 3: longer tool outputs are cut to their head and tail, with a marker.'));
       form.appendChild(num('mask_after_turns', 'Mask after turns (0 = off)', 'Tool results older than this become a placeholder; 0 turns masking off (the default). Each masking step rewrites the vendor\'s prompt cache, so it pays where cached input is not much cheaper than input (OpenAI chat models with a 50% cache discount) and costs more than it saves where cache reads are very cheap (Anthropic, GPT-5).'));
