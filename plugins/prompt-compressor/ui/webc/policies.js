@@ -28,7 +28,7 @@ const POLICY_DEFAULTS = {
   cache_mode: 'deterministic',
   dedupe_references: false,
   max_unit_tokens: 6000,
-  mask_after_turns: 8,
+  mask_after_turns: 0,
   mask_step_tokens: 20000,
 };
 const RESERVED = ['off'];
@@ -573,7 +573,7 @@ class PromptCompressorPolicies extends HTMLElement {
     );
     if (p.level >= 3) {
       form.appendChild(num('max_unit_tokens', 'Maximum unit size (tokens)', 'Level 3: longer tool outputs are cut to their head and tail, with a marker.'));
-      form.appendChild(num('mask_after_turns', 'Mask after turns', 'Tool results older than this become a placeholder.'));
+      form.appendChild(num('mask_after_turns', 'Mask after turns (0 = off)', 'Tool results older than this become a placeholder; 0 turns masking off (the default). Each masking step rewrites the vendor\'s prompt cache, so it pays where cached input is not much cheaper than input (OpenAI chat models with a 50% cache discount) and costs more than it saves where cache reads are very cheap (Anthropic, GPT-5).'));
       form.appendChild(num('mask_step_tokens', 'Mask step (tokens)', 'Old turns are masked in steps of at least this many tokens.'));
       if (!this._config.lossy_with_request_filters) {
         form.appendChild(h('div', { className: 'note' }, 'Level 3 is skipped on LLMs with request filters, so the filters still see the original text. See Advanced settings.'));
