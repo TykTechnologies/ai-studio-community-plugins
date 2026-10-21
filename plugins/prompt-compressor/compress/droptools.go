@@ -43,6 +43,8 @@ type toolsArray struct {
 	raw   []byte // the array as sent
 	items []json.RawMessage
 	names []string
+	// marker: the item is a cache marker, not a tool (a Bedrock cachePoint)
+	marker []bool
 }
 
 // dropTools returns the edits that remove the matching tools, the bytes of
@@ -76,7 +78,7 @@ func dropTools(format string, body []byte, patterns []string) ([]segments.Edit, 
 				n++
 			}
 		}
-		if n == len(a.items) {
+		if n > 0 && !a.stillValid(keep) {
 			for i := range keep {
 				keep[i], reason[i] = true, ToolWouldEmpty
 			}
@@ -98,6 +100,28 @@ func dropTools(format string, body []byte, patterns []string) ([]segments.Edit, 
 		}
 	}
 	return edits, dropped, decisions
+}
+
+// stillValid reports whether the array keep would leave is one vendors
+// take: it holds a real tool (a cache marker alone is refused, Bedrock
+// answers 400 to tools=[cachePoint], to tools=[] and to a missing
+// toolConfig beside tool blocks in the history), and every kept cache
+// marker has a kept tool before it to cache.
+func (a toolsArray) stillValid(keep []bool) bool {
+	tools := 0
+	for i := range a.items {
+		if !keep[i] {
+			continue
+		}
+		if a.marker[i] {
+			if tools == 0 {
+				return false
+			}
+			continue
+		}
+		tools++
+	}
+	return tools > 0
 }
 
 // without is the array as sent with the items keep marks false cut out:
@@ -156,9 +180,13 @@ func toolArrays(format string, body []byte) []toolsArray {
 		if json.Unmarshal(raw, &items) != nil || len(items) == 0 {
 			return toolsArray{}, false
 		}
-		a := toolsArray{path: path, raw: raw, items: items, names: make([]string, len(items))}
+		a := toolsArray{path: path, raw: raw, items: items, names: make([]string, len(items)), marker: make([]bool, len(items))}
 		for i, it := range items {
 			a.names[i] = name(it)
+			var m map[string]json.RawMessage
+			if a.names[i] == "" && json.Unmarshal(it, &m) == nil {
+				_, a.marker[i] = m["cachePoint"]
+			}
 		}
 		return a, true
 	}
