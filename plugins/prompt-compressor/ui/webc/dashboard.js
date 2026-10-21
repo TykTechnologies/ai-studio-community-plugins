@@ -205,6 +205,16 @@ class PromptCompressorDashboard extends HTMLElement {
           'Approve the plugin\'s scopes on the Plugins page.'),
       );
     }
+    const overBudget = (v.by_reason || {}).over_budget || 0;
+    if (overBudget > 0) {
+      page.appendChild(
+        h('div', { className: 'banner warning', role: 'status', 'data-testid': 'pc-over-budget' },
+          h('span', { className: 'icon', 'aria-hidden': 'true' }, '⚠'),
+          h('strong', {}, 'Edges were too busy to compress. '),
+          `${fmtInt(overBudget)} requests were forwarded uncompressed because an edge already held as many request bytes in compression as max_in_flight_bytes allows. `,
+          'Raise max_in_flight_bytes in the plugin\'s configuration form if the edges have the memory for it.'),
+      );
+    }
     if (v.partial) {
       page.appendChild(
         h('div', { className: 'banner info', 'data-testid': 'pc-partial' },
