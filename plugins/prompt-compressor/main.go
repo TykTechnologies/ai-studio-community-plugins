@@ -31,7 +31,7 @@ var configSchemaFile []byte
 
 const (
 	PluginName    = "prompt-compressor"
-	PluginVersion = "0.1.0"
+	PluginVersion = "1.0.0"
 )
 
 // PromptCompressorPlugin compresses LLM request bodies on the Microgateway
