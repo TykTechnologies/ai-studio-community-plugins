@@ -1312,6 +1312,201 @@
         "pytest",
         "ripgrep"
       ],
+      "tools": [
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 6237
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 8173
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2415
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 2493
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 7777
+        },
+        {
+          "kind": "docker_build",
+          "marker": "load build definition from Dockerfile",
+          "via": "tool_result",
+          "bytes": 5599
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 14976
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 28860
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ErrNilInvoice",
+          "via": "tool_result",
+          "bytes": 7632
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 17070
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "RoundHalfEven",
+          "via": "tool_result",
+          "bytes": 1866
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "Subtotal(",
+          "via": "tool_result",
+          "bytes": 14004
+        },
+        {
+          "kind": "gotest",
+          "variant": "panic",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 7013
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 4030
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 22270
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 19676
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 12256
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 4616
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 1585
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 7547
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 2755
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 1979
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 1192
+        },
+        {
+          "kind": "docker_build",
+          "marker": "load build definition from Dockerfile",
+          "via": "tool_result",
+          "bytes": 13974
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ErrNilInvoice",
+          "via": "tool_result",
+          "bytes": 1716
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 3357
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 674
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 7174
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 19222
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2414
+        },
+        {
+          "kind": "gotest",
+          "variant": "panic",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5872
+        }
+      ],
       "shapes": [
         "cache_control_system",
         "cache_control_tools",
@@ -1344,6 +1539,217 @@
         "ripgrep",
         "terraform_plan"
       ],
+      "tools": [
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 3328
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 4544
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 2200
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 740
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 6049
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 2461
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 6832
+        },
+        {
+          "kind": "csv",
+          "marker": "order_id,tenant_id,region",
+          "via": "tool_result",
+          "bytes": 1360
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5241
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 3866
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 10218
+        },
+        {
+          "kind": "docker_build",
+          "marker": "load build definition from Dockerfile",
+          "via": "tool_result",
+          "bytes": 4669
+        },
+        {
+          "kind": "terraform_plan",
+          "marker": "Terraform will perform the following actions:",
+          "via": "tool_result",
+          "bytes": 4575
+        },
+        {
+          "kind": "docker_build",
+          "marker": "load build definition from Dockerfile",
+          "via": "tool_result",
+          "bytes": 5610
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 424
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1370
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5938
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 7012
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 4523
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ErrNilInvoice",
+          "via": "tool_result",
+          "bytes": 15056
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 6759
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 18585
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 8813
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 9068
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3579
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 5190
+        },
+        {
+          "kind": "kubectl",
+          "variant": "logs",
+          "marker": "\"service\":\"ledger-api\"",
+          "via": "tool_result",
+          "bytes": 1680
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 2504
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 3017
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 9230
+        },
+        {
+          "kind": "csv",
+          "marker": "order_id,tenant_id,region",
+          "via": "tool_result",
+          "bytes": 493
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 6657
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 3188
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 18652
+        }
+      ],
       "shapes": [
         "developer_role",
         "parallel_tool_calls",
@@ -1373,6 +1779,204 @@
         "ripgrep",
         "terraform_plan"
       ],
+      "tools": [
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 790
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1449
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1814
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 2857
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 3190
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 4051
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 11443
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1022
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 9736
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 3421
+        },
+        {
+          "kind": "gradle",
+          "marker": "\u003e Task :",
+          "via": "tool_result",
+          "bytes": 7544
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 12552
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 1028
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 15556
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1426
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 3092
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 1979
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 2570
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 2276
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 9448
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ErrNilInvoice",
+          "via": "tool_result",
+          "bytes": 5473
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "Subtotal(",
+          "via": "tool_result",
+          "bytes": 1725
+        },
+        {
+          "kind": "maven",
+          "marker": "[INFO] BUILD FAILURE",
+          "via": "tool_result",
+          "bytes": 6049
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "Subtotal(",
+          "via": "tool_result",
+          "bytes": 1669
+        },
+        {
+          "kind": "terraform_plan",
+          "marker": "Terraform will perform the following actions:",
+          "via": "tool_result",
+          "bytes": 4093
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "RoundHalfEven",
+          "via": "tool_result",
+          "bytes": 780
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1453
+        },
+        {
+          "kind": "gradle",
+          "marker": "\u003e Task :",
+          "via": "tool_result",
+          "bytes": 1834
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 6263
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 3752
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3787
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 1537
+        }
+      ],
       "shapes": [
         "bedrock_cachepoint",
         "reasoning_content",
@@ -1401,6 +2005,242 @@
         "pytest",
         "ripgrep",
         "terraform_plan"
+      ],
+      "tools": [
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 2281
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2927
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2669
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1838
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 3572
+        },
+        {
+          "kind": "terraform_plan",
+          "marker": "Terraform will perform the following actions:",
+          "via": "tool_result",
+          "bytes": 14799
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 992
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 4277
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 6543
+        },
+        {
+          "kind": "gotest",
+          "variant": "panic",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5829
+        },
+        {
+          "kind": "kubectl",
+          "variant": "logs",
+          "marker": "\"service\":\"ledger-api\"",
+          "via": "tool_result",
+          "bytes": 1479
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 5931
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 3439
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 14840
+        },
+        {
+          "kind": "maven",
+          "marker": "[INFO] BUILD FAILURE",
+          "via": "tool_result",
+          "bytes": 9863
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3214
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 1568
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1115
+        },
+        {
+          "kind": "kubectl",
+          "variant": "describe",
+          "marker": "Events:\n",
+          "via": "tool_result",
+          "bytes": 5131
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 7461
+        },
+        {
+          "kind": "kubectl",
+          "variant": "get_pods",
+          "marker": "NOMINATED NODE",
+          "via": "tool_result",
+          "bytes": 1191
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 4685
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 2488
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 3036
+        },
+        {
+          "kind": "kubectl",
+          "variant": "logs",
+          "marker": "\"service\":\"ledger-api\"",
+          "via": "tool_result",
+          "bytes": 5058
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3676
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3917
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 2510
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "Subtotal(",
+          "via": "tool_result",
+          "bytes": 4241
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 4151
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 2335
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 4631
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5108
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 2165
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2675
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 1798
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 5684
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 3523
+        }
       ],
       "shapes": [
         "encrypted_reasoning",
@@ -1464,6 +2304,223 @@
         "pytest",
         "ripgrep",
         "terraform_plan"
+      ],
+      "tools": [
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 6009
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2957
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 8342
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 1287
+        },
+        {
+          "kind": "maven",
+          "marker": "[INFO] BUILD FAILURE",
+          "via": "tool_result",
+          "bytes": 6003
+        },
+        {
+          "kind": "gotest",
+          "variant": "panic",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 6690
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 16997
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "Subtotal(",
+          "via": "tool_result",
+          "bytes": 2881
+        },
+        {
+          "kind": "json_api",
+          "marker": "repository_url",
+          "via": "tool_result",
+          "bytes": 8472
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1873
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 23672
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "ctx.Done()",
+          "via": "tool_result",
+          "bytes": 6535
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "RoundHalfEven",
+          "via": "tool_result",
+          "bytes": 18835
+        },
+        {
+          "kind": "ripgrep",
+          "marker": "tenantID",
+          "via": "tool_result",
+          "bytes": 1038
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 6236
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2937
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 14785
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "ls",
+          "marker": "drwxr-xr-x",
+          "via": "tool_result",
+          "bytes": 1026
+        },
+        {
+          "kind": "dir_listing",
+          "variant": "tree",
+          "marker": " directories, ",
+          "via": "tool_result",
+          "bytes": 1446
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 5263
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1200
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 4828
+        },
+        {
+          "kind": "html",
+          "marker": "\u003c!DOCTYPE html\u003e",
+          "via": "tool_result",
+          "bytes": 3905
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 5570
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 1933
+        },
+        {
+          "kind": "git_diff",
+          "marker": "diff --git a/",
+          "via": "tool_result",
+          "bytes": 2544
+        },
+        {
+          "kind": "pytest",
+          "marker": "test session starts",
+          "via": "tool_result",
+          "bytes": 23670
+        },
+        {
+          "kind": "gotest",
+          "marker": "=== RUN   Test",
+          "via": "tool_result",
+          "bytes": 4065
+        },
+        {
+          "kind": "csv",
+          "marker": "order_id,tenant_id,region",
+          "via": "tool_result",
+          "bytes": 628
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 3847
+        },
+        {
+          "kind": "terraform_plan",
+          "marker": "Terraform will perform the following actions:",
+          "via": "tool_result",
+          "bytes": 8097
+        },
+        {
+          "kind": "mcp",
+          "marker": "structuredContent",
+          "via": "tool_result",
+          "bytes": 7392
+        },
+        {
+          "kind": "docker_build",
+          "marker": "load build definition from Dockerfile",
+          "via": "tool_result",
+          "bytes": 5419
+        },
+        {
+          "kind": "cargo",
+          "marker": "test result: FAILED.",
+          "via": "tool_result",
+          "bytes": 2688
+        },
+        {
+          "kind": "jest",
+          "marker": "Test Suites:",
+          "via": "tool_result",
+          "bytes": 16983
+        }
       ],
       "shapes": [
         "previous_response_id",

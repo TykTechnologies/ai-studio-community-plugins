@@ -13,6 +13,10 @@ credentials and no captured traffic.
 - `internal/corpus` generates the files from code (`go generate ./internal/corpus`).
 - Each entry gets its own random source, seeded from its name, so the output
   is the same byte for byte on every run.
+- Agent-loop entries end with a short `edit_file` (or `apply_patch`) step, so
+  the tool output an entry is about sits in an older turn than the newest.
+  The default policy keeps the newest turn at level 1 (`protect_recent_turns`),
+  which would otherwise hide every lossy reducer.
   `TestCorpusMatchesGenerator` fails if the committed files and the generator
   ever differ.
 - The content describes one invented company, "Acme", and its "ledger"

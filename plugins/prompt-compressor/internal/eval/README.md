@@ -18,7 +18,9 @@ the machine.
 `report.json` and `report.md` give, for each level:
 
 - **Token reduction per tool kind**: the tool-result units of every body,
-  before and after.
+  before and after. A second table does the same for the last turn of each
+  full-history session, which holds the session's whole tool mix at the
+  sizes agents produce.
 - **Session cost with cache**: each 30-turn session is billed the way the
   vendor would bill it, with the gateway's own formula
   (`models.ChatRecordCost`) at the `-prices` list prices. The defaults are

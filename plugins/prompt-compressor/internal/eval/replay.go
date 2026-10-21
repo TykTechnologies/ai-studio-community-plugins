@@ -11,6 +11,7 @@ package eval
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -157,6 +158,10 @@ type LevelResult struct {
 	// Unattributed: tokens saved in entries whose unit layout changed, so
 	// savings could not be assigned to a tool kind.
 	Unattributed int `json:"unattributed_saved_tokens"`
+	// SessionByKind is ByKind over the last turn of each full-history
+	// session; SessionUnattributed as Unattributed.
+	SessionByKind       map[string]KindStats `json:"session_by_kind"`
+	SessionUnattributed int                  `json:"session_unattributed_saved_tokens"`
 	// SkipViolations are pass-through bodies the compressor changed, and
 	// native-context-management bodies compressed beyond level 1. Any is a
 	// bug.
@@ -192,7 +197,7 @@ func Replay(m corpus.Manifest, o Options) (*Report, error) {
 		baseline[s.Name] = r.Cost
 	}
 	for _, level := range o.Levels {
-		lr := LevelResult{Level: level, ByKind: map[string]KindStats{}, SkipViolations: []string{}, Nondeterministic: []string{}, Errors: []string{}}
+		lr := LevelResult{Level: level, ByKind: map[string]KindStats{}, SessionByKind: map[string]KindStats{}, SkipViolations: []string{}, Nondeterministic: []string{}, Errors: []string{}}
 		for _, e := range m.Entries {
 			replayEntry(e, level, o, &lr)
 		}
@@ -247,25 +252,36 @@ func replayEntry(e corpus.Entry, level int, o Options, lr *LevelResult) {
 	lr.TokensBefore += before
 	lr.TokensAfter += after
 
-	ub, err1 := segments.ExtractUnits(e.Format, body)
-	ua, err2 := segments.ExtractUnits(e.Format, out)
+	ok, err := attributeKinds(lr.ByKind, e.Tools, e.Format, body, out, tk)
+	if err != nil {
+		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: units: %s", e.Name, ErrorClass(err)))
+	} else if !ok {
+		lr.Unattributed += before - after
+	}
+}
+
+// attributeKinds adds each tool result's tokens before and after
+// compression to its kind; false when compression changed the unit layout,
+// so results cannot be paired.
+func attributeKinds(by map[string]KindStats, refs []corpus.ToolRef, format string, in, out []byte, tk Tokenizer) (bool, error) {
+	ub, err1 := segments.ExtractUnits(format, in)
+	ua, err2 := segments.ExtractUnits(format, out)
 	if err1 != nil || err2 != nil {
-		lr.Errors = append(lr.Errors, fmt.Sprintf("%s: units: %s", e.Name, ErrorClass(errors.Join(err1, err2))))
-		return
+		return false, errors.Join(err1, err2)
 	}
 	tb, ta := toolUnits(ub), toolUnits(ua)
 	if len(tb) != len(ta) {
-		lr.Unattributed += before - after
-		return
+		return false, nil
 	}
 	for i, u := range tb {
-		kind := kindOf(e, u.Text)
-		ks := lr.ByKind[kind]
+		kind := kindOf(refs, u.Text)
+		ks := by[kind]
 		ks.Units++
 		ks.Before += tk.Count([]byte(u.Text))
 		ks.After += tk.Count([]byte(ta[i].Text))
-		lr.ByKind[kind] = ks
+		by[kind] = ks
 	}
+	return true, nil
 }
 
 func toolUnits(units []segments.Unit) []segments.Unit {
@@ -278,11 +294,16 @@ func toolUnits(units []segments.Unit) []segments.Unit {
 	return out
 }
 
-// kindOf names the tool kind of a tool result by the corpus markers; a
+// kindOf names the tool kind of a tool result by the corpus markers, also
+// inside a JSON string (Codex wraps shell output as {"output": "..."}); a
 // result no marker matches (a patch confirmation) is "other".
-func kindOf(e corpus.Entry, text string) string {
-	for _, ref := range e.Tools {
-		if ref.Via == "tool_result" && strings.Contains(text, ref.Marker) {
+func kindOf(refs []corpus.ToolRef, text string) string {
+	for _, ref := range refs {
+		if ref.Via != "tool_result" {
+			continue
+		}
+		esc, _ := json.Marshal(ref.Marker)
+		if strings.Contains(text, ref.Marker) || strings.Contains(text, string(esc[1:len(esc)-1])) {
 			return string(ref.Kind)
 		}
 	}
@@ -332,6 +353,14 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 		}
 		r.Usage = r.Usage.Add(TurnUsage(rule, tokens, shared, explicit, o.OutputTokens))
 		prevIn, prevOut = in, out
+	}
+	// The last turn of a full-history session holds every tool result,
+	// all but the newest past the protected turns: what each kind's
+	// reducer does to session-shaped output.
+	if lr != nil && s.History == "full" && prevIn != nil {
+		if ok, err := attributeKinds(lr.SessionByKind, s.Tools, s.Format, prevIn, prevOut, tk); err != nil || !ok {
+			lr.SessionUnattributed += tk.Count(prevIn) - tk.Count(prevOut)
+		}
 	}
 	r.Cost = price.Cost(r.Usage)
 	r.CacheReadShare = r.Usage.CacheReadShare()
@@ -451,9 +480,11 @@ func commonPrefix(a, b []byte) int {
 }
 
 // Kinds returns the tool kinds of a level in a fixed order.
-func (lr LevelResult) Kinds() []string {
+func (lr LevelResult) Kinds() []string { return sortedKinds(lr.ByKind) }
+
+func sortedKinds(by map[string]KindStats) []string {
 	var ks []string
-	for k := range lr.ByKind {
+	for k := range by {
 		ks = append(ks, k)
 	}
 	sort.Strings(ks)

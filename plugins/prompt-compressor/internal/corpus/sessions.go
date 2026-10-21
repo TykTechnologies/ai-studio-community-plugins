@@ -56,7 +56,7 @@ var followUps = map[int]string{
 }
 
 // sessionConvo builds the 29 steps behind a 30-turn session.
-func sessionConvo(name, style, model string, tools []ToolDef) (*Convo, []Kind) {
+func sessionConvo(name, style, model string, tools []ToolDef) (*Convo, []Kind, []ToolRef) {
 	b := newBuilder(name, style)
 	seen := map[Kind]bool{}
 	var steps []Step
@@ -84,14 +84,14 @@ func sessionConvo(name, style, model string, tools []ToolDef) (*Convo, []Kind) {
 		kinds = append(kinds, k)
 	}
 	sort.Slice(kinds, func(i, j int) bool { return kinds[i] < kinds[j] })
-	return &Convo{Model: model, System: codingSystem, Tools: tools, Task: "The nightly reconciliation job reports mismatches for EUR invoices since the money package refactor. Find the cause across the Go API, the Python worker and the web app, fix it, and add regression tests.", Steps: steps}, kinds
+	return &Convo{Model: model, System: codingSystem, Tools: tools, Task: "The nightly reconciliation job reports mismatches for EUR invoices since the money package refactor. Find the cause across the Go API, the Python worker and the web app, fix it, and add regression tests.", Steps: steps}, kinds, b.refs
 }
 
 // Sessions builds the multi-turn agent sessions.
 func Sessions() []Session {
 	var ss []Session
 	{
-		c, kinds := sessionConvo("session_anthropic", "anthropic", modelClaude, codingTools())
+		c, kinds, refs := sessionConvo("session_anthropic", "anthropic", modelClaude, codingTools())
 		g := NewR("session_anthropic/opaque")
 		for i := range c.Steps {
 			if i%3 == 0 {
@@ -100,7 +100,7 @@ func Sessions() []Session {
 			}
 		}
 		c.Steps[4].Calls[0].Blocks, c.Steps[4].Calls[0].Image, c.Steps[4].Calls[0].ImageData = true, true, pngImage(g)
-		s := Session{Name: "anthropic_agent_30", Format: "anthropic", Path: pathAnthropic, History: "full", MovingCacheControl: true, Kinds: kinds,
+		s := Session{Name: "anthropic_agent_30", Format: "anthropic", Path: pathAnthropic, History: "full", MovingCacheControl: true, Kinds: kinds, Tools: refs,
 			Description: "A Claude Code style session: system and tools cached, cache_control moved to the newest user message every turn, thinking with signatures on every third step, one image result.",
 			Shapes:      []string{ShapeCacheControlSystem, ShapeCacheControlTools, ShapeCacheControlMoving, ShapeThinking, ShapeImage, ShapeParallelToolCalls, ShapeUserFollowUp}}
 		for n := 0; n < SessionTurns; n++ {
@@ -109,8 +109,8 @@ func Sessions() []Session {
 		ss = append(ss, s)
 	}
 	{
-		c, kinds := sessionConvo("session_openai", "openai", modelGPT, codingTools())
-		s := Session{Name: "openai_agent_30", Format: "openai", Path: pathOpenAIChat, History: "full", Kinds: kinds,
+		c, kinds, refs := sessionConvo("session_openai", "openai", modelGPT, codingTools())
+		s := Session{Name: "openai_agent_30", Format: "openai", Path: pathOpenAIChat, History: "full", Kinds: kinds, Tools: refs,
 			Description: "An OpenAI Chat Completions agent session with the developer role and occasional parallel tool calls.",
 			Shapes:      []string{ShapeDeveloperRole, ShapeParallelToolCalls, ShapeUserFollowUp}}
 		for n := 0; n < SessionTurns; n++ {
@@ -119,7 +119,7 @@ func Sessions() []Session {
 		ss = append(ss, s)
 	}
 	{
-		c, kinds := sessionConvo("session_bedrock", "bedrock", modelClaude, codingTools())
+		c, kinds, refs := sessionConvo("session_bedrock", "bedrock", modelClaude, codingTools())
 		g := NewR("session_bedrock/opaque")
 		for i := range c.Steps {
 			if i%4 == 0 {
@@ -132,7 +132,7 @@ func Sessions() []Session {
 				}
 			}
 		}
-		s := Session{Name: "bedrock_converse_agent_30", Format: "bedrock", Path: pathBedrockConverse, History: "full", Kinds: kinds,
+		s := Session{Name: "bedrock_converse_agent_30", Format: "bedrock", Path: pathBedrockConverse, History: "full", Kinds: kinds, Tools: refs,
 			Description: "A Bedrock Converse agent session with cachePoint blocks, reasoningContent on every fourth step and some structured json tool results.",
 			Shapes:      []string{ShapeBedrockCachePoint, ShapeReasoningContent, ShapeParallelToolCalls, ShapeUserFollowUp}}
 		for n := 0; n < SessionTurns; n++ {
@@ -141,7 +141,7 @@ func Sessions() []Session {
 		ss = append(ss, s)
 	}
 	{
-		c, kinds := sessionConvo("session_codex", "openai", modelCodex, codexTools())
+		c, kinds, refs := sessionConvo("session_codex", "openai", modelCodex, codexTools())
 		g := NewR("session_codex/opaque")
 		for i := range c.Steps {
 			st := &c.Steps[i]
@@ -158,7 +158,7 @@ func Sessions() []Session {
 					Out:  Output{Kind: "patch_result", Text: "Success. Updated the following files:\nM internal/billing/invoice.go\n", Marker: "Success."}})
 			}
 		}
-		s := Session{Name: "responses_codex_30", Format: "openai_responses", Path: pathResponses, History: "full", Kinds: kinds,
+		s := Session{Name: "responses_codex_30", Format: "openai_responses", Path: pathResponses, History: "full", Kinds: kinds, Tools: refs,
 			Description: "A Codex CLI style Responses session: full history with store false, encrypted reasoning items, wrapped shell outputs and apply_patch calls.",
 			Shapes:      []string{ShapeEncryptedReasoning, ShapeWrappedOutput, ShapeCustomToolOutput, ShapeUserFollowUp}}
 		key := g.UUID()
@@ -168,9 +168,9 @@ func Sessions() []Session {
 		ss = append(ss, s)
 	}
 	{
-		c, kinds := sessionConvo("session_chained", "openai", modelGPT, codingTools())
+		c, kinds, refs := sessionConvo("session_chained", "openai", modelGPT, codingTools())
 		g := NewR("session_chained/opaque")
-		s := Session{Name: "responses_chained_30", Format: "openai_responses", Path: pathResponses, History: "previous_response_id", Kinds: kinds,
+		s := Session{Name: "responses_chained_30", Format: "openai_responses", Path: pathResponses, History: "previous_response_id", Kinds: kinds, Tools: refs,
 			Description: "A Responses session chained with previous_response_id: each turn sends only the new tool outputs.",
 			Shapes:      []string{ShapePreviousResponseID, ShapeParallelToolCalls, ShapeUserFollowUp}}
 		prev := ""

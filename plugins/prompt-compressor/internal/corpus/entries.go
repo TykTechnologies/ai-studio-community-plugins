@@ -138,7 +138,10 @@ type Session struct {
 	ResponseIDs []string `json:"response_ids,omitempty"`
 	Pending     string   `json:"pending,omitempty"`
 	Kinds       []Kind   `json:"kinds"`
-	Shapes      []string `json:"shapes"`
+	// Tools names every tool output in the session by its marker, so a
+	// report can attribute tokens to tool kinds.
+	Tools  []ToolRef `json:"tools,omitempty"`
+	Shapes []string  `json:"shapes"`
 
 	bodies [][]byte
 }
@@ -153,13 +156,16 @@ type Manifest struct {
 
 // builder holds the state of one entry's construction.
 type builder struct {
+	name  string
 	g     *R
 	style string
 	n     int
 	refs  []ToolRef
 }
 
-func newBuilder(name, style string) *builder { return &builder{g: NewR(name), style: style} }
+func newBuilder(name, style string) *builder {
+	return &builder{name: name, g: NewR(name), style: style}
+}
 
 func (b *builder) out(kind Kind, variant string, size int) Output {
 	b.n++
@@ -182,8 +188,22 @@ func (b *builder) think(s *Step, topic string) {
 	s.Signature = b.g.B64(b.g.N(180, 420))
 }
 
+// convo ends the steps with a short edit, so the outputs an entry is about
+// sit in an older turn than the newest: the default policy keeps the
+// newest turn at level 1, which would hide every lossy reducer (eac.70).
 func (b *builder) convo(model, task string, steps ...Step) *Convo {
+	steps = append(steps, b.followUp())
 	return &Convo{Model: model, System: codingSystem, Tools: codingTools(), Task: task, Steps: steps}
+}
+
+// followUp is an edit_file call and its one-line confirmation. It draws
+// from its own generator so the entry's other content stays as it was.
+func (b *builder) followUp() Step {
+	g := NewR(b.name + "/follow-up")
+	path := []string{"internal/billing/rounding.go", "internal/ledger/reconcile.go", "web/src/format/money.ts", "reports/src/main/java/com/acme/reports/Totals.java"}[g.N(0, 3)]
+	out := Output{Kind: "edit_result", Text: "The file " + path + " has been updated.", Marker: "has been updated."}
+	return Step{Text: "Applying the fix.", Calls: []Call{{ID: CallID(g, b.style), Name: "edit_file",
+		Args: O("path", path, "old_string", "scale := 1", "new_string", "scale := 2"), Out: out}}}
 }
 
 func (b *builder) entry(name, format, path, desc string, body *Obj, shapes ...string) Entry {
@@ -219,7 +239,7 @@ func Entries() []Entry {
 		s2 := b.step("Now the parser tests.", b.out(Cargo, "", 12000))
 		c := b.convo(modelClaude, "The decimal-comma parser tests started failing after the rust_decimal bump. Find out why.", s1, s2)
 		add(b.entry("anthropic_cargo_string", "anthropic", pathAnthropic, "tool_result content as plain strings: a tree listing and a failing cargo test run (is_error).",
-			RenderAnthropic(c, 2, AnthropicOpts{}), ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{}), ShapeToolResultString, ShapeIsError))
 	}
 	{
 		b := newBuilder("anthropic_jest_blocks_image", "anthropic")
@@ -228,7 +248,7 @@ func Entries() []Entry {
 		s1.Calls[0].ImageData = pngImage(b.g)
 		c := b.convo(modelClaude, "The invoice table shows €1,234.5 instead of €1,234.50. Fix the formatter and its test.", s1)
 		add(b.entry("anthropic_jest_blocks_image", "anthropic", pathAnthropic, "tool_result content as a block array (text with ANSI colour codes, then a screenshot image block).",
-			RenderAnthropic(c, 1, AnthropicOpts{}), ShapeToolResultBlocks, ShapeImage, ShapeANSI, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{}), ShapeToolResultBlocks, ShapeImage, ShapeANSI, ShapeIsError))
 	}
 	{
 		b := newBuilder("anthropic_cache_control", "anthropic")
@@ -237,7 +257,7 @@ func Entries() []Entry {
 		s2.Calls[0].Blocks, s2.Calls[0].CacheControl = true, true
 		c := b.convo(modelClaude, "Make the app build green again after the reports refactor.", s1, s2)
 		add(b.entry("anthropic_cache_control", "anthropic", pathAnthropic, "cache_control on the system block, on the last tool definition, and block-level on a tool_result (gradle log).",
-			RenderAnthropic(c, 2, AnthropicOpts{SystemCache: true, ToolsCache: true}), ShapeCacheControlSystem, ShapeCacheControlTools, ShapeCacheControlBlock, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{SystemCache: true, ToolsCache: true}), ShapeCacheControlSystem, ShapeCacheControlTools, ShapeCacheControlBlock, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
 	}
 	{
 		b := newBuilder("anthropic_thinking_gotest", "anthropic")
@@ -248,7 +268,7 @@ func Entries() []Entry {
 		s2.Redacted = b.g.B64(b.g.N(300, 700))
 		c := b.convo(modelClaude, "go test ./internal/... panics in CI on the billing package. Find the nil dereference.", s1, s2)
 		add(b.entry("anthropic_thinking_gotest", "anthropic", pathAnthropic, "Extended thinking: thinking blocks with signatures and a redacted_thinking block before tool calls; a go test panic with goroutine dump.",
-			RenderAnthropic(c, 2, AnthropicOpts{Thinking: true}), ShapeThinking, ShapeRedactedThinking, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{Thinking: true}), ShapeThinking, ShapeRedactedThinking, ShapeToolResultString, ShapeIsError))
 	}
 	{
 		b := newBuilder("anthropic_document_csv", "anthropic")
@@ -259,7 +279,7 @@ func Entries() []Entry {
 		doc := O("type", "document", "source", O("type", "base64", "media_type", "text/plain", "data", base64.StdEncoding.EncodeToString([]byte(csv.Text))), "title", "orders-2026-q3.csv")
 		img := O("type", "image", "source", O("type", "base64", "media_type", "image/png", "data", base64.StdEncoding.EncodeToString(pngImage(b.g))))
 		add(b.entry("anthropic_document_csv", "anthropic", pathAnthropic, "A base64 text/plain document (CSV export) and an image in the user turn; a large pretty-printed JSON API response as a tool result.",
-			RenderAnthropic(c, 1, AnthropicOpts{TaskBlocks: []any{doc, img}}), ShapeBase64TextDocument, ShapeImage, ShapeToolResultString))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{TaskBlocks: []any{doc, img}}), ShapeBase64TextDocument, ShapeImage, ShapeToolResultString))
 	}
 	{
 		b := newBuilder("anthropic_context_management", "anthropic")
@@ -268,7 +288,7 @@ func Entries() []Entry {
 		c := b.convo(modelClaude, "The web image build fails and the staging pod is crash-looping. Sort out both.", s1, s2)
 		cm := O("context_management", O("edits", []any{O("type", "clear_tool_uses_20250919", "trigger", O("type", "input_tokens", "value", 30000), "keep", O("type", "tool_uses", "value", 3), "clear_at_least", O("type", "input_tokens", "value", 5000))}))
 		e := b.entry("anthropic_context_management", "anthropic", pathAnthropic, "Top-level context_management (clear_tool_uses): the vendor edits context itself, so the compressor caps the level at 1.",
-			RenderAnthropic(c, 2, AnthropicOpts{Extra: cm}), ShapeContextManagement, ShapeToolResultString, ShapeIsError)
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{Extra: cm}), ShapeContextManagement, ShapeToolResultString, ShapeIsError)
 		e.NativeContextManagement = true
 		add(e)
 	}
@@ -277,7 +297,7 @@ func Entries() []Entry {
 		s1 := b.step("Planning the infra change.", b.out(TerraformPlan, "", 15000))
 		s2 := b.step("Reading the rounding docs.", b.out(HTML, "", 14000))
 		c := b.convo(modelClaude, "Continue the upgrade: plan the Postgres 16 move and confirm the rounding rules still hold.", s1, s2)
-		body := RenderAnthropic(c, 2, AnthropicOpts{Extra: O("context_management", O("edits", []any{O("type", "compact_20260112", "trigger", O("type", "input_tokens", "value", 150000))}))})
+		body := RenderAnthropic(c, len(c.Steps), AnthropicOpts{Extra: O("context_management", O("edits", []any{O("type", "compact_20260112", "trigger", O("type", "input_tokens", "value", 150000))}))})
 		msgs := body.Get("messages").([]any)
 		summary := O("role", "assistant", "content", []any{O("type", "compaction", "content", "Summary of earlier work: the engineer asked to upgrade the ledger database to Postgres 16. "+b.g.Sentence(40)+" "+b.g.Sentence(30))})
 		body.Set("messages", append([]any{O("role", "user", "content", "Start the Postgres 16 upgrade.")}, append([]any{summary}, msgs...)...))
@@ -293,14 +313,14 @@ func Entries() []Entry {
 		s2 := b.step("Running the worker tests.", b.out(Pytest, "", 14000))
 		c := b.convo(modelClaude, "Check whether there's already a tracker issue for the reconcile mismatch, then run the worker tests.", s1, s2)
 		add(b.entry("anthropic_mcp_result", "anthropic", pathAnthropic, "An MCP tools/call result relayed as a tool_result text block (content + structuredContent JSON), and a pytest failure.",
-			RenderAnthropic(c, 2, AnthropicOpts{}), ShapeMCPResult, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{}), ShapeMCPResult, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
 	}
 	{
 		b := newBuilder("anthropic_parallel_maven_kubectl", "anthropic")
 		s1 := b.step("Running the build and checking the cluster in parallel.", b.out(Maven, "", 45000), b.out(Kubectl, "get_pods", 9000))
 		c := b.convo(modelClaude, "Reports deploys are failing. Is it the build or the cluster?", s1)
 		add(b.entry("anthropic_parallel_maven_kubectl", "anthropic", pathAnthropic, "Two parallel tool_use blocks answered in one user message: a large maven log with dependency downloads and a kubectl pod table.",
-			RenderAnthropic(c, 1, AnthropicOpts{Stream: true}), ShapeParallelToolCalls, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{Stream: true}), ShapeParallelToolCalls, ShapeToolResultString, ShapeIsError))
 	}
 
 	// ---- OpenAI Chat Completions ----
@@ -309,14 +329,14 @@ func Entries() []Entry {
 		s1 := b.step("", b.out(Pytest, "", 20000))
 		c := b.convo(modelGPT, "Run the reconcile tests and tell me which assertions fail — the €0.01 drift is back.", s1)
 		add(b.entryStyle("openai_pytest_developer", "openai", pathOpenAIChat, "developer role, serialised the way Python's json.dumps does by default (spaced separators, non-ASCII escaped); a pytest failure.",
-			RenderOpenAI(c, 1, OpenAIOpts{Developer: true}), PythonDefault, ShapeDeveloperRole, ShapePythonJSON, ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{Developer: true}), PythonDefault, ShapeDeveloperRole, ShapePythonJSON, ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_parallel_k8s_diff", "openai")
 		s1 := b.step("Looking at the pods, the API logs and the last changes together.", b.out(Kubectl, "get_pods", 8000), b.out(Kubectl, "logs", 12000), b.out(GitDiff, "", 10000))
 		c := b.convo(modelGPT, "ledger-api is returning 503s in prod since this morning's deploy.", s1)
 		add(b.entry("openai_parallel_k8s_diff", "openai", pathOpenAIChat, "Three parallel tool_calls: a pod table, JSON-lines container logs and a git diff.",
-			RenderOpenAI(c, 1, OpenAIOpts{Stream: true}), ShapeParallelToolCalls, ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{Stream: true}), ShapeParallelToolCalls, ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_terraform_rg", "openai")
@@ -324,7 +344,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(TerraformPlan, "", 25000))
 		c := b.convo(modelGPT, "Before we apply, find every caller of the rounding helper and show me the plan.", s1, s2)
 		add(b.entry("openai_terraform_rg", "openai", pathOpenAIChat, "ripgrep --heading output and a long terraform plan with refresh lines.",
-			RenderOpenAI(c, 2, OpenAIOpts{}), ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_json_api_mcp", "openai")
@@ -333,7 +353,7 @@ func Entries() []Entry {
 		s2.Calls[0].Blocks = true
 		c := b.convo(modelGPT, "List the open billing issues from the API and the tracker and de-duplicate them.", s1, s2)
 		add(b.entry("openai_json_api_mcp", "openai", pathOpenAIChat, "A large compact JSON array from an API, and an MCP result sent as tool content parts.",
-			RenderOpenAI(c, 2, OpenAIOpts{}), ShapeToolResultString, ShapeToolContentParts, ShapeMCPResult))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString, ShapeToolContentParts, ShapeMCPResult))
 	}
 	{
 		b := newBuilder("openai_gradle_docker", "openai")
@@ -341,7 +361,7 @@ func Entries() []Entry {
 		s2 := b.step("The app builds locally; trying the image.", b.out(DockerBuild, "", 22000))
 		c := b.convo(modelGPT, "CI fails on both the gradle build and the docker build. Go through both logs.", s1, s2)
 		add(b.entry("openai_gradle_docker", "openai", pathOpenAIChat, "A gradle build with task lines and a BuildKit docker build log with apt and npm noise.",
-			RenderOpenAI(c, 2, OpenAIOpts{}), ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_csv_html", "openai")
@@ -349,13 +369,13 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(HTML, "", 20000))
 		c := b.convo(modelGPT, "Export last quarter's orders and check them against the documented rounding rules.", s1, s2)
 		add(b.entry("openai_csv_html", "openai", pathOpenAIChat, "A CSV export and a fetched HTML docs page with scripts, styles and navigation.",
-			RenderOpenAI(c, 2, OpenAIOpts{}), ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_jest_cargo_image", "openai")
 		s1 := b.step("", b.out(Jest, "", 12000), b.out(Cargo, "", 9000))
 		c := b.convo(modelGPT, "", s1)
-		body := RenderOpenAI(c, 1, OpenAIOpts{})
+		body := RenderOpenAI(c, len(c.Steps), OpenAIOpts{})
 		msgs := body.Get("messages").([]any)
 		msgs[1] = O("role", "user", "content", []any{
 			O("type", "text", "text", "This is what the statements page looks like after the parser change. Run the web and parser tests."),
@@ -370,14 +390,14 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(GoTest, "", 16000))
 		c := b.convo(modelGPT, "Which test in internal/money is failing, and why?", s1, s2)
 		add(b.entry("openai_gotest_ls", "openai", pathOpenAIChat, "ls -la output and verbose go test output with testify diffs.",
-			RenderOpenAI(c, 2, OpenAIOpts{}), ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 	{
 		b := newBuilder("openai_maven_large", "openai")
 		s1 := b.step("", b.out(Maven, "", 60000))
 		c := b.convo(modelGPT, "Why does the reports build fail?", s1)
 		add(b.entry("openai_maven_large", "openai", pathOpenAIChat, "A 60 KB maven log dominated by dependency download lines.",
-			RenderOpenAI(c, 1, OpenAIOpts{}), ShapeToolResultString))
+			RenderOpenAI(c, len(c.Steps), OpenAIOpts{}), ShapeToolResultString))
 	}
 
 	// ---- Bedrock Converse ----
@@ -389,7 +409,7 @@ func Entries() []Entry {
 		b.think(&s2, "build")
 		c := b.convo(modelClaude, "Review the reports change and get the build passing.", s1, s2)
 		add(b.entry("bedrock_converse_cachepoint", "bedrock", pathBedrockConverse, "Converse with cachePoint blocks after the system prompt and the tool config, reasoningContent with signatures, a git diff and a maven log.",
-			RenderBedrock(c, 2, BedrockOpts{CachePoints: true, Reasoning: true}), ShapeBedrockCachePoint, ShapeReasoningContent, ShapeIsError))
+			RenderBedrock(c, len(c.Steps), BedrockOpts{CachePoints: true, Reasoning: true}), ShapeBedrockCachePoint, ShapeReasoningContent, ShapeIsError))
 	}
 	{
 		b := newBuilder("bedrock_converse_json_result", "bedrock")
@@ -399,7 +419,7 @@ func Entries() []Entry {
 		s2.Calls[0].Structured = true
 		c := b.convo(modelClaude, "Which deployments are behind the release in the tracker issues?", s1, s2)
 		add(b.entry("bedrock_converse_json_result", "bedrock", pathBedrockConverse, "toolResult content as json blocks (structured): kubectl -o json and an API issue list.",
-			RenderBedrock(c, 2, BedrockOpts{}), ShapeToolResultJSON))
+			RenderBedrock(c, len(c.Steps), BedrockOpts{}), ShapeToolResultJSON))
 	}
 	{
 		b := newBuilder("bedrock_converse_terraform_pytest", "bedrock")
@@ -407,7 +427,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(Pytest, "", 12000))
 		c := b.convo(modelClaude, "Plan the worker infra change and make sure the worker tests still pass.", s1, s2)
 		add(b.entry("bedrock_converse_terraform_pytest", "bedrock", pathBedrockConverse, "A terraform plan and a failing pytest run (toolResult status error).",
-			RenderBedrock(c, 2, BedrockOpts{}), ShapeIsError))
+			RenderBedrock(c, len(c.Steps), BedrockOpts{}), ShapeIsError))
 	}
 	{
 		b := newBuilder("bedrock_converse_docker_html_csv", "bedrock")
@@ -415,7 +435,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(CSV, "", 8000))
 		c := b.convo(modelClaude, "Fix the image build, then check the export against the docs.", s1, s2)
 		add(b.entry("bedrock_converse_docker_html_csv", "bedrock", pathBedrockConverse, "Parallel toolUse (docker build, HTML page) then a CSV export.",
-			RenderBedrock(c, 2, BedrockOpts{}), ShapeParallelToolCalls, ShapeIsError))
+			RenderBedrock(c, len(c.Steps), BedrockOpts{}), ShapeParallelToolCalls, ShapeIsError))
 	}
 
 	// ---- Bedrock InvokeModel with an Anthropic body ----
@@ -426,7 +446,7 @@ func Entries() []Entry {
 		s2 := b.step("And the parser crate.", b.out(Cargo, "", 9000))
 		c := b.convo(modelClaude, "Get both the app and the parser building.", s1, s2)
 		add(b.entry("bedrock_invoke_anthropic", "bedrock", pathBedrockInvoke, "InvokeModel carrying an Anthropic body (anthropic_version, no model), with system and block-level cache_control.",
-			RenderAnthropic(c, 2, AnthropicOpts{Bedrock: true, SystemCache: true}), ShapeCacheControlSystem, ShapeCacheControlBlock, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{Bedrock: true, SystemCache: true}), ShapeCacheControlSystem, ShapeCacheControlBlock, ShapeToolResultBlocks, ShapeToolResultString, ShapeIsError))
 	}
 	{
 		b := newBuilder("bedrock_invoke_mcp_jest", "anthropic")
@@ -434,7 +454,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(Jest, "", 11000))
 		c := b.convo(modelClaude, "Find the tracker issue for the pagination bug and the code it touches, then run the web tests.", s1, s2)
 		add(b.entry("bedrock_invoke_mcp_jest", "bedrock", pathBedrockInvoke, "InvokeModel Anthropic body: parallel MCP + ripgrep results, then jest.",
-			RenderAnthropic(c, 2, AnthropicOpts{Bedrock: true}), ShapeMCPResult, ShapeParallelToolCalls, ShapeToolResultString, ShapeIsError))
+			RenderAnthropic(c, len(c.Steps), AnthropicOpts{Bedrock: true}), ShapeMCPResult, ShapeParallelToolCalls, ShapeToolResultString, ShapeIsError))
 	}
 
 	// ---- Bedrock InvokeModel, non-Anthropic bodies: pass through ----
@@ -467,7 +487,7 @@ func Entries() []Entry {
 		s2.ThoughtSig = b.g.B64(b.g.N(120, 300))
 		c := b.convo("", "Find where Subtotal is called without a context and run the tests.", s1, s2)
 		add(b.entry("google_gotest_rg", "google_ai", pathGoogleAI, "functionResponse {output: text} parts; functionCall parts with thoughtSignature (Gemini 2.5).",
-			RenderGoogle(c, 2, GoogleOpts{}), ShapeThoughtSignature))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{}), ShapeThoughtSignature))
 	}
 	{
 		b := newBuilder("google_json_structured", "google")
@@ -476,14 +496,14 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(CSV, "", 10000))
 		c := b.convo("", "Match the refund issues against the order export.", s1, s2)
 		add(b.entry("google_json_structured", "google_ai", pathGoogleAI, "A structured functionResponse (response.result holding the JSON array), and a CSV export as text.",
-			RenderGoogle(c, 2, GoogleOpts{}), ShapeToolResultJSON))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{}), ShapeToolResultJSON))
 	}
 	{
 		b := newBuilder("google_parallel_k8s_tf", "google")
 		s1 := b.step("", b.out(Kubectl, "describe", 7000), b.out(TerraformPlan, "", 12000))
 		c := b.convo("", "Is the crash-loop caused by the pending infra change?", s1)
 		add(b.entry("google_parallel_k8s_tf", "google_ai", pathGoogleAI, "Parallel functionCalls answered by two functionResponse parts in one content.",
-			RenderGoogle(c, 1, GoogleOpts{}), ShapeParallelToolCalls))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{}), ShapeParallelToolCalls))
 	}
 	{
 		b := newBuilder("google_docker_mcp", "google")
@@ -492,7 +512,7 @@ func Entries() []Entry {
 		s2.Calls[0].Structured = true
 		c := b.convo("", "The web image fails to build. Is there an issue for it already?", s1, s2)
 		add(b.entry("google_docker_mcp", "google_ai", pathGoogleAI, "A docker build log, and an MCP result passed as a structured functionResponse.",
-			RenderGoogle(c, 2, GoogleOpts{}), ShapeMCPResult, ShapeToolResultJSON))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{}), ShapeMCPResult, ShapeToolResultJSON))
 	}
 
 	// ---- Vertex AI ----
@@ -502,21 +522,21 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(Maven, "", 20000))
 		c := b.convo("", "Build the reports service and tell me what fails.", s1, s2)
 		add(b.entry("vertex_function_role", "vertex", pathVertex, "Function responses sent with role \"function\" (older Vertex clients); a tree listing and a maven log.",
-			RenderGoogle(c, 2, GoogleOpts{FunctionRole: true}), ShapeFunctionRole))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{FunctionRole: true}), ShapeFunctionRole))
 	}
 	{
 		b := newBuilder("vertex_pytest_html", "google")
 		s1 := b.step("", b.out(Pytest, "", 12000), b.out(HTML, "", 12000))
 		c := b.convo("", "Do the worker tests agree with the documented rounding rules?", s1)
 		add(b.entry("vertex_pytest_html", "vertex", pathVertex, "Parallel pytest and HTML page function responses.",
-			RenderGoogle(c, 1, GoogleOpts{}), ShapeParallelToolCalls))
+			RenderGoogle(c, len(c.Steps), GoogleOpts{}), ShapeParallelToolCalls))
 	}
 	{
 		b := newBuilder("vertex_jest_diff", "google")
 		s1 := b.step("", b.out(GitDiff, "", 9000))
 		s2 := b.step("", b.out(Jest, "", 10000))
 		c := b.convo("", "Review the web change and run its tests.", s1, s2)
-		add(b.entry("vertex_jest_diff", "vertex", pathVertex, "A git diff and a jest run.", RenderGoogle(c, 2, GoogleOpts{})))
+		add(b.entry("vertex_jest_diff", "vertex", pathVertex, "A git diff and a jest run.", RenderGoogle(c, len(c.Steps), GoogleOpts{})))
 	}
 
 	// ---- Ollama ----
@@ -526,7 +546,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(Cargo, "", 10000))
 		c := b.convo(modelOllama, "Run the parser tests and list its fixture files.", s1, s2)
 		add(b.entry("ollama_chat_cargo_find", "ollama", pathOllamaChat, "Ollama /api/chat with role tool messages (tool_name) and object arguments: find output and cargo test.",
-			RenderOllama(c, 2)))
+			RenderOllama(c, len(c.Steps))))
 	}
 	{
 		b := newBuilder("ollama_chat_gradle_csv_logs", "openai")
@@ -534,7 +554,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(CSV, "", 7000), b.out(Kubectl, "logs", 8000))
 		c := b.convo(modelOllama, "Build the app, then compare the export with what the API logged.", s1, s2)
 		add(b.entry("ollama_chat_gradle_csv_logs", "ollama", pathOllamaChat, "Ollama chat: gradle log, then parallel CSV export and JSON-lines logs.",
-			RenderOllama(c, 2), ShapeParallelToolCalls))
+			RenderOllama(c, len(c.Steps)), ShapeParallelToolCalls))
 	}
 	{
 		b := newBuilder("ollama_generate_pytest", "openai")
@@ -555,9 +575,13 @@ func Entries() []Entry {
 		s3 := b.step("Patched; re-running the parser tests too.", b.out(Cargo, "", 9000))
 		s3.Encrypted = "gAAAAAB" + b.g.B64(b.g.N(600, 1200))
 		s3.Calls[0].Name, s3.Calls[0].Args, s3.Calls[0].Wrapped = "shell", codexArgs("cd parser && cargo test"), true
-		c := &Convo{Model: modelCodex, System: codingSystem, Tools: codexTools(), Task: "Fix the nil Subtotal call in billing and make sure nothing else regressed.", Steps: []Step{s1, s2, s3}}
+		// a closing patch, so the cargo run is not the newest turn (eac.70)
+		f := NewR(b.name + "/follow-up")
+		done := Output{Kind: "patch_result", Text: "Success. Updated the following files:\nM parser/src/decimal.rs\n", Marker: "M parser/src/decimal.rs"}
+		s4 := Step{Encrypted: "gAAAAAB" + f.B64(f.N(600, 1200)), Calls: []Call{{ID: CallID(f, "openai"), Name: "apply_patch", Args: O("input", "*** Begin Patch\n*** Update File: parser/src/decimal.rs\n@@ fn parse_comma(s: &str) -> Result<Decimal, ParseError> {\n-    let scale = 1;\n+    let scale = 2;\n*** End Patch\n"), Out: done}}}
+		c := &Convo{Model: modelCodex, System: codingSystem, Tools: codexTools(), Task: "Fix the nil Subtotal call in billing and make sure nothing else regressed.", Steps: []Step{s1, s2, s3, s4}}
 		e := b.entry("responses_codex_shell", "openai_responses", pathResponses, "Codex CLI style: store false, encrypted reasoning items, shell outputs wrapped as a JSON string, an apply_patch custom tool call and output.",
-			RenderResponses(c, 3, ResponsesOpts{Codex: true, CacheKey: b.g.UUID()}), ShapeEncryptedReasoning, ShapeWrappedOutput, ShapeCustomToolOutput)
+			RenderResponses(c, len(c.Steps), ResponsesOpts{Codex: true, CacheKey: b.g.UUID()}), ShapeEncryptedReasoning, ShapeWrappedOutput, ShapeCustomToolOutput)
 		add(e)
 	}
 	{
@@ -574,7 +598,7 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(HTML, "", 10000), b.out(MCP, "", 8000))
 		c := b.convo(modelGPT, "Collect the open rounding issues from the API, the docs and the tracker.", s1, s2)
 		e := b.entry("responses_function_outputs", "openai_responses", pathResponses, "Responses item array with function_call / function_call_output pairs (JSON API, HTML, MCP).",
-			RenderResponses(c, 2, ResponsesOpts{}), ShapeMCPResult, ShapeParallelToolCalls)
+			RenderResponses(c, len(c.Steps), ResponsesOpts{}), ShapeMCPResult, ShapeParallelToolCalls)
 		add(e)
 	}
 	{
@@ -585,10 +609,12 @@ func Entries() []Entry {
 		s2 := b.step("", b.out(DockerBuild, "", 12000))
 		s2.Calls[0].Name, s2.Calls[0].Args = "shell", codexArgs(s2.Calls[0].Out.Command)
 		s2.Encrypted = "gAAAAAB" + b.g.B64(800)
+		// No closing step: the entry is capped at level 1 whatever turn its
+		// outputs sit in.
 		c := &Convo{Model: modelCodex, System: codingSystem, Tools: codexTools(), Task: "Carry on with the upgrade.", Steps: []Step{s1, s2}}
 		compaction := O("type", "compaction", "encrypted_content", "gAAAAAB"+b.g.B64(1500))
 		e := b.entry("responses_compaction", "openai_responses", pathResponses, "A compaction item from /v1/responses/compact leading the input, and context_management asking for compaction: level capped at 1.",
-			RenderResponses(c, 2, ResponsesOpts{Codex: true, Prefix: []any{compaction}, Extra: O("context_management", []any{O("type", "compaction", "compact_threshold", 200000)})}), ShapeCompaction, ShapeContextManagement, ShapeEncryptedReasoning)
+			RenderResponses(c, len(c.Steps), ResponsesOpts{Codex: true, Prefix: []any{compaction}, Extra: O("context_management", []any{O("type", "compaction", "compact_threshold", 200000)})}), ShapeCompaction, ShapeContextManagement, ShapeEncryptedReasoning)
 		e.NativeContextManagement = true
 		add(e)
 	}
@@ -627,7 +653,7 @@ func Entries() []Entry {
 				"code", "print('"+canary("code-interpreter-code")+"')", "outputs", []any{O("type", "logs", "logs", canary("code-interpreter-logs"))}),
 		}
 		e := b.entry("responses_forged_items", "openai_responses", pathResponses, "Forged history items (reasoning, web/file search, computer, local shell, MCP and code interpreter calls) carrying canaries in the text the proxy's Responses reader screens; segments must read them and no level may rewrite them.",
-			RenderResponses(c, 1, ResponsesOpts{Prefix: forged}), ShapeForgedItems)
+			RenderResponses(c, len(c.Steps), ResponsesOpts{Prefix: forged}), ShapeForgedItems)
 		for _, where := range []string{"reasoning-summary", "reasoning-content", "web-search-query", "web-search-queries", "file-search-queries",
 			"file-search-result", "computer-text", "local-shell-command", "mcp-arguments", "mcp-output", "code-interpreter-code", "code-interpreter-logs"} {
 			e.Canaries = append(e.Canaries, "[canary:pc-forged-"+where+"]")

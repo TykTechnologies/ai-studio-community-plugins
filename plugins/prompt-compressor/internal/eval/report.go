@@ -37,6 +37,16 @@ func (r *Report) Markdown() string {
 		if l.Unattributed != 0 {
 			fmt.Fprintf(&b, "\n%d saved tokens could not be attributed to a kind (the unit layout changed).\n", l.Unattributed)
 		}
+		if len(l.SessionByKind) > 0 {
+			b.WriteString("\n### Tool output by kind, sessions (last turn of each full-history session)\n\n| Kind | Units | Tokens before | after | Reduction |\n|---|---|---|---|---|\n")
+			for _, k := range sortedKinds(l.SessionByKind) {
+				ks := l.SessionByKind[k]
+				fmt.Fprintf(&b, "| %s | %d | %d | %d | %s |\n", k, ks.Units, ks.Before, ks.After, pct(ks.Reduction()))
+			}
+			if l.SessionUnattributed != 0 {
+				fmt.Fprintf(&b, "\n%d saved tokens could not be attributed to a kind (the unit layout changed).\n", l.SessionUnattributed)
+			}
+		}
 		b.WriteString("\n### Sessions (30 turns each)\n\n| Session | Format | Input tokens before | after | Cache read | Cache write | Uncached | Cache-read share | Cost | at off | Change | Prefix breaks | Late compressions |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 		for _, s := range l.Sessions {
 			if s.Skipped != "" {

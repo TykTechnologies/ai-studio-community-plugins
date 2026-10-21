@@ -137,6 +137,17 @@ func TestDeterministicCompressionSavesAfterCache(t *testing.T) {
 			t.Errorf("%s reduction %.2f, want > 0.5 for a 600-byte cut", k, l.ByKind[k].Reduction())
 		}
 	}
+	// Session tool results are attributed to their kinds by marker (only
+	// the Codex apply_patch confirmations are "other"), and the session
+	// mix reaches the table.
+	if o := l.SessionByKind["other"]; l.SessionUnattributed != 0 || o.Units > 6 || o.Before > 6*30 {
+		t.Errorf("session results unattributed: %d tokens, other %+v", l.SessionUnattributed, o)
+	}
+	for _, k := range []string{"ripgrep", "gotest", "git_diff"} {
+		if l.SessionByKind[k].Units == 0 || l.SessionByKind[k].Reduction() <= 0 {
+			t.Errorf("session %s: %+v, want units cut by the truncator", k, l.SessionByKind[k])
+		}
+	}
 	for _, s := range l.Sessions {
 		if s.Skipped != "" {
 			continue
