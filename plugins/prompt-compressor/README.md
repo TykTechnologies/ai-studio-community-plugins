@@ -216,7 +216,7 @@ plugin loading. The full schema is in `config.schema.json`.
   level 3 stays capped there.
 - `protect_recent_turns` keeps the newest turns at level 1.
 - **drop_tools** (any level): tool definitions to remove from requests, by
-  name or by a prefix ending in `*` (`["deploy_*", "legacy_search"]`), for
+  name or by a prefix ending in `*` (`["legacy_*", "browser_screenshot"]`), for
   OpenAI chat, Responses, Anthropic, Google `functionDeclarations` and
   Bedrock `toolConfig.tools`. A tool the conversation already called, or
   that `tool_choice` (Google `allowedFunctionNames`, Bedrock `toolChoice`)
@@ -226,6 +226,15 @@ plugin loading. The full schema is in `config.schema.json`.
   dashboard's never-called tools are the candidates. Changing the list is a
   one-off prompt-cache miss for the Apps it applies to. Removed definitions
   count as the `drop_tools` strategy.
+
+  **drop_tools saves tokens; it is not an access control.** The client
+  decides whether a tool survives: a tool named by a tool call in the
+  history (which the client writes) or by `tool_choice` is kept,
+  `X-Tyk-Compression: off` skips the policy while `allow_client_bypass` is
+  on (the default), and the request passes through whole in `audit` mode,
+  while an App's metadata is unknown, over `max_body_bytes`, or on any
+  error. To keep a tool away from a model, don't give the App access to it,
+  or block the call with a filter or a guardrail on tool calls.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
   built-in tools) are never rewritten, nor are thinking blocks, signatures

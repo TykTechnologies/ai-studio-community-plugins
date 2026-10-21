@@ -654,7 +654,11 @@ class PromptCompressorPolicies extends HTMLElement {
       }),
       h('div', { className: 'muted' },
         'One tool name per line, or a prefix ending in "*". Matching definitions are removed from every request on this policy, '
-        + 'except a tool that a tool call in the conversation or tool_choice names, and except when removing them would leave no tools while the conversation holds tool calls.'));
+        + 'except a tool that a tool call in the conversation or tool_choice names, and except when removing them would leave no tools while the conversation holds tool calls.'),
+      h('div', { className: 'note', 'data-testid': 'pc-drop-tools-not-acl' },
+        'This saves tokens; it is not an access control. A client can keep any tool: by naming it in its conversation history or tool_choice, '
+        + 'by sending X-Tyk-Compression: off while client bypass is allowed, and whenever a request passes through uncompressed (audit mode, errors). '
+        + 'To keep a tool from a model, remove the App\'s access to it, or block its calls with a filter or a guardrail.'));
     if (JSON.stringify(list) !== originalDrop) {
       box.appendChild(h('div', { className: 'note', role: 'status', 'data-testid': 'pc-drop-tools-warning' },
         'Changing the drop list changes the tools every App on this policy sends, so each of their sessions misses the prompt cache once. '
