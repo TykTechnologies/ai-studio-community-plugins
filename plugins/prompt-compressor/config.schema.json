@@ -170,9 +170,9 @@
         "mask_after_turns": {
           "type": "integer",
           "title": "Mask after turns (level 3)",
-          "description": "Level 3 replaces tool results older than this many turns with a placeholder.",
+          "description": "Level 3 replaces tool results older than this many turns with a placeholder; 0 turns masking off. Each masking step rewrites the vendor's prompt cache, so it pays where cached input is not much cheaper than input (OpenAI chat models with a 50% cache discount) and costs more than it saves where cache reads are very cheap (Anthropic, GPT-5). Off by default.",
           "minimum": 0,
-          "default": 8
+          "default": 0
         },
         "mask_step_tokens": {
           "type": "integer",

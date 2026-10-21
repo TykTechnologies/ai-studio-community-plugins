@@ -115,7 +115,7 @@ func TestDefaults(t *testing.T) {
 		}
 		r := c.Resolve(Target{AppID: 1, LLMID: 2, LLMSlug: "x"}, "")
 		want := &Policy{Level: 1, Roles: []string{RoleTool}, MinUnitTokens: 300, ProtectRecentTurns: 1,
-			CacheMode: CacheDeterministic, MaxUnitTokens: 6000, MaskAfterTurns: 8, MaskStepTokens: 20000}
+			CacheMode: CacheDeterministic, MaxUnitTokens: 6000, MaskAfterTurns: 0, MaskStepTokens: 20000}
 		got := *r.Policy
 		got.hash, got.compiled = "", nil
 		if r.Name != DefaultPolicyName || r.Source != SourceDefault || !reflect.DeepEqual(&got, want) {

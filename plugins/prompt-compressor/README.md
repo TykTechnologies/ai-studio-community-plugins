@@ -197,11 +197,17 @@ plugin loading. The full schema is in `config.schema.json`.
   with no short lines is cut by bytes. JSON has its arrays cut to the floor
   above, then, if still over, becomes its field names and value types
   (`"string"`, `"number"`, `"boolean"`, one item per array and a count),
-  still JSON. Tool results older than `mask_after_turns` turns become a
-  placeholder (`[tyk-compressed: shell output, 12,345 tokens, masked after 8
-  turns]`); the masking boundary moves only when it would mask at least
-  `mask_step_tokens` more, so each move, which rewrites the cached prefix
-  once, buys a large saving. Masking replaces the whole result and ignores
+  still JSON. With `mask_after_turns` set (0, the default, does not mask),
+  tool results older than that many turns become a placeholder
+  (`[tyk-compressed: shell output, 12,345 tokens, masked after 8 turns]`);
+  the masking boundary moves only when it would mask at least
+  `mask_step_tokens` more and at least twice the tokens the move makes the
+  vendor re-cache, so each move, which rewrites the cached prefix once,
+  buys a large saving. Even so, replaying the corpus sessions, masking
+  saved money on OpenAI chat (cached input at half price) and Bedrock but
+  cost more than it saved on Anthropic and GPT-5 (cache reads at a tenth),
+  so turn it on per policy where cached input is not much cheaper than
+  input. Masking replaces the whole result and ignores
   `protect_patterns`. Results held in several leaves (structured JSON tool
   results) are not masked. Level 3 is capped at 2 on LLMs with request
   filters, and on LLMs the plugin has not looked up yet, unless

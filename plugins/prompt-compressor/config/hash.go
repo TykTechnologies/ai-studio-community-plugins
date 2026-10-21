@@ -23,7 +23,8 @@ import (
 //	   (compress/level3.go)
 //	6: git diff@2 (lock and generated files), grep@2 (dependency
 //	   directories), html@1, and a level-2 cut must remove 30% of a leaf
-const StrategyVersion = 6
+//	7: level3@2, a mask step must mask twice what it re-caches
+const StrategyVersion = 7
 
 // Hash returns the policy hash carried on every savings record: the SHA-256
 // of the policy's canonical JSON (its effective settings, defaults filled

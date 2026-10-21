@@ -178,7 +178,9 @@ type Policy struct {
 	// MaxUnitTokens: level 3 cuts a longer tool output to its head and tail.
 	MaxUnitTokens int `json:"max_unit_tokens"`
 	// MaskAfterTurns: level 3 replaces tool results older than this many
-	// turns with a placeholder.
+	// turns with a placeholder; 0 (the default) does not mask. Masking
+	// rewrites the cached prompt, so it pays only where a cache rewrite is
+	// cheap next to the input it saves (eac.69).
 	MaskAfterTurns int `json:"mask_after_turns"`
 	// MaskStepTokens: level 3 masks in steps of at least this many tokens.
 	MaskStepTokens int `json:"mask_step_tokens"`
@@ -233,7 +235,7 @@ func DefaultPolicy() *Policy {
 		ProtectRecentTurns: 1,
 		CacheMode:          CacheDeterministic,
 		MaxUnitTokens:      6000,
-		MaskAfterTurns:     8,
+		MaskAfterTurns:     0,
 		MaskStepTokens:     20000,
 	}
 }

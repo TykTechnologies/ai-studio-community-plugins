@@ -26,7 +26,7 @@ const (
 )
 
 // level3Version is fingerprinted with the reducers (registryFingerprint).
-const level3Version = 1
+const level3Version = 2
 
 // headTailMarkerRoom is the bytes kept free of the budget for markers.
 const headTailMarkerRoom = 160
@@ -197,22 +197,49 @@ func maskBoundary(units []segments.Unit, lastTurn int, p *config.Policy) int {
 	if eligible <= 0 {
 		return 0
 	}
-	perTurn := make([]int, eligible)
+	// maskable: tokens of the tool results masking would replace (single
+	// leaf, not vendor-produced); all: every unit's tokens, per turn
+	maskable := make([]int, eligible)
+	all := make([]int, lastTurn+1)
 	for _, u := range units {
-		if u.Kind == guardrails.KindToolResult && !u.ServerTool && u.Turn < eligible {
-			perTurn[u.Turn] += selectionTokens(u.Text)
+		if u.Turn < 0 || u.Turn > lastTurn {
+			continue
+		}
+		n := selectionTokens(u.Text)
+		all[u.Turn] += n
+		if u.Kind == guardrails.KindToolResult && !u.ServerTool && len(u.Leaves) == 1 && u.Turn < eligible {
+			maskable[u.Turn] += n
 		}
 	}
 	step := max(p.MaskStepTokens, 1)
 	boundary, sinceBoundary := 0, 0
 	for t := 0; t < eligible; t++ {
-		sinceBoundary += perTurn[t]
-		if sinceBoundary >= step {
+		sinceBoundary += maskable[t]
+		if sinceBoundary < step {
+			continue
+		}
+		// Moving the boundary past turn t first happens when turn
+		// t+mask_after_turns is the newest: the vendor then re-caches every
+		// turn after t up to it. The move must mask more than that, times
+		// maskRecacheRatio, or the rewrite costs more than the masking saves.
+		// Only turns up to t+mask_after_turns count, so the decision never
+		// changes as the conversation grows.
+		recache := 0
+		for k := t + 1; k <= t+p.MaskAfterTurns && k <= lastTurn; k++ {
+			recache += all[k]
+		}
+		if float64(sinceBoundary) >= maskRecacheRatio*float64(recache) {
 			boundary, sinceBoundary = t+1, 0
 		}
 	}
 	return boundary
 }
+
+// maskRecacheRatio is how many times the tokens a mask step re-caches it
+// must mask. Replaying the corpus sessions, 2 cost least of 0, 1 and 2
+// (eac.69); even so masking costs more than it saves on Anthropic and
+// GPT-5 sessions, so mask_after_turns defaults to 0.
+const maskRecacheRatio = 2.0
 
 // maskPlaceholder is what a masked tool result becomes:
 //

@@ -149,17 +149,19 @@ func toolUnits(tokens []int) []segments.Unit {
 		u := segments.Unit{Turn: turn}
 		u.Kind = guardrails.KindToolResult
 		u.Text = strings.Repeat("abcd", n)
+		u.Leaves = []segments.Segment{{Segment: u.Segment}}
 		us = append(us, u)
 	}
 	return us
 }
 
-// The mask boundary only moves forward, and only by at least a step of
-// tokens; earlier turns decide it alone.
+// The mask boundary only moves forward, only by at least a step of tokens,
+// and only when it masks maskRecacheRatio times what the move re-caches;
+// earlier turns decide it alone.
 func TestMaskBoundarySteps(t *testing.T) {
 	p := config.DefaultPolicy()
 	p.MaskAfterTurns, p.MaskStepTokens = 3, 1000
-	tokens := []int{300, 300, 300, 300, 2000, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 900}
+	tokens := []int{3000, 3000, 100, 100, 100, 100, 100, 4000, 100, 100, 100, 100, 100, 100, 600, 600, 900}
 	prev, moves := 0, 0
 	for last := 0; last < len(tokens); last++ {
 		b := maskBoundary(toolUnits(tokens[:last+1]), last, p)
@@ -174,6 +176,13 @@ func TestMaskBoundarySteps(t *testing.T) {
 			}
 			if masked < p.MaskStepTokens {
 				t.Errorf("turn %d: boundary moved %d → %d masking only %d tokens", last, prev, b, masked)
+			}
+			recache := 0
+			for turn := b; turn < b+p.MaskAfterTurns && turn < len(tokens); turn++ {
+				recache += tokens[turn]
+			}
+			if float64(masked) < maskRecacheRatio*float64(recache) {
+				t.Errorf("turn %d: boundary moved %d → %d masking %d tokens and re-caching %d", last, prev, b, masked, recache)
 			}
 			if b > last-p.MaskAfterTurns+1 {
 				t.Errorf("turn %d: masked turn %d, younger than mask_after_turns", last, b-1)
