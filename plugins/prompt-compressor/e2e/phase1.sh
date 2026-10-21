@@ -6,7 +6,7 @@
 # Needs: curl, jq, go; the plugin registered in Studio, scopes approved and
 # loaded on the edge; mockupstream running where the gateway can reach it.
 #
-#   go run ./e2e/mockupstream -addr :18999 -dir /tmp/pc-mock &
+#   go run ./e2e/mockupstream -dir /tmp/pc-mock &   # 127.0.0.1:18999
 #   STUDIO=http://localhost:8080 EDGE=http://localhost:8081 API_KEY=... \
 #   PLUGIN_ID=1 MOCK_URL=http://host.docker.internal:18999 MOCK_DIR=/tmp/pc-mock \
 #   OUT=/tmp/pc-e2e e2e/phase1.sh

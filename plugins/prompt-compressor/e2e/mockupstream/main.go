@@ -13,7 +13,12 @@
 //
 // A newest message asking ECHO_CALL(<tool>) gets a response calling that tool.
 //
-//	go run ./e2e/mockupstream -addr :18999 -dir /tmp/pc-e2e-requests
+//	go run ./e2e/mockupstream -dir /tmp/pc-e2e-requests
+//
+// It listens on 127.0.0.1:18999 by default: it saves every body it gets.
+// Docker Desktop containers reach that as host.docker.internal; on a Linux
+// Docker host, where host.docker.internal is the bridge gateway, pass
+// -addr with that gateway's address.
 package main
 
 import (
@@ -49,7 +54,7 @@ func usageFor(body []byte, openaiFormat bool) usage {
 }
 
 func main() {
-	addr := flag.String("addr", ":18999", "listen address")
+	addr := flag.String("addr", "127.0.0.1:18999", "listen address")
 	dir := flag.String("dir", "mock-requests", "where to record requests")
 	flag.Parse()
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
