@@ -34,13 +34,25 @@ the machine.
 - **Prefix breaks**: turns where compression changed text the previous turn
   already sent, or broke the shared prefix. Any break means lost cache hits.
   - The usual cause is output that is not a pure function of the unit text
-    and the policy (R1).
+    and the policy (R1). Level 3's stepped masking of old turns also shows
+    here, by design.
+- **Late compressions**: results compressed further as they leave the
+  protected newest turns (`protect_recent_turns`, `-protect`). Each costs the
+  cache that one result, once; they are expected from level 2 up.
 - **Skip violations**: changed pass-through bodies, or bodies whose context is
   vendor-managed. Any violation is a bug.
 - **Nondeterministic**: bodies that compressed differently on a second run.
 
-Token counts are estimates (bytes/4) until the compress package's estimator
-(eac.10) is wired in. The reported ratios between levels are what matters.
+By default the replay runs the plugin's compress package with the default
+policy at each level, and counts tokens with its per-format estimator;
+`-compressor identity` and `-tokens bytes` (bytes/4) are the fallbacks.
+
+To see what one level does to one body (and what the gateway should forward
+for it, for live checks):
+
+```bash
+go run ./cmd/pc-eval compress -in body.json -format anthropic -level 2 > out.json   # report on stderr
+```
 
 The `go test ./internal/...` run is the CI smoke. It replays the corpus with
 toy compressors and checks that:

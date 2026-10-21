@@ -118,6 +118,7 @@ func replay(args []string) error {
 	out := fs.String("out", "", "write report.json and report.md here (default: print Markdown)")
 	comp := fs.String("compressor", "library", "library (the plugin's compress package) | identity")
 	toks := fs.String("tokens", "library", "library (the compress package's per-format estimator) | bytes (bytes/4)")
+	protect := fs.Int("protect", 1, "the policy's protect_recent_turns, so results leaving that window count as late compressions")
 	fs.Parse(args)
 
 	ls, err := levels(*lv)
@@ -137,7 +138,7 @@ func replay(args []string) error {
 	if err != nil {
 		return err
 	}
-	opts := eval.Options{Levels: ls, Prices: p, OutputTokens: *outTok}
+	opts := eval.Options{Levels: ls, Prices: p, OutputTokens: *outTok, ProtectRecentTurns: *protect}
 	switch *comp {
 	case "library":
 		opts.Compressor = eval.NewLibrary()
