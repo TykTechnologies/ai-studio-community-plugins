@@ -21,6 +21,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 PLUGIN_DIR=$(cd "$HERE/.." && pwd)
 : "${STUDIO:?}" "${EDGE:?}" "${API_KEY:?}" "${PLUGIN_ID:?}" "${MOCK_URL:?}" "${MOCK_DIR:?}" "${OUT:?}"
 SETTLE=${SETTLE:-20}
+# The mock numbers requests from 1 per process, and streams and the /ai/
+# routes are matched by count: start it on an empty -dir for every run.
+if [ -n "$(find "$MOCK_DIR" -name '*.body' 2>/dev/null | head -1)" ]; then
+  echo "MOCK_DIR $MOCK_DIR already holds requests: restart mockupstream with an empty -dir"; exit 1
+fi
 RUN=${RUN:-$(date -u +%Y%m%d%H%M%S)}
 mkdir -p "$OUT/req" "$OUT/resp"
 LOG=$OUT/run-log.md
