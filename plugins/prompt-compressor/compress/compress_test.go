@@ -458,6 +458,73 @@ func TestResponsesModelItemsUntouched(t *testing.T) {
 	}
 }
 
+// With compress_server_tool_results, the vendor tool results checked live
+// (eac.56) are compressed like the client's; MCP connector results and the
+// kinds not checked stay as sent. The policy hash changes only when it is on.
+func TestServerToolResultsOptIn(t *testing.T) {
+	noisy := strings.Repeat("result line   \n\n\n", 100)
+	for _, tc := range []struct {
+		format string
+		body   map[string]any
+		want   map[string]bool // ServerToolType -> compressed
+	}{
+		{"anthropic", map[string]any{"messages": []any{
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "server_tool_use", "id": "s1", "name": "web_fetch", "input": map[string]any{}},
+				map[string]any{"type": "web_fetch_tool_result", "tool_use_id": "s1", "content": map[string]any{"type": "web_fetch_result", "url": "u",
+					"content": map[string]any{"type": "document", "source": map[string]any{"type": "text", "media_type": "text/plain", "data": noisy}}}},
+				map[string]any{"type": "server_tool_use", "id": "s2", "name": "bash_code_execution", "input": map[string]any{}},
+				map[string]any{"type": "bash_code_execution_tool_result", "tool_use_id": "s2", "content": map[string]any{"type": "bash_code_execution_result", "stdout": noisy}},
+				map[string]any{"type": "server_tool_use", "id": "s3", "name": "code_execution", "input": map[string]any{}},
+				map[string]any{"type": "code_execution_tool_result", "tool_use_id": "s3", "content": map[string]any{"type": "code_execution_result", "stdout": noisy}},
+				map[string]any{"type": "mcp_tool_use", "id": "m1", "name": "x", "server_name": "s", "input": map[string]any{}},
+				map[string]any{"type": "mcp_tool_result", "tool_use_id": "m1", "content": []any{map[string]any{"type": "text", "text": noisy}}},
+			}},
+			map[string]any{"role": "user", "content": "next"},
+		}}, map[string]bool{"web_fetch_tool_result": true, "bash_code_execution_tool_result": true, "code_execution_tool_result": false, "mcp_tool_result": false}},
+		{"openai_responses", map[string]any{"input": []any{
+			map[string]any{"type": "file_search_call", "id": "fs", "queries": []any{"q"}, "results": []any{map[string]any{"text": noisy}}},
+			map[string]any{"type": "code_interpreter_call", "id": "ci", "code": "x", "outputs": []any{map[string]any{"type": "logs", "logs": noisy}}},
+			map[string]any{"type": "mcp_call", "id": "mc", "name": "n", "arguments": "{}", "output": noisy},
+			map[string]any{"role": "user", "content": "next"},
+		}}, map[string]bool{"file_search_call": true, "code_interpreter_call": true, "mcp_call": false}},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			body := mustJSON(t, tc.body)
+			p := config.DefaultPolicy()
+			p.ProtectRecentTurns = 0
+			off := p.Hash()
+			if _, rep := New(Options{}).Compress(Input{Format: tc.format, Body: body, Policy: p}); rep.Outcome == OutcomeCompressed {
+				t.Fatalf("compressed a vendor result with the switch off: %+v", rep)
+			}
+			on := config.DefaultPolicy()
+			on.ProtectRecentTurns, on.CompressServerToolResults = 0, true
+			if on.Hash() == off {
+				t.Error("the switch does not change the policy hash")
+			}
+			out, rep := New(Options{}).Compress(Input{Format: tc.format, Body: body, Policy: on})
+			if rep.Outcome != OutcomeCompressed {
+				t.Fatalf("report %+v", rep)
+			}
+			units, _ := segments.ExtractUnits(tc.format, out)
+			seen := map[string]bool{}
+			for _, u := range units {
+				want, ok := tc.want[u.ServerToolType]
+				if !u.ServerTool || !ok {
+					continue
+				}
+				seen[u.ServerToolType] = true
+				if changed := !strings.Contains(u.Text, noisy); changed != want {
+					t.Errorf("%s: compressed %v, want %v", u.ServerToolType, changed, want)
+				}
+			}
+			if len(seen) != len(tc.want) {
+				t.Errorf("saw %v, want every one of %v", seen, tc.want)
+			}
+		})
+	}
+}
+
 // Tool results the vendor produced are never selected; the client's own are.
 func TestServerToolResultsNotSelected(t *testing.T) {
 	noisy := strings.Repeat("result line   \n\n\n", 100)

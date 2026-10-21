@@ -262,9 +262,17 @@ plugin loading. The full schema is in `config.schema.json`.
   or a guardrail on tool calls.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
-  built-in tools) are never rewritten, nor are thinking blocks, signatures
-  or tool call ids. The model's own text is rewritten only when a policy's
-  `roles` includes `assistant`.
+  built-in tools) are left as sent by default. A policy with
+  `compress_server_tool_results` compresses some of them like the client's
+  own: Anthropic web search, web fetch and (bash) code execution results,
+  and Responses file search and code interpreter results. A live check
+  (eac.56) found that both vendors accept these edited in history and that
+  the model reads the edited text, also with OpenAI's encrypted reasoning
+  replayed. MCP connector results, the older code execution and text
+  editor results and Google's code execution results were not checked and
+  are always left as sent. Thinking blocks, signatures and tool call ids
+  are never rewritten. The model's own text is rewritten only when a
+  policy's `roles` includes `assistant`.
 
 A reducer's cut leaves an inline marker, in a fixed format:
 

@@ -162,6 +162,12 @@
           "items": { "type": "string", "minLength": 1, "maxLength": 512 },
           "maxItems": 64
         },
+        "compress_server_tool_results": {
+          "type": "boolean",
+          "title": "Compress vendor tool results",
+          "description": "Also compress results of the vendor's own tools replayed in history: Anthropic web search, web fetch and code execution, OpenAI Responses file search and code interpreter. Both vendors accept these edited and the model reads the edited text (checked live). MCP connector results and Google code execution results are always left as sent.",
+          "default": false
+        },
         "drop_tools": {
           "type": "array",
           "title": "Drop tools",

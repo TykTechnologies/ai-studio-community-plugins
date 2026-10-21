@@ -192,6 +192,12 @@ type Policy struct {
 	// a prefix ending in '*'. Tools the history calls or tool_choice names
 	// are always kept (compress/droptools.go).
 	DropTools []string `json:"drop_tools,omitempty"`
+	// CompressServerToolResults also compresses results of the vendor's own
+	// tools that the client replays in history, of the kinds a live check
+	// found the vendor accepts edited and reads as edited (compress
+	// editableServerTools, eac.56). Off by default: they are left as the
+	// vendor sent them (eac.48).
+	CompressServerToolResults bool `json:"compress_server_tool_results,omitempty"`
 	// MaxUnitTokens: level 3 cuts a longer tool output to its head and tail.
 	MaxUnitTokens int `json:"max_unit_tokens"`
 	// MaskAfterTurns: level 3 replaces tool results older than this many

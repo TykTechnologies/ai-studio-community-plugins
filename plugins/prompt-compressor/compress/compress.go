@@ -296,6 +296,22 @@ func btoi(b bool) int {
 	return 0
 }
 
+// editableServerTools are the vendor tool results a policy may compress
+// (compress_server_tool_results): those a live check (eac.56, 2026-10-21)
+// found the vendor accepts edited when replayed in history and the model
+// reads as edited, with the last line of the output swapped for a marker
+// the model then quoted. Anthropic: claude-haiku-4-5 and claude-sonnet-5;
+// OpenAI Responses: gpt-4.1-mini and gpt-5.5 with encrypted reasoning
+// replayed. Kinds not checked (MCP connector results, the older code
+// execution and text editor results, Google's code execution) stay as sent.
+var editableServerTools = map[string]bool{
+	"web_search_tool_result":          true,
+	"web_fetch_tool_result":           true,
+	"bash_code_execution_tool_result": true,
+	"file_search_call":                true,
+	"code_interpreter_call":           true,
+}
+
 // selected is a unit to compress at a level.
 type selected struct {
 	unit   segments.Unit
@@ -352,7 +368,7 @@ func (c *Compressor) selectUnits(in Input, doc *segments.Doc, p *config.Policy, 
 		// A result the vendor produced is replayed to it as it was: the
 		// vendor may check it against encrypted or signed parts beside it.
 		switch {
-		case u.ServerTool:
+		case u.ServerTool && !(p.CompressServerToolResults && editableServerTools[u.ServerToolType]):
 			rep.ServerToolSkipped++
 			skip(TraceServerTool)
 			continue
