@@ -1,0 +1,48 @@
+{
+ "tasks": {
+  "lcqa-001": {
+   "answer": {
+    "text": "7731"
+   },
+   "evidence": [
+    "settlement batch 7731"
+   ],
+   "wrong": {
+    "text": "not in the log"
+   }
+  },
+  "lcqa-002": {
+   "answer": {
+    "text": "4.2.1"
+   },
+   "evidence": [
+    "decimal library 4.2.1"
+   ],
+   "wrong": {
+    "text": "not in the log"
+   }
+  },
+  "lcqa-003": {
+   "answer": {
+    "text": "23:59:58"
+   },
+   "evidence": [
+    "GBP ledger closed at 23:59:58"
+   ],
+   "wrong": {
+    "text": "not in the log"
+   }
+  },
+  "lcqa-004": {
+   "answer": {
+    "text": "12 and 44"
+   },
+   "evidence": [
+    "tenants 12 and 44"
+   ],
+   "wrong": {
+    "text": "not in the log"
+   }
+  }
+ }
+}

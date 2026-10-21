@@ -1,0 +1,66 @@
+{
+ "tasks": {
+  "swe-001": {
+   "answer": {
+    "text": "Fixed: use HalfEven rounding in internal/money/round.go."
+   },
+   "evidence": [
+    "round_test.go:41: got 2.67, want 2.66"
+   ],
+   "steps": [
+    {
+     "arguments": {
+      "command": "go test ./internal/money/..."
+     },
+     "name": "bash"
+    },
+    {
+     "arguments": {
+      "path": "internal/money/round.go"
+     },
+     "name": "read_file"
+    },
+    {
+     "arguments": {
+      "command": "go test ./internal/money/..."
+     },
+     "name": "bash"
+    }
+   ],
+   "wrong": {
+    "text": "I could not find the failing case."
+   }
+  },
+  "swe-002": {
+   "answer": {
+    "text": "Fixed: use scale 0 rounding in internal/money/round.go."
+   },
+   "evidence": [
+    "JPY scale 2, want 0"
+   ],
+   "steps": [
+    {
+     "arguments": {
+      "command": "go test ./internal/money/..."
+     },
+     "name": "bash"
+    },
+    {
+     "arguments": {
+      "path": "internal/money/round.go"
+     },
+     "name": "read_file"
+    },
+    {
+     "arguments": {
+      "command": "go test ./internal/money/..."
+     },
+     "name": "bash"
+    }
+   ],
+   "wrong": {
+    "text": "I could not find the failing case."
+   }
+  }
+ }
+}

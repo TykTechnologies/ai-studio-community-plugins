@@ -1,0 +1,142 @@
+{
+ "tasks": {
+  "bfcl-001": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70000",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70000\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  },
+  "bfcl-002": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70001",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70001\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  },
+  "bfcl-003": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70002",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70002\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  },
+  "bfcl-004": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70003",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70003\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  },
+  "bfcl-005": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70004",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70004\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  },
+  "bfcl-006": {
+   "answer": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_70005",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   },
+   "evidence": [
+    "\"id\":\"inv_70005\""
+   ],
+   "wrong": {
+    "call": {
+     "arguments": {
+      "invoice_id": "inv_unknown",
+      "reason": "customer dispute"
+     },
+     "name": "refund_invoice"
+    }
+   }
+  }
+ }
+}
