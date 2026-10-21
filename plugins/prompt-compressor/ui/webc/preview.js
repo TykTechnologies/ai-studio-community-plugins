@@ -305,10 +305,10 @@ class PromptCompressorPreview extends HTMLElement {
     } else if (this._mode === 'body') {
       section.appendChild(h('div', { className: 'row' },
         h('label', { className: 'field' }, 'Vendor',
-          h('select', { onChange: (e) => { this._vendor = e.target.value; } },
+          h('select', { 'data-testid': 'pc-preview-vendor', onChange: (e) => { this._vendor = e.target.value; } },
             ['openai', 'anthropic', 'bedrock', 'google_ai', 'vertex', 'ollama'].map((v) => h('option', { value: v, selected: v === this._vendor }, v)))),
         h('label', { className: 'field' }, 'Vendor path',
-          h('input', { type: 'text', value: this._path, placeholder: '/v1/messages', onInput: (e) => { this._path = e.target.value; } })),
+          h('input', { type: 'text', value: this._path, placeholder: '/v1/messages', 'data-testid': 'pc-preview-path', onInput: (e) => { this._path = e.target.value; } })),
         h('label', { className: 'field' }, 'Upload a JSON file',
           h('input', { type: 'file', accept: '.json,application/json', onChange: (e) => this._upload(e.target.files[0]) }))));
       section.appendChild(h('label', { className: 'field' }, 'Request body (JSON)',
