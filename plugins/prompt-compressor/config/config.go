@@ -69,6 +69,9 @@ const (
 	RoleSystem    = "system"
 )
 
+// dropToolPattern is a drop_tools entry: a tool name or a prefix with '*'.
+var dropToolPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}\*?$|^[A-Za-z0-9_.:-]{0,63}\*$`)
+
 // refusedCredential is what the edge puts in a config value whose $SECRET/
 // reference it would not resolve.
 const refusedCredential = "refused-credential-reference"
@@ -100,6 +103,7 @@ const (
 	MaxPolicies           = 64
 	MaxBindings           = 10000
 	MaxProtectPatterns    = 64
+	MaxDropTools          = 256
 	MaxProtectPatternLen  = 512
 	MaxToolOverrides      = 256
 	MaxEngineTimeoutMs    = 60000
@@ -167,6 +171,10 @@ type Policy struct {
 	ToolOverrides    map[string]*ToolOverride `json:"tool_overrides,omitempty"`
 	// ProtectPatterns are regexes whose matches lossy levels keep verbatim.
 	ProtectPatterns []string `json:"protect_patterns,omitempty"`
+	// DropTools names tool definitions to remove from requests: a name, or
+	// a prefix ending in '*'. Tools the history calls or tool_choice names
+	// are always kept (compress/droptools.go).
+	DropTools []string `json:"drop_tools,omitempty"`
 	// MaxUnitTokens: level 3 cuts a longer tool output to its head and tail.
 	MaxUnitTokens int `json:"max_unit_tokens"`
 	// MaskAfterTurns: level 3 replaces tool results older than this many
@@ -633,6 +641,15 @@ func (p *Policy) validate(c *Config) error {
 			continue
 		}
 		p.compiled = append(p.compiled, re)
+	}
+
+	if len(p.DropTools) > MaxDropTools {
+		add("drop_tools: %d defined, at most %d allowed", len(p.DropTools), MaxDropTools)
+	}
+	for i, name := range p.DropTools {
+		if !dropToolPattern.MatchString(name) {
+			add("drop_tools[%d]: must be a tool name (letters, digits, '_', '.', ':', '-'), optionally ending in '*'", i)
+		}
 	}
 
 	if e := p.Engine; e != nil {

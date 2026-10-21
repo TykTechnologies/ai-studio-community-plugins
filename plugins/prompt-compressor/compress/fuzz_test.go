@@ -104,6 +104,9 @@ func FuzzCompress(f *testing.F) {
 		}
 		p.ProtectRecentTurns = int(flags>>2) % 3
 		p.Level = 1 + int(flags>>4)%3
+		if fi&0x80 != 0 {
+			p.DropTools = []string{"*"}
+		}
 		if p.Level == 3 {
 			p.MaxUnitTokens = 40 + int(flags>>6)*100
 			p.MaskAfterTurns, p.MaskStepTokens = 1, 100

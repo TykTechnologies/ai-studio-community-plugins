@@ -153,6 +153,13 @@
           "items": { "type": "string", "minLength": 1, "maxLength": 512 },
           "maxItems": 64
         },
+        "drop_tools": {
+          "type": "array",
+          "title": "Drop tools",
+          "description": "Tool definitions to remove from requests: a name, or a prefix ending in '*'. Tools the conversation already called, or that tool_choice names, are always kept. Changing the list is a one-off prompt-cache miss for the Apps it applies to.",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{0,64}\\*?$", "minLength": 1, "maxLength": 65 },
+          "maxItems": 256
+        },
         "max_unit_tokens": {
           "type": "integer",
           "title": "Maximum unit size (tokens, level 3)",

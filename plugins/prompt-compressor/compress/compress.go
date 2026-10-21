@@ -133,6 +133,9 @@ type Report struct {
 
 	// Units is every unit's decisions, in body order, when Input.Trace.
 	Units []UnitTrace `json:"units,omitempty"`
+	// ToolDecisions is what drop_tools did with each tool definition, when
+	// Input.Trace.
+	ToolDecisions []ToolDecision `json:"tool_decisions,omitempty"`
 }
 
 // TokensSaved is the estimated saving.
@@ -230,6 +233,9 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 			rep.UnitsCompressed, rep.Strategies, rep.TokensBefore, rep.TokensAfter = 0, nil, 0, 0
 			return in.Body, rep
 		}
+	}
+	if len(p.DropTools) > 0 {
+		edits = c.applyDropTools(in, p, edits, est, &rep)
 	}
 	if len(edits) == 0 {
 		rep.Outcome = OutcomeUnchanged
@@ -536,6 +542,36 @@ func (c *Compressor) runEngine(in Input, p *config.Policy, sel []selected, edits
 
 var errEngineResults = errors.New("compress: engine returned the wrong number of results")
 
+// applyDropTools adds the edits that remove the policy's drop_tools. A
+// leaf edit inside a tools array being replaced is left out: the array's
+// kept definitions go as they were sent.
+func (c *Compressor) applyDropTools(in Input, p *config.Policy, edits []segments.Edit, est *Estimator, rep *Report) []segments.Edit {
+	drops, removed, decisions := dropTools(in.Format, in.Body, p.DropTools)
+	if in.Trace {
+		rep.ToolDecisions = decisions
+	}
+	if len(drops) == 0 {
+		return edits
+	}
+	kept := edits[:0:0]
+	for _, e := range edits {
+		inside := false
+		for _, d := range drops {
+			if strings.HasPrefix(e.Path, d.Path+"/") {
+				inside = true
+			}
+		}
+		if !inside {
+			kept = append(kept, e)
+		}
+	}
+	for _, raw := range removed {
+		rep.count(StrategyDropTools, len(raw))
+		rep.TokensBefore += c.countTokens(est, string(raw))
+	}
+	return append(kept, drops...)
+}
+
 // mask replaces an old tool result with a placeholder. Only a result held
 // in one leaf is masked: a structured result (a JSON tool result read leaf
 // by leaf) cannot lose its fields through leaf edits, so it keeps its
@@ -617,6 +653,9 @@ func postCheck(format string, before, after []byte, edits []segments.Edit) error
 		}
 	}
 	for _, e := range edits {
+		if e.Value != nil {
+			continue // a tools array, rebuilt from its own items
+		}
 		if got, ok := leaves[e.Path]; !ok || got != e.New {
 			return errPostCheck
 		}

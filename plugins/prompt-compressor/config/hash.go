@@ -46,6 +46,10 @@ func (p *Policy) computeHash() string {
 	canon := *p
 	canon.Roles = append([]string(nil), p.Roles...)
 	sort.Strings(canon.Roles)
+	if len(p.DropTools) > 0 {
+		canon.DropTools = append([]string(nil), p.DropTools...)
+		sort.Strings(canon.DropTools)
+	}
 	if canon.Engine != nil {
 		e := *canon.Engine
 		if e.TimeoutMs == 0 {

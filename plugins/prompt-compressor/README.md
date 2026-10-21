@@ -202,6 +202,17 @@ plugin loading. The full schema is in `config.schema.json`.
   filters from Studio 2.3 on, and older hosts are treated as unknown, so
   level 3 stays capped there.
 - `protect_recent_turns` keeps the newest turns at level 1.
+- **drop_tools** (any level): tool definitions to remove from requests, by
+  name or by a prefix ending in `*` (`["deploy_*", "legacy_search"]`), for
+  OpenAI chat, Responses, Anthropic, Google `functionDeclarations` and
+  Bedrock `toolConfig.tools`. A tool the conversation already called, or
+  that `tool_choice` (Google `allowedFunctionNames`, Bedrock `toolChoice`)
+  names, is always kept, and an array the list would empty is left whole.
+  The kept definitions, and every other byte of the body, are sent as they
+  were. Set it per App with a binding or the App metadata override; the
+  dashboard's never-called tools are the candidates. Changing the list is a
+  one-off prompt-cache miss for the Apps it applies to. Removed definitions
+  count as the `drop_tools` strategy.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
   built-in tools) are never rewritten, nor are thinking blocks, signatures
