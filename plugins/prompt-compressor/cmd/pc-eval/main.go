@@ -19,7 +19,7 @@
 // Live suites through a gateway: a dry run (the default) against the oracle
 // mock upstream costs nothing and refuses a slug that is not the mock.
 //
-//	pc-eval live -suite bfcl -gateway http://edge:8080 -secret $APP -slugs 0=pc-off,2=pc-l2
+//	PC_EVAL_SECRET=... pc-eval live -suite bfcl -gateway http://edge:8080 -slugs 0=pc-off,2=pc-l2
 //	pc-eval live -suite lcqa -local http://localhost:9999 -levels 2   # in-process gateway in front of the mock
 //	pc-eval live ... -dry-run=false -approved-by lead -max-usd 40   # paid: needs an approval covering the estimate
 package main
@@ -322,7 +322,7 @@ func live(args []string) error {
 	seed := fs.Uint64("seed", 1, "selection seed")
 	lv := fs.String("levels", "2", "levels compared against off")
 	gw := fs.String("gateway", "", "gateway base URL (a Microgateway)")
-	secret := fs.String("secret", "", "App credential for the gateway")
+	secret := fs.String("secret", os.Getenv("PC_EVAL_SECRET"), "App credential for the gateway (default $PC_EVAL_SECRET; a flag value shows in ps and shell history)")
 	slugs := fs.String("slugs", "", "level=slug pairs, e.g. 0=pc-off,2=pc-l2 (default with -local: 0=off,<level>=l<level>)")
 	local := fs.String("local", "", "run an in-process compressing gateway in front of this upstream URL instead of -gateway")
 	pf := fs.String("policy", "", policyUsage+" (with -local)")

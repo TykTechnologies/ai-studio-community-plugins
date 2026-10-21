@@ -101,13 +101,14 @@ and cost, and the paired difference and verdict of each level against off.
 
 ```bash
 # a Microgateway with one LLM per configuration, each bound to a policy at that level
-go run ./cmd/pc-eval live -suite bfcl -gateway http://edge:8080 -secret "$APP_SECRET" -slugs 0=pc-off,2=pc-l2 -out /tmp/bfcl
+# the App credential comes from PC_EVAL_SECRET (a -secret flag shows in ps and shell history)
+PC_EVAL_SECRET=... go run ./cmd/pc-eval live -suite bfcl -gateway http://edge:8080 -slugs 0=pc-off,2=pc-l2 -out /tmp/bfcl
 # no stack: an in-process gateway (the plugin's compress library) in front of the mock
 go run ./cmd/pc-eval live -suite lcqa -local http://localhost:9999 -levels 2
 ```
 
 - **Dry run is the default.** Every slug must answer with the oracle mock's
-  `X-PC-Mock` header. One tiny preflight request per slug checks it before
+  `X-PC-Mock: oracle` header (the mock says `echo` without an oracle). One tiny preflight request per slug checks it before
   any task is sent, so a slug bound to a real vendor costs at most that
   request. `-dry-run=false` needs `-approved-by` and `-max-usd` covering
   the plan's estimate.

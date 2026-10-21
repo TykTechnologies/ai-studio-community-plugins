@@ -26,7 +26,7 @@ func oracle(mark bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if mark {
-			w.Header().Set(MockHeader, "oracle")
+			w.Header().Set(MockHeader, MockOracle)
 		}
 		var req struct {
 			Model string `json:"model"`

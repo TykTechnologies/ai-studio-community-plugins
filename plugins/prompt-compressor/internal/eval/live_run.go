@@ -13,10 +13,14 @@ import (
 	"time"
 )
 
-// MockHeader is the header the oracle mock upstream (e2e/mockupstream) sets
-// on every answer. A dry run checks for it before sending a task, so a
-// slug bound to a real vendor cannot spend money.
-const MockHeader = "X-PC-Mock"
+// MockHeader is the header the mock upstream (internal/mockvendor) sets on
+// every answer, MockOracle when it answers from an oracle file. A dry run
+// requires MockOracle before sending a task, so a slug bound to a real
+// vendor (or to the mock without an oracle) cannot spend or mislead.
+const (
+	MockHeader = "X-PC-Mock"
+	MockOracle = "oracle"
+)
 
 // Gateway is where a live run sends its requests: a Microgateway (or
 // CompressingGateway), with one LLM slug per configuration, each bound to
@@ -85,7 +89,7 @@ func (g Gateway) send(ctx context.Context, level int, format string, body []byte
 
 // ErrNotMock: a dry run found a configuration whose upstream is not the
 // oracle mock.
-var ErrNotMock = errors.New("eval: dry run, but the upstream behind a slug is not the mock (no " + MockHeader + " header); bind every slug to the mock, or approve a paid run")
+var ErrNotMock = errors.New("eval: dry run, but the upstream behind a slug is not the oracle mock (no " + MockHeader + ": " + MockOracle + " header); bind every slug to the mock with an oracle, or approve a paid run")
 
 // Preflight sends one tiny request per configuration and, for a dry run,
 // requires the mock's header on each answer: a misconfigured slug costs at
@@ -99,7 +103,7 @@ func (g Gateway) Preflight(ctx context.Context, format string, dryRun bool) erro
 	sort.Ints(levels)
 	for _, l := range levels {
 		_, h, err := g.send(ctx, l, format, body)
-		if dryRun && (h == nil || h.Get(MockHeader) == "") {
+		if dryRun && (h == nil || h.Get(MockHeader) != MockOracle) {
 			return fmt.Errorf("level %d (%s): %w", l, g.Slugs[l], ErrNotMock)
 		}
 		if err != nil {
