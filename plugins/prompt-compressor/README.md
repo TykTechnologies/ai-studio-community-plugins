@@ -270,7 +270,9 @@ written by hand are shown with the LLM they match.
   point an engine URL elsewhere while keeping its token. Edit them in the
   plugin's own configuration form, which needs plugin edit rights (and
   secrets read for `$SECRET/` references). Stored token values are masked on
-  the page.
+  the page, and engine URLs show only their scheme, host and path: a query
+  string, fragment or userinfo is masked, since it can carry a key.
+  `$SECRET/` references are shown as they are.
 - Level 3 and engines are skipped on LLMs with request filters unless
   `lossy_with_request_filters` is set. The page marks the LLM bindings and
   names the LLMs where that happens, from the host's LLM list

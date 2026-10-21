@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -41,6 +42,8 @@ const (
 const maskedToken = "********"
 
 var engineTokenKey = regexp.MustCompile(`^engine_[a-z0-9]+(?:_[a-z0-9]+)*_token$`)
+
+var engineURLKey = regexp.MustCompile(`^engine_[a-z0-9]+(?:_[a-z0-9]+)*_url$`)
 
 type llmOption struct {
 	ID     uint32 `json:"id"`
@@ -189,15 +192,45 @@ func loadStoredConfig(ctx context.Context, api studioAPI, pluginID uint32) (map[
 	return stored, nil
 }
 
-// maskTokens hides stored engine tokens. A $SECRET/ reference is shown: it
-// names a secret, it is not one.
+// maskTokens hides stored engine tokens, and the parts of engine URLs that
+// can carry a credential (eac.76): policies:read is a wider audience than
+// the plugin config form. A $SECRET/ reference is shown: it names a secret,
+// it is not one. editorMerge compares against this view, so a save that
+// sends it back unchanged keeps the stored values.
 func maskTokens(cfg map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(cfg))
 	for k, v := range cfg {
-		if s, ok := v.(string); ok && engineTokenKey.MatchString(k) && s != "" && !strings.HasPrefix(s, "$SECRET/") {
-			v = maskedToken
+		if s, ok := v.(string); ok && s != "" && !strings.HasPrefix(s, "$SECRET/") {
+			switch {
+			case engineTokenKey.MatchString(k):
+				v = maskedToken
+			case engineURLKey.MatchString(k):
+				v = maskEngineURL(s)
+			}
 		}
 		out[k] = v
+	}
+	return out
+}
+
+// maskEngineURL shows scheme, host and path. Userinfo, a query string and a
+// fragment are masked (an API key in "?api_key=" is a credential); a value
+// that is not an absolute URL is masked whole.
+func maskEngineURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+		return maskedToken
+	}
+	shown := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}
+	out := shown.String()
+	if u.User != nil {
+		out = strings.Replace(out, "://", "://"+maskedToken+"@", 1)
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		out += "?" + maskedToken
+	}
+	if u.Fragment != "" || u.RawFragment != "" {
+		out += "#" + maskedToken
 	}
 	return out
 }
