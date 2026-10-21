@@ -34,8 +34,11 @@ except Bedrock, which they call directly.
 | `/llm/rest`, `/llm/stream`, `/llm/call` (vendor-native bodies) | Yes |
 | `/ai/`, unified `/v1`, `/router/` to a non-Bedrock LLM | Yes, on the internal `/llm/call/` hop (vendor-native body) |
 | `/ai/` and `/anthropic/` to a Bedrock LLM | **No**: these call AWS directly and run no `post_auth`, until the core `pre_upstream` hook exists |
-| `/llm/stream` Bedrock `converse-stream` | Compressed, but **not labelled or recorded**: the native Bedrock stream runs no response hooks yet (eac.83) |
 | Studio Chat | No: Chat does not go through the gateway |
+
+Native Bedrock streams (`converse-stream`) are labelled and recorded from
+the AI Studio build that runs response hooks on them (eac.83). Before it,
+they are compressed but carry no `X-Tyk-Compression` headers and no record.
 
 A cache hit from Advanced LLM Cache attached before the compressor skips
 compression and is not recorded, but it replays the stored response's

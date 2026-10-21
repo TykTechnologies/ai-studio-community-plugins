@@ -196,11 +196,23 @@ corpus_pass "$K_E2" enforce:2
 stream_pass "$K_E2" enforce:2
 
 # ---- usage: what the plugin recorded against what the mock reported
+# recorded app n: the App's savings totals once n requests are recorded, or
+# whatever is there after FLUSH_WAIT seconds (edges flush every 30 s and
+# Studio folds the batch in on arrival).
+recorded() {
+  local got deadline=$(( $(date +%s) + ${FLUSH_WAIT:-240} ))
+  while :; do
+    got=$(api POST "/api/v1/plugins/$PLUGIN_ID/rpc/getSavings" "{\"range_hours\":24,\"app_id\":$1}" | jq -c '(.data // .).totals')
+    if [ "$(jq -r '.requests // 0' <<<"$got")" -ge "$2" ] || [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "$got"; return
+    fi
+    sleep 10
+  done
+}
 log ""
 log "## 4. Recorded usage against the vendor's (mock) usage"
 log ""
 log "The mock reports input = upstream bytes / 4 and cached = input / 2 for bodies with a cache marker (or OpenAI bodies over 4096 bytes). Records reach Studio with the edge's next flush."
-sleep "${FLUSH_WAIT:-75}"
 log ""
 log "| App | Requests sent | recorded | Input tokens (mock) | recorded | Cache-read (mock) | recorded | Usage missing | Result |"
 log "|---|---|---|---|---|---|---|---|---|"
@@ -213,7 +225,7 @@ for pair in "audit $A_AUD $K_AUD" "enforce-l1 $A_E1 $K_E1" "enforce-l2 $A_E2 $K_
     sent=$((sent + 1)); sz=$(wc -c < "$b" | tr -d ' '); i=$((sz / 4)); inp=$((inp + i))
     if grep -q '"cache_control"\|"cachePoint"' "$b" || { case $fmt in openai*) [ "$sz" -gt 4096 ];; *) false;; esac; }; then cached=$((cached + i / 2)); fi
   done < "$OUT/requests.tsv"
-  got=$(api POST "/api/v1/plugins/$PLUGIN_ID/rpc/getSavings" "{\"range_hours\":24,\"app_id\":$app}" | jq -c '(.data // .).totals')
+  got=$(recorded "$app" "$sent")
   echo "$got" > "$OUT/savings-$name.json"
   rr=$(jq -r .requests <<<"$got"); ri=$(jq -r .input_tokens <<<"$got"); rc=$(jq -r .cache_read_tokens <<<"$got"); um=$(jq -r .usage_missing <<<"$got")
   verdict=ok; { [ "$rr" = "$sent" ] && [ "$ri" = "$inp" ] && [ "$rc" = "$cached" ] && [ "$um" = 0 ]; } || { verdict="FAIL"; FAILS=$((FAILS + 1)); }
@@ -329,8 +341,7 @@ if [ -n "${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ]; then
     real anthropic "/llm/rest/$(slug "$L_RAN")/v1/messages" anthropic "$OUT/req/real-anthropic.json"
     real anthropic-stream "/llm/stream/$(slug "$L_RAN")/v1/messages" anthropic "$OUT/req/real-anthropic-stream.json"
   fi
-  sleep "${FLUSH_WAIT:-75}"
-  got=$(api POST "/api/v1/plugins/$PLUGIN_ID/rpc/getSavings" "{\"range_hours\":24,\"app_id\":$A_RE}" | jq -c '(.data // .).totals | {requests, input_tokens, cache_read_tokens, usage_missing}')
+  got=$(recorded "$A_RE" "$vn" | jq -c '{requests, input_tokens, cache_read_tokens, usage_missing}')
   verdict=ok; { [ "$(jq -r .requests <<<"$got")" = "$vn" ] && [ "$(jq -r .input_tokens <<<"$got")" = "$vin" ] && [ "$(jq -r .cache_read_tokens <<<"$got")" = "$vcr" ]; } || { verdict=FAIL; FAILS=$((FAILS + 1)); }
   log ""
   log "Vendor usage over $vn requests: input $vin, cache-read $vcr. Recorded: $got. **$verdict**"
