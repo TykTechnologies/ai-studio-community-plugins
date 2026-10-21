@@ -166,8 +166,10 @@ type appTools struct {
 	ShareKnown bool      `json:"share_known"`
 	Tools      []toolRow `json:"tools"`
 	// NeverCalled are the tools offered but never called in the range
-	// ("other", the folded names, is never listed).
+	// ("other", the folded names, is never listed), leaving out those
+	// drop_tools removed from every request, which are DroppedByPolicy.
 	NeverCalled          []string `json:"never_called"`
+	DroppedByPolicy      []string `json:"dropped_by_policy"`
 	NeverCalledDefTokens int64    `json:"never_called_def_tokens"`
 	// EstimatedSaving is the never-called tools' share of the definitions'
 	// cost at the model's input price, and at its cache-read price, by
@@ -184,6 +186,7 @@ type toolRow struct {
 	Offered   int64  `json:"offered"`
 	Called    int64  `json:"called"`
 	DefTokens int64  `json:"def_tokens"`
+	Dropped   int64  `json:"dropped"`
 }
 
 // Bounds on the tools section.
@@ -214,6 +217,7 @@ func (a *toolAcc) add(d *records.Delta) {
 		cur.Offered += s.Offered
 		cur.Called += s.Called
 		cur.DefTokens += s.DefTokens
+		cur.Dropped += s.Dropped
 		a.tools[n] = cur
 	}
 	for c, x := range d.ToolDefCost {
@@ -233,10 +237,16 @@ func (a *toolAcc) view() appTools {
 	if v.InputTokens > 0 {
 		v.Share, v.ShareKnown = float64(v.ToolDefTokens)/float64(v.InputTokens), true
 	}
-	v.Tools, v.NeverCalled = []toolRow{}, []string{}
+	v.Tools, v.NeverCalled, v.DroppedByPolicy = []toolRow{}, []string{}, []string{}
 	for n, s := range a.tools {
-		v.Tools = append(v.Tools, toolRow{Name: n, Offered: s.Offered, Called: s.Called, DefTokens: s.DefTokens})
-		if s.Offered > 0 && s.Called == 0 && n != records.OtherTool {
+		v.Tools = append(v.Tools, toolRow{Name: n, Offered: s.Offered, Called: s.Called, DefTokens: s.DefTokens, Dropped: s.Dropped})
+		switch {
+		case n == records.OtherTool || s.Offered == 0:
+		case s.Dropped >= s.Offered:
+			// Already removed on every request: its saving is realised (the
+			// drop_tools strategy), so it is no suggestion
+			v.DroppedByPolicy = append(v.DroppedByPolicy, n)
+		case s.Called == 0:
 			v.NeverCalled = append(v.NeverCalled, n)
 			v.NeverCalledDefTokens += s.DefTokens
 		}
@@ -253,6 +263,10 @@ func (a *toolAcc) view() appTools {
 	sort.Strings(v.NeverCalled)
 	if len(v.NeverCalled) > maxToolsPerApp {
 		v.NeverCalled = v.NeverCalled[:maxToolsPerApp]
+	}
+	sort.Strings(v.DroppedByPolicy)
+	if len(v.DroppedByPolicy) > maxToolsPerApp {
+		v.DroppedByPolicy = v.DroppedByPolicy[:maxToolsPerApp]
 	}
 	v.EstimatedSaving, v.EstimatedSavingAtCacheRead = map[string]float64{}, map[string]float64{}
 	if v.ToolDefTokens > 0 {

@@ -101,19 +101,23 @@ type Request struct {
 	CalledTools []string
 }
 
-// OfferedTool is one tool definition a request offered.
+// OfferedTool is one tool definition a request offered. Dropped: the
+// policy's drop_tools removed it from the forwarded body.
 type OfferedTool struct {
-	Name   string
-	Tokens int64
+	Name    string
+	Tokens  int64
+	Dropped bool
 }
 
 // ToolStats counts one tool in a row: requests that offered it, requests
 // whose response called it, and its definition's tokens summed over the
-// requests that offered it.
+// requests that sent it to the vendor. Dropped counts the requests where
+// drop_tools removed it, which add no tokens.
 type ToolStats struct {
 	Offered   int64 `json:"offered"`
 	Called    int64 `json:"called"`
 	DefTokens int64 `json:"def_tokens"`
+	Dropped   int64 `json:"dropped,omitempty"`
 }
 
 // TokensSaved is the estimated saving (zero when nothing was saved).
@@ -350,9 +354,15 @@ func (d *Delta) addTools(r Request, p Price, priced bool) {
 	for _, t := range r.OfferedTools {
 		name := toolName(t.Name)
 		s := ToolStats{DefTokens: max(t.Tokens, 0)}
+		if t.Dropped {
+			s.DefTokens = 0
+		}
 		if !offered[name] {
 			offered[name] = true
 			s.Offered = 1
+			if t.Dropped {
+				s.Dropped = 1
+			}
 		}
 		d.Tools = addTool(d.Tools, name, s, true)
 	}
@@ -403,6 +413,7 @@ func addTool(m map[string]ToolStats, name string, s ToolStats, allowNew bool) ma
 	cur.Offered += s.Offered
 	cur.Called += s.Called
 	cur.DefTokens += s.DefTokens
+	cur.Dropped += s.Dropped
 	m[name] = cur
 	return m
 }
@@ -618,7 +629,7 @@ func (b *Batch) Validate() error {
 			return fmt.Errorf("delta %d: too many tools, tool lists or currencies", i)
 		}
 		for name, s := range d.Tools {
-			if (name != OtherTool && !toolNamePattern.MatchString(name)) || s.Offered < 0 || s.Called < 0 || s.DefTokens < 0 {
+			if (name != OtherTool && !toolNamePattern.MatchString(name)) || s.Offered < 0 || s.Called < 0 || s.DefTokens < 0 || s.Dropped < 0 {
 				return fmt.Errorf("delta %d: bad tool entry", i)
 			}
 		}

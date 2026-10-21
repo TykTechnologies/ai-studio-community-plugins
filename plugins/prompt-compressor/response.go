@@ -129,10 +129,24 @@ func (p *PromptCompressorPlugin) complete(rec pendingRecord, u usage, found, str
 		r.InputTokens, r.CacheReadTokens, r.CacheWriteTokens = u.InputTokens, u.CacheReadTokens, u.CacheWriteTokens
 	}
 	if t := rec.Tools; len(t.Tools) > 0 {
-		r.ToolDefs, r.ToolDefTokens, r.ToolListHash = len(t.Tools), t.Tokens, t.Hash
+		// A definition drop_tools removed from the forwarded body was
+		// offered by the client but never reached the vendor: it is not in
+		// the definitions counted against the vendor's prompt tokens
+		// (eac.81).
+		dropped := map[string]bool{}
+		if rec.Forwarded {
+			for _, n := range rep.DroppedTools {
+				dropped[n] = true
+			}
+		}
+		r.ToolListHash = t.Hash
 		r.OfferedTools = make([]records.OfferedTool, len(t.Tools))
 		for i, o := range t.Tools {
-			r.OfferedTools[i] = records.OfferedTool{Name: o.Name, Tokens: o.Tokens}
+			r.OfferedTools[i] = records.OfferedTool{Name: o.Name, Tokens: o.Tokens, Dropped: dropped[o.Name]}
+			if !dropped[o.Name] {
+				r.ToolDefs++
+				r.ToolDefTokens += o.Tokens
+			}
 		}
 	}
 	r.CalledTools = offeredOnly(called, rec.Tools)

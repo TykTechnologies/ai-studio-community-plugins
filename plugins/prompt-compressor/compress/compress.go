@@ -136,6 +136,9 @@ type Report struct {
 	// ToolDecisions is what drop_tools did with each tool definition, when
 	// Input.Trace.
 	ToolDecisions []ToolDecision `json:"tool_decisions,omitempty"`
+	// DroppedTools names the tool definitions drop_tools removed, when the
+	// rewrite went through.
+	DroppedTools []string `json:"dropped_tools,omitempty"`
 }
 
 // TokensSaved is the estimated saving.
@@ -259,6 +262,7 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	if err != nil {
 		rep.Outcome, rep.Reason = OutcomeRejected, ReasonPostCheck
 		rep.UnitsCompressed, rep.Strategies, rep.TokensBefore, rep.TokensAfter = 0, nil, 0, 0
+		rep.DroppedTools = nil
 		return in.Body, rep
 	}
 	rep.Outcome = OutcomeCompressed
@@ -579,6 +583,11 @@ func (c *Compressor) applyDropTools(in Input, p *config.Policy, edits []segments
 	for _, raw := range removed {
 		rep.count(StrategyDropTools, len(raw))
 		rep.TokensBefore += c.countTokens(est, string(raw))
+	}
+	for _, d := range decisions {
+		if d.Dropped {
+			rep.DroppedTools = append(rep.DroppedTools, d.Name)
+		}
 	}
 	return append(kept, drops...)
 }

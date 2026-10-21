@@ -66,10 +66,32 @@ func TestToolsMergeKnown(t *testing.T) {
 	}
 }
 
+// A definition drop_tools removed counts as offered and dropped, with no
+// tokens, and merges like the other counts (eac.81).
+func TestDroppedToolsCount(t *testing.T) {
+	r := toolRequest("read_file", "deploy_prod")
+	r.OfferedTools[1].Dropped = true
+	a := NewDelta(KeyOf(r))
+	a.AddRequest(r, Price{}, false)
+	if s := a.Tools["deploy_prod"]; s.Offered != 1 || s.Dropped != 1 || s.DefTokens != 0 {
+		t.Errorf("dropped %+v", s)
+	}
+	if s := a.Tools["read_file"]; s.Dropped != 0 || s.DefTokens != 10 {
+		t.Errorf("kept %+v", s)
+	}
+	b := NewDelta(KeyOf(r))
+	b.AddRequest(r, Price{}, false)
+	a.mergeKnown(b)
+	if a.Tools["deploy_prod"].Dropped != 2 {
+		t.Errorf("merged %+v", a.Tools)
+	}
+}
+
 func TestValidateRefusesBadToolEntries(t *testing.T) {
 	for name, mutate := range map[string]func(d *Delta){
 		"name":     func(d *Delta) { d.Tools = map[string]ToolStats{"a b": {Offered: 1}} },
 		"negative": func(d *Delta) { d.Tools = map[string]ToolStats{"a": {Called: -1}} },
+		"dropped":  func(d *Delta) { d.Tools = map[string]ToolStats{"a": {Dropped: -1}} },
 		"too many": func(d *Delta) {
 			d.Tools = map[string]ToolStats{}
 			for i := 0; i <= MaxToolsPerRow; i++ {

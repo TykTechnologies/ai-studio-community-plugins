@@ -41,6 +41,56 @@ func TestCalledToolsMustBeOffered(t *testing.T) {
 	}
 }
 
+// A definition drop_tools removed never reached the vendor: it is not
+// counted against the vendor's prompt tokens (no share over 100%), and it
+// is listed as dropped by policy, not as a never-called suggestion with a
+// saving that is already realised (eac.81). In audit mode nothing is
+// removed, so it counts as sent.
+func TestDroppedToolsAreNotCountedAsSent(t *testing.T) {
+	def := func(name string) string {
+		return `{"type":"function","function":{"name":"` + name + `","description":"` + strings.Repeat("d", 400) + `","parameters":{}}}`
+	}
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"go"}],"tools":[` + def("read_file") + `,` + def("deploy_prod") + `]}`)
+	resp := `{"choices":[{"message":{"tool_calls":[{"id":"c1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}],"usage":{"prompt_tokens":400}}`
+	for _, mode := range []string{"enforce", "audit"} {
+		p, ctx := hookPlugin(t, `{"mode":"`+mode+`","policies":{"default":{"drop_tools":["deploy_*"]}}}`)
+		rec := &recorded{}
+		p.SetRecorder(rec)
+		p.HandlePostAuth(ctx, request(body, nil))
+		p.OnBeforeWrite(ctx, &pb.ResponseWriteRequest{Body: []byte(resp)})
+		if len(rec.reqs) != 1 {
+			t.Fatalf("%s: %d records", mode, len(rec.reqs))
+		}
+		r := rec.reqs[0]
+		dropped := mode == "enforce"
+		if len(r.OfferedTools) != 2 || r.OfferedTools[1].Name != "deploy_prod" || r.OfferedTools[1].Dropped != dropped || r.OfferedTools[0].Dropped {
+			t.Fatalf("%s: offered %+v", mode, r.OfferedTools)
+		}
+		wantDefs, wantTokens := 2, r.OfferedTools[0].Tokens+r.OfferedTools[1].Tokens
+		if dropped {
+			wantDefs, wantTokens = 1, r.OfferedTools[0].Tokens
+		}
+		if r.ToolDefs != wantDefs || r.ToolDefTokens != wantTokens {
+			t.Errorf("%s: %d definitions, %d tokens; want %d, %d", mode, r.ToolDefs, r.ToolDefTokens, wantDefs, wantTokens)
+		}
+
+		d := records.NewDelta(records.KeyOf(r))
+		d.AddRequest(r, records.Price{Currency: "USD", Input: 1e-6}, true)
+		v := summarise([]*records.Delta{d}, nil, d.Key.Hour, d.Key.Hour, savingsQuery{}, 0, nil, nil)
+		a := v.Tools[0]
+		if a.Share != float64(wantTokens)/400 || a.Share > 1 {
+			t.Errorf("%s: share %v", mode, a.Share)
+		}
+		if dropped {
+			if len(a.NeverCalled) != 0 || !reflect.DeepEqual(a.DroppedByPolicy, []string{"deploy_prod"}) || a.EstimatedSaving["USD"] != 0 {
+				t.Errorf("enforce: never called %v, dropped %v, saving %v", a.NeverCalled, a.DroppedByPolicy, a.EstimatedSaving)
+			}
+		} else if !reflect.DeepEqual(a.NeverCalled, []string{"deploy_prod"}) || len(a.DroppedByPolicy) != 0 || a.EstimatedSaving["USD"] <= 0 {
+			t.Errorf("audit: never called %v, dropped %v, saving %v", a.NeverCalled, a.DroppedByPolicy, a.EstimatedSaving)
+		}
+	}
+}
+
 // The savings view reports each App's tool-definition cost, its share of
 // the prompt, the tools never called and what dropping them would save.
 func TestSavingsToolsSection(t *testing.T) {
