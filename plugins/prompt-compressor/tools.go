@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
+	"github.com/TykTechnologies/midsommar/v2/guardrails/segments"
 )
 
 // Tool-definition cost (eac.39): what the tools a request offers cost in
@@ -32,6 +33,16 @@ type toolsInfo struct {
 	Hash string
 }
 
+// subtree decodes the value at ptr into v. A missing or null value decodes
+// as none (true); one of another shape does not (false).
+func subtree(doc *segments.Doc, ptr string, v any) bool {
+	raw := doc.Raw(ptr)
+	if raw == nil {
+		return true
+	}
+	return json.Unmarshal(raw, v) == nil
+}
+
 // toolListHashLen is the hex length of a tool list hash.
 const toolListHashLen = 16
 
@@ -41,6 +52,24 @@ const maxToolsPerRequest = 512
 // parseOfferedTools reads the tool definitions of a request body in its
 // format. Bodies without tools, or that do not parse, offer none.
 func parseOfferedTools(format string, body []byte) toolsInfo {
+	doc, err := parseBody(body)
+	if err != nil {
+		return toolsInfo{}
+	}
+	return offeredTools(format, doc)
+}
+
+// parseBody parses a request body once, for the tool definitions and then
+// the compressor (compress.Input.Doc). The format given here only matters
+// to the Doc's own readers, which the compressor reads As its format.
+func parseBody(body []byte) (*segments.Doc, error) {
+	return segments.Parse(segments.FormatOpenAI, body)
+}
+
+// offeredTools reads the tool definitions of a parsed body in format. Only
+// the tools member is decoded, never the conversation: decoding a whole
+// 250 KB body for it cost about 1 ms on every request.
+func offeredTools(format string, doc *segments.Doc) toolsInfo {
 	var defs []json.RawMessage
 	var names []string
 	add := func(raw json.RawMessage, name string) {
@@ -50,13 +79,11 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 	}
 	switch format {
 	case "anthropic":
-		var b struct {
-			Tools []json.RawMessage `json:"tools"`
-		}
-		if json.Unmarshal(body, &b) != nil {
+		var tools []json.RawMessage
+		if !subtree(doc, "/tools", &tools) {
 			return toolsInfo{}
 		}
-		for _, raw := range b.Tools {
+		for _, raw := range tools {
 			var t struct {
 				Name string `json:"name"`
 			}
@@ -64,13 +91,11 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 			add(raw, t.Name)
 		}
 	case "openai_responses":
-		var b struct {
-			Tools []json.RawMessage `json:"tools"`
-		}
-		if json.Unmarshal(body, &b) != nil {
+		var tools []json.RawMessage
+		if !subtree(doc, "/tools", &tools) {
 			return toolsInfo{}
 		}
-		for _, raw := range b.Tools {
+		for _, raw := range tools {
 			var t struct {
 				Type string `json:"type"`
 				Name string `json:"name"`
@@ -83,16 +108,14 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 			add(raw, name)
 		}
 	case "google_ai":
-		var b struct {
-			Tools []struct {
-				FunctionDeclarations  []json.RawMessage `json:"functionDeclarations"`
-				FunctionDeclarations2 []json.RawMessage `json:"function_declarations"`
-			} `json:"tools"`
+		var tools []struct {
+			FunctionDeclarations  []json.RawMessage `json:"functionDeclarations"`
+			FunctionDeclarations2 []json.RawMessage `json:"function_declarations"`
 		}
-		if json.Unmarshal(body, &b) != nil {
+		if !subtree(doc, "/tools", &tools) {
 			return toolsInfo{}
 		}
-		for _, t := range b.Tools {
+		for _, t := range tools {
 			for _, raw := range append(t.FunctionDeclarations, t.FunctionDeclarations2...) {
 				var d struct {
 					Name string `json:"name"`
@@ -102,15 +125,11 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 			}
 		}
 	case "bedrock":
-		var b struct {
-			ToolConfig struct {
-				Tools []json.RawMessage `json:"tools"`
-			} `json:"toolConfig"`
-		}
-		if json.Unmarshal(body, &b) != nil {
+		var tools []json.RawMessage
+		if !subtree(doc, "/toolConfig/tools", &tools) {
 			return toolsInfo{}
 		}
-		for _, raw := range b.ToolConfig.Tools {
+		for _, raw := range tools {
 			var t struct {
 				ToolSpec struct {
 					Name string `json:"name"`
@@ -123,13 +142,11 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 			add(raw, t.ToolSpec.Name)
 		}
 	default: // OpenAI chat and the formats that copy it (Ollama)
-		var b struct {
-			Tools []json.RawMessage `json:"tools"`
-		}
-		if json.Unmarshal(body, &b) != nil {
+		var tools []json.RawMessage
+		if !subtree(doc, "/tools", &tools) {
 			return toolsInfo{}
 		}
-		for _, raw := range b.Tools {
+		for _, raw := range tools {
 			var t struct {
 				Name     string `json:"name"`
 				Function struct {

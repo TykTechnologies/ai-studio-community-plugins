@@ -11,6 +11,7 @@ import (
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/config"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/engine"
+	"github.com/TykTechnologies/midsommar/v2/guardrails/segments"
 	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 	"github.com/TykTechnologies/midsommar/v2/pkg/requestformat"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
@@ -115,10 +116,15 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		defer p.budget.release(size)
 	}
 	// The tool definitions are measured whatever happens to the body (the
-	// vendor's format is enough to read them).
+	// vendor's format is enough to read them). The body is parsed once, and
+	// the compressor reads the same parse.
 	var tools toolsInfo
+	var doc *segments.Doc
 	if held {
-		tools = parseOfferedTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), r.GetBody())
+		if d, err := parseBody(r.GetBody()); err == nil {
+			doc = d
+			tools = offeredTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), d)
+		}
 	}
 
 	if cfg.AllowClientBypass && strings.EqualFold(strings.TrimSpace(headerValue(r.GetHeaders(), BypassHeader)), "off") {
@@ -176,6 +182,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	out, rep := p.compressFn(compress.Input{
 		Format:       format,
 		Body:         r.GetBody(),
+		Doc:          doc,
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
 		CapLossy:     capLossy,

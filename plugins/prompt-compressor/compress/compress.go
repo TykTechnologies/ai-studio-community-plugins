@@ -63,6 +63,10 @@ type Input struct {
 	// Format is the request filter format (pkg/requestformat.For).
 	Format string
 	Body   []byte
+	// Doc is Body already parsed (segments.Parse of these same bytes, in
+	// any format), or nil. The compressor reads it As Format instead of
+	// parsing the body again.
+	Doc *segments.Doc
 	// Policy is the resolved policy; nil or level 0 skips the body.
 	Policy *config.Policy
 	// MaxBodyBytes skips larger bodies; 0 means config.DefaultMaxBodyBytes.
@@ -221,13 +225,19 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	if !segments.Supports(in.Format) {
 		return skip(ReasonUnsupportedFormat)
 	}
-	units, err := segments.ExtractUnits(in.Format, in.Body)
+	// The body is parsed once: selection, the rewrite and the post-check
+	// read the same tree (eac.80).
+	doc, err := parseInput(in)
+	if err != nil {
+		return skip(ReasonUnreadable)
+	}
+	units, err := doc.Units(segments.Options{})
 	if err != nil {
 		return skip(ReasonUnreadable)
 	}
 	rep.UnitsSeen = len(units)
 
-	sel := c.selectUnits(in, p, units, &rep)
+	sel := c.selectUnits(in, doc, p, units, &rep)
 	rep.Model = modelOf(in)
 	est := EstimatorFor(in.Format, rep.Model)
 	rep.Estimator = est.Name()
@@ -255,9 +265,9 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 		rep.Outcome = OutcomeUnchanged
 		return in.Body, rep
 	}
-	out, err := segments.Apply(in.Body, edits)
+	out, err := doc.Apply(edits)
 	if err == nil {
-		err = postCheck(in.Format, in.Body, out, edits)
+		err = postCheck(doc, out, edits)
 	}
 	if err != nil {
 		rep.Outcome, rep.Reason = OutcomeRejected, ReasonPostCheck
@@ -266,8 +276,17 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 		return in.Body, rep
 	}
 	rep.Outcome = OutcomeCompressed
-	rep.BytesAfter = len(out)
-	return out, rep
+	rep.BytesAfter = len(out.Body())
+	return out.Body(), rep
+}
+
+// parseInput is in.Doc read as in.Format when it holds in.Body, else
+// in.Body parsed.
+func parseInput(in Input) (*segments.Doc, error) {
+	if d := in.Doc; d != nil && len(d.Body()) == len(in.Body) && len(in.Body) > 0 && &d.Body()[0] == &in.Body[0] {
+		return d.As(in.Format)
+	}
+	return segments.Parse(in.Format, in.Body)
 }
 
 func btoi(b bool) int {
@@ -289,19 +308,19 @@ type selected struct {
 
 // selectUnits picks the units the policy compresses, with the level each
 // gets.
-func (c *Compressor) selectUnits(in Input, p *config.Policy, units []segments.Unit, rep *Report) []selected {
+func (c *Compressor) selectUnits(in Input, doc *segments.Doc, p *config.Policy, units []segments.Unit, rep *Report) []selected {
 	maxLevel := p.Level
 	if in.CapLossy && maxLevel > 2 {
 		rep.RequestFiltersCapped = true
 		maxLevel = 2
 	}
-	if segments.NativeContextManagement(in.Format, in.Body) {
+	if doc.NativeContextManagement() {
 		rep.NativeContextManagement = true
 		maxLevel = min(maxLevel, 1)
 	}
 	var cached *segments.Breakpoint
 	if p.CacheMode == config.CacheSkipCached {
-		if bps, err := segments.CacheBreakpoints(in.Format, in.Body); err == nil && len(bps) > 0 {
+		if bps, err := doc.CacheBreakpoints(); err == nil && len(bps) > 0 {
 			cached = &bps[len(bps)-1]
 		}
 	}
@@ -657,12 +676,12 @@ var errPostCheck = errors.New("compress: post-check failed")
 
 // postCheck re-reads the rewritten body: it must be no larger, read in its
 // format, keep its tool calls paired if they were, and hold each edited
-// leaf exactly as written.
-func postCheck(format string, before, after []byte, edits []segments.Edit) error {
-	if len(after) > len(before) {
+// leaf exactly as written. after is the rewrite as Doc.Apply parsed it.
+func postCheck(before, after *segments.Doc, edits []segments.Edit) error {
+	if len(after.Body()) > len(before.Body()) {
 		return errPostCheck
 	}
-	units, err := segments.ExtractUnits(format, after)
+	units, err := after.Units(segments.Options{})
 	if err != nil {
 		return errPostCheck
 	}
@@ -682,7 +701,7 @@ func postCheck(format string, before, after []byte, edits []segments.Edit) error
 	}
 	// The input is read only when the output fails: a body that did not
 	// pair before may not pair after.
-	if segments.CheckToolPairing(format, after) != nil && segments.CheckToolPairing(format, before) == nil {
+	if after.CheckToolPairing() != nil && before.CheckToolPairing() == nil {
 		return errPostCheck
 	}
 	return nil

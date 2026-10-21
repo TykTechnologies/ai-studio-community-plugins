@@ -509,16 +509,24 @@ func TestServerToolResultsNotSelected(t *testing.T) {
 // The post-check rejects a rewrite that breaks the body, returning the
 // original.
 func TestPostCheckRejects(t *testing.T) {
+	parse := func(b []byte) *segments.Doc {
+		t.Helper()
+		d, err := segments.Parse("openai", b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
 	body := []byte(`{"messages":[{"role":"tool","tool_call_id":"c","content":"a"}]}`)
-	if err := postCheck("openai", body, body, []segments.Edit{{Path: "/messages/0/content", Old: "a", New: "b"}}); !errors.Is(err, errPostCheck) {
+	if err := postCheck(parse(body), parse(body), []segments.Edit{{Path: "/messages/0/content", Old: "a", New: "b"}}); !errors.Is(err, errPostCheck) {
 		t.Errorf("a leaf that does not read back passed: %v", err)
 	}
-	if err := postCheck("openai", body, append(body, ' '), nil); !errors.Is(err, errPostCheck) {
+	if err := postCheck(parse(body), parse(append(body, ' ')), nil); !errors.Is(err, errPostCheck) {
 		t.Errorf("a larger body passed: %v", err)
 	}
 	paired := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"c","function":{"name":"f"}}]},{"role":"tool","tool_call_id":"c","content":"a"}]}`)
 	broken := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"c","function":{"name":"f"}}]},{"role":"tool","tool_call_id":"d","content":"a"}]}`)
-	if err := postCheck("openai", paired, broken, nil); !errors.Is(err, errPostCheck) {
+	if err := postCheck(parse(paired), parse(broken), nil); !errors.Is(err, errPostCheck) {
 		t.Errorf("lost pairing passed: %v", err)
 	}
 }
