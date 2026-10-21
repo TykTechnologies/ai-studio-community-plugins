@@ -178,8 +178,12 @@ func New(opts Options) *Compressor {
 	return &Compressor{memo: newMemo(n), tokens: newMemo(n / 8)}
 }
 
-// countTokens is est.Count through the token-count memo.
+// countTokens is est.Count, through the token-count memo when it runs the
+// tokenizer.
 func (c *Compressor) countTokens(est *Estimator, text string) int {
+	if est.enc == nil {
+		return est.Count(text)
+	}
 	key := newMemoKey("tokens/"+est.Name(), text)
 	if v, ok := c.tokens.get(key); ok {
 		return v.Tokens
@@ -224,6 +228,13 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 	rep.Model = modelOf(in)
 	est := EstimatorFor(in.Format, rep.Model)
 	rep.Estimator = est.Name()
+	var sample []string
+	for _, s := range sel {
+		for _, l := range s.unit.Leaves {
+			sample = append(sample, l.Text)
+		}
+	}
+	est = est.calibrated(func(t string) int { return c.countTokens(est, t) }, sample)
 
 	edits, fixed := c.edit(p, rep.PolicyHash, sel, est, &rep)
 	if in.Engine != nil && p.Engine != nil {

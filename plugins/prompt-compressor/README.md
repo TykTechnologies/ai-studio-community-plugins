@@ -301,7 +301,13 @@ next flush.
 - **Counts and ids only.** Records carry token, byte and unit counts,
   strategy names, compression time and the vendor's usage counts. No prompt
   or tool text leaves the edge. The model name is used to look up its price
-  at the edge and is not sent.
+  at the edge and is not sent. Token counts are estimates: for OpenAI-family
+  models the tokenizer runs on at most 8 KB of the request's own tool text
+  and the rest is counted at that bytes-per-token ratio (encoding every
+  leaf allocated hundreds of times the body); other vendors use a fixed
+  characters-per-token ratio. Counts never change what is compressed.
+  `max_body_bytes` (default 4 MiB) is capped at 16 MiB: compressing a body
+  allocates about 10-20 times its size, and a larger body is never parsed.
 - **Tool definitions.** Every request's tool definitions are measured,
   whatever happens to its body: how many, their size in tokens (UTF-8
   bytes / 4 of each definition's JSON), a hash of the tool list (a new list

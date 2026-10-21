@@ -106,9 +106,13 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		return passThrough, nil
 	}
 	p.counters.seen.Add(1)
-	// The tool definitions are measured whatever happens to the body: the
-	// vendor's format is enough to read them.
-	tools := parseOfferedTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), r.GetBody())
+	// The tool definitions are measured whatever happens to the body (the
+	// vendor's format is enough to read them), within max_body_bytes: a
+	// larger body is never parsed.
+	var tools toolsInfo
+	if len(r.GetBody()) <= cfg.MaxBodyBytes {
+		tools = parseOfferedTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), r.GetBody())
+	}
 
 	if cfg.AllowClientBypass && strings.EqualFold(strings.TrimSpace(headerValue(r.GetHeaders(), BypassHeader)), "off") {
 		p.counters.count(OutcomeBypassed)

@@ -127,6 +127,13 @@ jobs:
           cd ${{ matrix.plugin }}
           go test -v -race -short -coverprofile=coverage.out -covermode=atomic ./...
 
+      # Allocation bounds need the normal build: the race detector defeats
+      # sync.Pool, so allocations there say nothing about production.
+      - name: Allocation bounds
+        run: |
+          cd ${{ matrix.plugin }}
+          go test -count=1 -run 'AllocationIsBounded' ./...
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:

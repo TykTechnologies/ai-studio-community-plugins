@@ -3,6 +3,7 @@ package compress
 import (
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/pkoukk/tiktoken-go"
 	tiktoken_loader "github.com/pkoukk/tiktoken-go-loader"
@@ -42,6 +43,9 @@ type Estimator struct {
 	name  string
 	enc   *tiktoken.Tiktoken
 	ratio float64
+	// perByte: ratio is bytes per token, calibrated on the request
+	// (calibrated); otherwise it is runes per token.
+	perByte bool
 }
 
 // Name is the tokenizer or ratio the counts come from.
@@ -52,14 +56,59 @@ func (e *Estimator) Count(s string) int {
 	if s == "" {
 		return 0
 	}
-	if e.enc != nil {
+	switch {
+	case e.perByte:
+		return max(int(float64(len(s))/e.ratio+0.5), 1)
+	case e.enc != nil:
 		return len(e.enc.EncodeOrdinary(s))
 	}
-	n := int(float64(len([]rune(s)))/e.ratio + 0.5)
-	if n == 0 {
-		n = 1
+	return max(int(float64(utf8.RuneCountInString(s))/e.ratio+0.5), 1)
+}
+
+// Calibration: a request's counts use bytes per token measured with the
+// tokenizer on at most calibrationBytes of its own text, at most
+// calibrationLeafBytes from each leaf. tiktoken allocates hundreds of times
+// the text it encodes, so encoding every leaf made a multi-megabyte request
+// allocate more than a gigabyte (eac.78). Counts are reported, never used
+// to decide anything, so an estimate cannot change the output (R1).
+const (
+	calibrationBytes     = 8 << 10
+	calibrationLeafBytes = 2 << 10
+)
+
+// calibrated returns an estimator that counts bytes at the ratio e's
+// tokenizer gives on texts; e itself for a ratio estimator or no text.
+func (e *Estimator) calibrated(count func(string) int, texts []string) *Estimator {
+	if e.enc == nil {
+		return e
 	}
-	return n
+	var b strings.Builder
+	for _, t := range texts {
+		if b.Len() >= calibrationBytes {
+			break
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(runePrefixString(t, min(calibrationLeafBytes, calibrationBytes-b.Len())))
+	}
+	sample := b.String()
+	tokens := count(sample)
+	if tokens <= 0 || len(sample) == 0 {
+		return e
+	}
+	return &Estimator{name: e.name, ratio: float64(len(sample)) / float64(tokens), perByte: true}
+}
+
+// runePrefixString is at most n bytes of s, ending on a rune boundary.
+func runePrefixString(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 var (

@@ -63,8 +63,9 @@
     "max_body_bytes": {
       "type": "integer",
       "title": "Maximum body size (bytes)",
-      "description": "Bodies larger than this pass through uncompressed. Limits are by size, never by time, so load never changes the output.",
+      "description": "Bodies larger than this pass through uncompressed. Limits are by size, never by time, so load never changes the output. Compressing a body allocates about 10-20 times its size, so it is capped at 16 MiB.",
       "minimum": 1,
+      "maximum": 16777216,
       "default": 4194304
     },
     "cache_drop_alert": {

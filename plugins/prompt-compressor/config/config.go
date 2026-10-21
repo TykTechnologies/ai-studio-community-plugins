@@ -97,6 +97,10 @@ const (
 	BindApp   = "app:"
 )
 
+// MaxMaxBodyBytes bounds max_body_bytes: compressing a body allocates about
+// 10-20 times its size (compress TestCompressAllocationIsBounded).
+const MaxMaxBodyBytes = 16 << 20
+
 // Limits on admin input.
 const (
 	MaxLevel              = 3
@@ -468,8 +472,8 @@ func (c *Config) Validate() error {
 	default:
 		add("failure_mode: must be open or closed")
 	}
-	if c.MaxBodyBytes <= 0 {
-		add("max_body_bytes: must be positive")
+	if c.MaxBodyBytes <= 0 || c.MaxBodyBytes > MaxMaxBodyBytes {
+		add("max_body_bytes: must be 1-%d", MaxMaxBodyBytes)
 	}
 	if !(c.CacheDropAlert >= 0 && c.CacheDropAlert <= 1) {
 		add("cache_drop_alert: must be between 0 and 1")
