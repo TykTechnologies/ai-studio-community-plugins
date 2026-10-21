@@ -135,7 +135,7 @@ func (p *PromptCompressorPlugin) complete(rec pendingRecord, u usage, found, str
 			r.OfferedTools[i] = records.OfferedTool{Name: o.Name, Tokens: o.Tokens}
 		}
 	}
-	r.CalledTools = called
+	r.CalledTools = offeredOnly(called, rec.Tools)
 	if len(rep.Strategies) > 0 {
 		r.Strategies = make(map[string]records.StrategyStats, len(rep.Strategies))
 		for name, s := range rep.Strategies {

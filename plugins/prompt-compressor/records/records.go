@@ -356,9 +356,15 @@ func (d *Delta) addTools(r Request, p Price, priced bool) {
 		}
 		d.Tools = addTool(d.Tools, name, s, true)
 	}
+	// A called name counts only when the request offered that tool: the
+	// name comes from model output, and a prompt-injected model could
+	// "call" a tool named after a secret it saw.
 	called := map[string]bool{}
 	for _, n := range r.CalledTools {
 		name := toolName(n)
+		if !offered[name] {
+			name = OtherTool
+		}
 		if !called[name] {
 			called[name] = true
 			d.Tools = addTool(d.Tools, name, ToolStats{Called: 1}, true)

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
 )
 
 // Tool-definition cost (eac.39): what the tools a request offers cost in
@@ -306,6 +308,32 @@ func (s calledSet) sorted() []string {
 		out = append(out, n)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// offeredOnly keeps the called names the request offered; the others
+// become records.OtherTool. A name comes from model output, so one it was
+// never offered (a prompt-injected model can "call" a tool named after a
+// secret it saw) is not kept.
+func offeredOnly(called []string, offered toolsInfo) []string {
+	if len(called) == 0 {
+		return nil
+	}
+	names := make(map[string]bool, len(offered.Tools))
+	for _, t := range offered.Tools {
+		names[t.Name] = true
+	}
+	var out []string
+	other := false
+	for _, n := range called {
+		switch {
+		case names[n]:
+			out = append(out, n)
+		case !other:
+			other = true
+			out = append(out, records.OtherTool)
+		}
+	}
 	return out
 }
 

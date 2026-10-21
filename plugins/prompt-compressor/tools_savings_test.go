@@ -1,11 +1,45 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
+	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
+
+// A called name the request never offered is model output: a
+// prompt-injected model can "call" a tool named after a secret it saw. It
+// is recorded only as "other", never by name, on the edge and in Studio.
+func TestCalledToolsMustBeOffered(t *testing.T) {
+	p, ctx := hookPlugin(t, `{"mode":"audit"}`)
+	rec := &recorded{}
+	p.SetRecorder(rec)
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"go"}],"tools":[{"type":"function","function":{"name":"read_file","parameters":{}}}]}`)
+	p.HandlePostAuth(ctx, request(body, nil))
+	resp := `{"choices":[{"message":{"tool_calls":[` +
+		`{"id":"c1","type":"function","function":{"name":"read_file","arguments":"{}"}},` +
+		`{"id":"c2","type":"function","function":{"name":"sk-live_SECRET123","arguments":"{}"}},` +
+		`{"id":"c3","type":"function","function":{"name":"ghp_SECRET456","arguments":"{}"}}]}}]}`
+	p.OnBeforeWrite(ctx, &pb.ResponseWriteRequest{Body: []byte(resp)})
+	if len(rec.reqs) != 1 || !reflect.DeepEqual(rec.reqs[0].CalledTools, []string{records.OtherTool, "read_file"}) && !reflect.DeepEqual(rec.reqs[0].CalledTools, []string{"read_file", records.OtherTool}) {
+		t.Fatalf("called %v", rec.reqs)
+	}
+	// Studio folds them too, whatever an edge sends
+	r := rec.reqs[0]
+	r.CalledTools = []string{"sk-live_SECRET123", "read_file"}
+	d := records.NewDelta(records.KeyOf(r))
+	d.AddRequest(r, records.Price{}, false)
+	if _, ok := d.Tools["sk-live_SECRET123"]; ok || d.Tools[records.OtherTool].Called != 1 || d.Tools["read_file"].Called != 1 {
+		t.Errorf("tools %+v", d.Tools)
+	}
+	raw, _ := json.Marshal(d)
+	if strings.Contains(string(raw), "SECRET") {
+		t.Errorf("the delta carries a called-only name: %s", raw)
+	}
+}
 
 // The savings view reports each App's tool-definition cost, its share of
 // the prompt, the tools never called and what dropping them would save.

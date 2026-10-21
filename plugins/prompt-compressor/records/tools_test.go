@@ -22,8 +22,8 @@ func TestToolsAreBounded(t *testing.T) {
 	for i := 0; i < 3*MaxToolsPerRow; i++ {
 		d.AddRequest(toolRequest(fmt.Sprintf("tool_%d", i)), Price{}, false)
 	}
-	r := toolRequest("<script>", "")
-	r.CalledTools = []string{"tool_0", "tool_0", "x y"}
+	r := toolRequest("<script>", "", "tool_0")
+	r.CalledTools = []string{"tool_0", "tool_0", "x y", "not_offered"}
 	d.AddRequest(r, Price{}, false)
 	if len(d.Tools) != MaxToolsPerRow {
 		t.Fatalf("%d tool names, max %d", len(d.Tools), MaxToolsPerRow)
