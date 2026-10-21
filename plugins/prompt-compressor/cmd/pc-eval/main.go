@@ -15,14 +15,25 @@
 //
 //	pc-eval plan -suite swebench -tasks verified.txt -n 200 -seed 7 -levels 1,2
 //	pc-eval plan ... -run -approved-by lead -max-usd 400
+//
+// Live suites through a gateway: a dry run (the default) against the oracle
+// mock upstream costs nothing and refuses a slug that is not the mock.
+//
+//	pc-eval live -suite bfcl -gateway http://edge:8080 -secret $APP -slugs 0=pc-off,2=pc-l2
+//	pc-eval live -suite lcqa -local http://localhost:9999 -levels 2   # in-process gateway in front of the mock
+//	pc-eval live ... -dry-run=false -approved-by lead -max-usd 40   # paid: needs an approval covering the estimate
 package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,6 +57,8 @@ func main() {
 		err = plan(os.Args[2:])
 	case "compress":
 		err = compressOne(os.Args[2:])
+	case "live":
+		err = live(os.Args[2:])
 	default:
 		usage()
 	}
@@ -56,7 +69,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: pc-eval replay|plan|compress [flags]  (pc-eval <cmd> -h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: pc-eval replay|plan|compress|live [flags]  (pc-eval <cmd> -h for flags)")
 	os.Exit(2)
 }
 
@@ -297,4 +310,139 @@ func taskIDs(path string, n int) ([]string, error) {
 		}
 	}
 	return ids, sc.Err()
+}
+
+// live runs a live suite's tasks through a gateway, off against each level,
+// and writes report.json, report.md and results.jsonl.
+func live(args []string) error {
+	fs := flag.NewFlagSet("live", flag.ExitOnError)
+	suite := fs.String("suite", "bfcl", "bfcl | lcqa | swebench")
+	taskFile := fs.String("tasks", "", "tasks.jsonl (default testdata/live/<suite>/tasks.jsonl)")
+	n := fs.Int("n", 0, "tasks to select (default: all in the file)")
+	seed := fs.Uint64("seed", 1, "selection seed")
+	lv := fs.String("levels", "2", "levels compared against off")
+	gw := fs.String("gateway", "", "gateway base URL (a Microgateway)")
+	secret := fs.String("secret", "", "App credential for the gateway")
+	slugs := fs.String("slugs", "", "level=slug pairs, e.g. 0=pc-off,2=pc-l2 (default with -local: 0=off,<level>=l<level>)")
+	local := fs.String("local", "", "run an in-process compressing gateway in front of this upstream URL instead of -gateway")
+	pf := fs.String("policy", "", policyUsage+" (with -local)")
+	dry := fs.Bool("dry-run", true, "require the oracle mock behind every slug (no spend)")
+	by := fs.String("approved-by", "", "who approved the spend (paid runs)")
+	maxUSD := fs.Float64("max-usd", 0, "approved spending cap (paid runs)")
+	note := fs.String("note", "", "approval note")
+	prices := fs.String("prices", "", "JSON price file")
+	conc := fs.Int("concurrency", 4, "parallel tasks")
+	out := fs.String("out", "", "report directory (default: print the Markdown report)")
+	fs.Parse(args)
+
+	spec, ok := eval.Suites[*suite]
+	if !ok {
+		return fmt.Errorf("unknown suite %q", *suite)
+	}
+	if *taskFile == "" {
+		*taskFile = filepath.Join("testdata", "live", *suite, "tasks.jsonl")
+	}
+	tasks, err := eval.LoadTasks(*taskFile)
+	if err != nil {
+		return err
+	}
+	byID := map[string]eval.Task{}
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		byID[t.ID] = t
+		ids = append(ids, t.ID)
+	}
+	if *n == 0 {
+		*n = len(ids)
+	}
+	ls, err := levels(*lv)
+	if err != nil {
+		return err
+	}
+	format := tasks[0].Format
+	pl, err := eval.NewPlan(spec, ids, *n, *seed, ls, format)
+	if err != nil {
+		return err
+	}
+	p, err := eval.LoadPrices(*prices)
+	if err != nil {
+		return err
+	}
+
+	g := eval.Gateway{BaseURL: *gw, Secret: *secret, Slugs: map[int]string{}}
+	if *local != "" {
+		up, err := url.Parse(*local)
+		if err != nil {
+			return fmt.Errorf("-local: %w", err)
+		}
+		base, err := loadPolicy(*pf)
+		if err != nil {
+			return err
+		}
+		policies := map[string]*config.Policy{}
+		g.Slugs[0] = "off"
+		for _, l := range ls {
+			slug := fmt.Sprintf("l%d", l)
+			g.Slugs[l] = slug
+			policies[slug] = atLevel(base, l)
+		}
+		srv := httptest.NewServer(eval.CompressingGateway(httputil.NewSingleHostReverseProxy(up), policies))
+		defer srv.Close()
+		g.BaseURL = srv.URL
+	} else if *gw == "" {
+		return errors.New("-gateway or -local is required")
+	}
+	if *slugs != "" {
+		g.Slugs = map[int]string{}
+		for _, kv := range strings.Split(*slugs, ",") {
+			k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")
+			l, err := strconv.Atoi(k)
+			if !ok || err != nil || v == "" {
+				return fmt.Errorf("-slugs: bad pair %q (level=slug)", kv)
+			}
+			g.Slugs[l] = v
+		}
+	}
+	for _, l := range pl.Levels {
+		if g.Slugs[l] == "" {
+			return fmt.Errorf("-slugs: no slug for level %d", l)
+		}
+	}
+	if !*dry {
+		pl.Approve = &eval.Approval{By: *by, Note: *note, MaxUSD: *maxUSD}
+		if err := pl.Authorize(pl.Estimate(p[format], *conc)); err != nil {
+			return err
+		}
+	}
+	ctx := context.Background()
+	if err := g.Preflight(ctx, format, *dry); err != nil {
+		return err
+	}
+	results, err := eval.Run(ctx, g, pl, byID, *conc)
+	if err != nil {
+		return err
+	}
+	rep := eval.Summarise(pl, results, p[format], *dry)
+	if *out == "" {
+		fmt.Print(rep.Markdown())
+		return nil
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
+	js, err := rep.JSON()
+	if err != nil {
+		return err
+	}
+	var lines strings.Builder
+	for _, r := range results {
+		b, _ := json.Marshal(r)
+		lines.Write(b)
+		lines.WriteByte('\n')
+	}
+	return errors.Join(
+		os.WriteFile(filepath.Join(*out, "report.json"), js, 0o644),
+		os.WriteFile(filepath.Join(*out, "report.md"), []byte(rep.Markdown()), 0o644),
+		os.WriteFile(filepath.Join(*out, "results.jsonl"), []byte(lines.String()), 0o644),
+	)
 }

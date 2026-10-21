@@ -68,7 +68,7 @@ toy compressors and checks that:
 - a non-deterministic one, or one that depends on context, is caught;
 - the cost formula matches the gateway's.
 
-## Live suites (paid)
+## Live suites
 
 The gate (eac.4) uses BFCL (≥1,000 cases, 1-point margin), long-context QA
 (≥500, 2-point F1 margin) and SWE-bench Verified (200 tasks × 3 seeds,
@@ -91,4 +91,41 @@ assumptions with figures from a pilot run.
 A paid run needs `-run -approved-by <who> -max-usd <cap>` with a cap at or
 above the estimate. Get the approval before running.
 
-The suite runners themselves arrive with eac.24.
+### Running a suite: `pc-eval live`
+
+`live` sends each task through a gateway, once with compression off and
+once at each level, on the same tasks and seeds. It writes `report.json`,
+`report.md` and `results.jsonl`. The report gives each configuration's
+metric with a 95% interval, turns per task, input tokens, cache-read share
+and cost, and the paired difference and verdict of each level against off.
+
+```bash
+# a Microgateway with one LLM per configuration, each bound to a policy at that level
+go run ./cmd/pc-eval live -suite bfcl -gateway http://edge:8080 -secret "$APP_SECRET" -slugs 0=pc-off,2=pc-l2 -out /tmp/bfcl
+# no stack: an in-process gateway (the plugin's compress library) in front of the mock
+go run ./cmd/pc-eval live -suite lcqa -local http://localhost:9999 -levels 2
+```
+
+- **Dry run is the default.** Every slug must answer with the oracle mock's
+  `X-PC-Mock` header. One tiny preflight request per slug checks it before
+  any task is sent, so a slug bound to a real vendor costs at most that
+  request. `-dry-run=false` needs `-approved-by` and `-max-usd` covering
+  the plan's estimate.
+- **Tasks** come from `testdata/live/<suite>/tasks.jsonl`, one object per
+  line: `{"id", "format": "openai"|"anthropic", "request": <vendor body>,
+  "expect": {...}}`.
+  - BFCL `expect.calls` (`[{name, arguments}]`) scores 100 for exactly
+    those calls, with arguments compared as canonical JSON. A call whose
+    arguments are not JSON, or that names a tool the request does not
+    offer, counts as malformed.
+  - Long-context QA `expect.answers` scores the best F1 and exact match
+    (SQuAD normalisation). The document travels in the request as a tool
+    result.
+  - SWE-bench-shaped tasks add `tool_outputs` and `max_turns`. The runner
+    sends the request; for each tool call the model makes it appends the
+    assistant turn and the next scripted output, and it repeats until the
+    model stops calling tools. The task is resolved when the final answer
+    contains `expect.resolved_if`. Nothing is executed.
+- **Against the oracle mock** a task scores only if its evidence reached
+  the upstream intact. A dry run therefore measures what compression kept,
+  at no cost.
