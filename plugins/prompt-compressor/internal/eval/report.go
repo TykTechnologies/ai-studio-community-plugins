@@ -37,15 +37,15 @@ func (r *Report) Markdown() string {
 		if l.Unattributed != 0 {
 			fmt.Fprintf(&b, "\n%d saved tokens could not be attributed to a kind (the unit layout changed).\n", l.Unattributed)
 		}
-		b.WriteString("\n### Sessions (30 turns each)\n\n| Session | Format | Input tokens before | after | Cache read | Cache write | Uncached | Cache-read share | Cost | at off | Change | Prefix breaks |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+		b.WriteString("\n### Sessions (30 turns each)\n\n| Session | Format | Input tokens before | after | Cache read | Cache write | Uncached | Cache-read share | Cost | at off | Change | Prefix breaks | Late compressions |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 		for _, s := range l.Sessions {
 			if s.Skipped != "" {
-				fmt.Fprintf(&b, "| %s | %s | skipped: %s |||||||||\n", s.Name, s.Format, s.Skipped)
+				fmt.Fprintf(&b, "| %s | %s | skipped: %s ||||||||||\n", s.Name, s.Format, s.Skipped)
 				continue
 			}
-			fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %d | %d | %s | $%.4f | $%.4f | %s | %d |\n",
+			fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %d | %d | %s | $%.4f | $%.4f | %s | %d | %d |\n",
 				s.Name, s.Format, s.TokensBefore, s.TokensAfter, s.Usage.CacheRead, s.Usage.CacheWrite, s.Usage.Input,
-				pct(s.CacheReadShare), s.Cost, s.BaselineCost, signedPct(s.Cost, s.BaselineCost), s.PrefixBreaks)
+				pct(s.CacheReadShare), s.Cost, s.BaselineCost, signedPct(s.Cost, s.BaselineCost), s.PrefixBreaks, s.LateCompressions)
 		}
 		for _, list := range []struct {
 			title string

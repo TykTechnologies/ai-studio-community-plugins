@@ -231,6 +231,66 @@ func TestLibraryLevel1Replay(t *testing.T) {
 		l.TokensBefore, l.TokensAfter, l.SessionCost, l.BaselineCost, lib.Outcomes)
 }
 
+// protecting mimics protect_recent_turns: results in the newest turn get a
+// light touch (level 1: a trailing space trimmed), older ones the full cut.
+// A result compressed further as it leaves the newest turn is a late
+// compression, not a prefix break.
+type protecting struct{ keep int }
+
+func (protecting) Name() string { return "protecting" }
+func (p protecting) Compress(format, path string, body []byte, level int) ([]byte, error) {
+	units, err := segments.ExtractUnits(format, body)
+	if err != nil {
+		return body, nil
+	}
+	newest := 0
+	for _, u := range units {
+		newest = max(newest, u.Turn)
+	}
+	var edits []segments.Edit
+	for _, u := range units {
+		if u.Kind != guardrails.KindToolResult {
+			continue
+		}
+		for _, l := range u.Leaves {
+			switch {
+			case u.Turn == newest:
+				if t := strings.TrimRight(l.Text, " \n"); t != l.Text {
+					edits = append(edits, segments.Edit{Path: l.Path, Old: l.Text, New: t})
+				}
+			case len(l.Text) > p.keep:
+				head := l.Text[:p.keep]
+				for !utf8.ValidString(head) {
+					head = head[:len(head)-1]
+				}
+				edits = append(edits, segments.Edit{Path: l.Path, Old: l.Text, New: head + " [cut]"})
+			}
+		}
+	}
+	if len(edits) == 0 {
+		return body, nil
+	}
+	return segments.Apply(body, edits)
+}
+
+func TestProtectedTurnIsLateNotBroken(t *testing.T) {
+	t.Parallel()
+	rep, err := Replay(loadCorpus(t), Options{Levels: []int{2}, Compressor: protecting{keep: 600}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := 0
+	for _, s := range rep.Levels[0].Sessions {
+		if s.PrefixBreaks != 0 {
+			t.Errorf("%s: %d prefix breaks; results leaving the protected turn are late compressions", s.Name, s.PrefixBreaks)
+		}
+		late += s.LateCompressions
+	}
+	if late == 0 {
+		t.Error("no late compressions counted")
+	}
+}
+
 // leaky fails the way a careless compressor would: quoting the text it
 // failed on.
 type leaky struct{}

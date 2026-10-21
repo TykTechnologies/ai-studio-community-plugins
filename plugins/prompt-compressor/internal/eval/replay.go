@@ -67,6 +67,11 @@ type Options struct {
 	// OutputTokens is the response length billed per session turn (the
 	// corpus records requests, not responses).
 	OutputTokens int
+	// ProtectRecentTurns is the policy's protect_recent_turns: results in
+	// that many newest turns may compress further once they leave the
+	// window without counting as a prefix break. Default 1, the default
+	// policy's.
+	ProtectRecentTurns int
 }
 
 func (o *Options) defaults() {
@@ -84,6 +89,9 @@ func (o *Options) defaults() {
 	}
 	if o.OutputTokens == 0 {
 		o.OutputTokens = 400
+	}
+	if o.ProtectRecentTurns == 0 {
+		o.ProtectRecentTurns = 1
 	}
 }
 
@@ -291,7 +299,7 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 	tk := o.tok(s.Format)
 	price := o.Prices[s.Format]
 	var prevIn, prevOut []byte
-	var prevLeaves map[string][2]string
+	var prevLeaves map[string]leaf
 	for k, in := range s.Bodies() {
 		out, err := c.Compress(s.Format, s.Path, in, level)
 		if err != nil {
@@ -304,9 +312,9 @@ func replaySession(s corpus.Session, c Compressor, level int, o Options, lr *Lev
 		r.TokensBefore += tk.Count(in)
 		r.TokensAfter += tokens
 		shared := 0
-		var leaves map[string][2]string
+		var leaves map[string]leaf
 		if lr != nil { // the baseline pass only prices; it checks nothing
-			leaves = leafMap(s.Format, in, out)
+			leaves = leafMap(s.Format, in, out, o.ProtectRecentTurns)
 		}
 		if prevOut != nil {
 			n := commonPrefix(prevOut, out)
@@ -351,9 +359,17 @@ func ErrorClass(err error) string {
 	return "compress_error"
 }
 
-// leafMap maps each tool-result leaf path to its uncompressed and compressed
-// text, when compression kept the unit layout (nil otherwise).
-func leafMap(format string, in, out []byte) map[string][2]string {
+// leaf is one tool-result leaf of a request: its text before and after
+// compression, and whether it sat in the request's protected newest turns.
+type leaf struct {
+	in, out   string
+	protected bool
+}
+
+// leafMap maps each tool-result leaf path of a request to a leaf, when
+// compression kept the unit layout (nil otherwise). protect is the number of
+// newest turns the policy keeps at level 1 at most (protect_recent_turns).
+func leafMap(format string, in, out []byte, protect int) map[string]leaf {
 	ui, err1 := segments.ExtractUnits(format, in)
 	uo, err2 := ui, err1
 	if !bytes.Equal(in, out) {
@@ -362,17 +378,21 @@ func leafMap(format string, in, out []byte) map[string][2]string {
 	if err1 != nil || err2 != nil {
 		return nil
 	}
+	newest := 0
+	for _, u := range ui {
+		newest = max(newest, u.Turn)
+	}
 	ti, to := toolUnits(ui), toolUnits(uo)
 	if len(ti) != len(to) {
 		return nil
 	}
-	m := map[string][2]string{}
+	m := map[string]leaf{}
 	for i := range ti {
 		if len(ti[i].Leaves) != len(to[i].Leaves) {
 			return nil
 		}
 		for j, l := range ti[i].Leaves {
-			m[l.Path] = [2]string{l.Text, to[i].Leaves[j].Text}
+			m[l.Path] = leaf{in: l.Text, out: to[i].Leaves[j].Text, protected: ti[i].Turn > newest-protect}
 		}
 	}
 	return m
@@ -387,24 +407,31 @@ func leafMap(format string, in, out []byte) map[string][2]string {
 //     shared prefix becomes at this turn's compression ratio (something
 //     before the history changed, such as a stamp or a reordering).
 //
-// A result the previous turn sent uncompressed and this turn compresses is
-// not a break: protect_recent_turns keeps the newest turn verbatim by
-// design, so it costs the cache only that result, once (counted in late).
-func prefixBroken(prev, cur map[string][2]string, sharedIn, sharedOut, tokensIn, tokensOut int, late *int) bool {
-	broken := false
+// A result the previous turn sent in its protected newest turns (level 1 at
+// most, by protect_recent_turns) or uncompressed, and this turn compresses
+// further, is not a break: the design costs the cache that result once, as
+// it leaves the protected window (counted in late).
+func prefixBroken(prev, cur map[string]leaf, sharedIn, sharedOut, tokensIn, tokensOut int, late *int) bool {
+	broken, lateNow := false, false
 	for path, c := range cur {
 		p, ok := prev[path]
-		if !ok || p[0] != c[0] || p[1] == c[1] {
+		if !ok || p.in != c.in || p.out == c.out {
 			continue
 		}
-		if p[0] == p[1] {
+		if p.in == p.out || (p.protected && !c.protected) {
 			*late++
+			lateNow = true
 			continue
 		}
 		broken = true
 	}
 	if broken {
 		return true
+	}
+	if lateNow {
+		// The shared prefix ends at the late-compressed result; that loss
+		// is the late compression's, not a break before the history.
+		return false
 	}
 	if tokensIn == 0 {
 		return false
