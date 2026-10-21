@@ -26,6 +26,41 @@ func bedrockBody(history bool, tools ...string) string {
 	return `{"messages":` + msgs + `,"toolConfig":{"tools":[` + strings.Join(items, ",") + `]}}`
 }
 
+// A dropped Anthropic tool's cache_control moves to the nearest kept tool
+// before it (else after it), so the tools and system prompt stay cached;
+// a kept tool keeps its own marker and never gets a second one.
+func TestDropToolsMovesTheCacheBreakpoint(t *testing.T) {
+	cc := `,"cache_control":{"type":"ephemeral"}}`
+	marked := func(name string) string { return strings.TrimSuffix(toolSpec("anthropic", name), "}") + cc }
+	body := func(tools ...string) string {
+		return `{"model":"claude","max_tokens":10,"messages":[{"role":"user","content":"go"}],"tools":[` + strings.Join(tools, ",") + `]}`
+	}
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"last tool marked", body(toolSpec("anthropic", "read_file"), marked("deploy_prod")), body(marked("read_file"))},
+		{"first tool marked", body(marked("deploy_prod"), toolSpec("anthropic", "read_file")), body(marked("read_file"))},
+		{"kept tool already marked", body(marked("read_file"), marked("deploy_prod")), body(marked("read_file"))},
+		{"middle", body(toolSpec("anthropic", "a"), toolSpec("anthropic", "b"), marked("deploy_prod"), toolSpec("anthropic", "c")),
+			body(toolSpec("anthropic", "a"), marked("b"), toolSpec("anthropic", "c"))},
+	} {
+		edits, _, _ := dropTools("anthropic", []byte(tc.in), []string{"deploy_*"})
+		out, err := segments.Apply([]byte(tc.in), edits)
+		if err != nil || string(out) != tc.want {
+			t.Errorf("%s: %v\n%s\nwant\n%s", tc.name, err, out, tc.want)
+		}
+		if n := strings.Count(string(out), "cache_control"); n != 1 {
+			t.Errorf("%s: %d breakpoints", tc.name, n)
+		}
+	}
+	// Other formats have no tool-level breakpoint to move
+	in := `{"model":"gpt-4o","messages":[],"tools":[` + toolSpec("openai", "read_file") + `,` + strings.TrimSuffix(toolSpec("openai", "deploy_prod"), "}") + cc + `]}`
+	edits, _, _ := dropTools("openai", []byte(in), []string{"deploy_*"})
+	if out, _ := segments.Apply([]byte(in), edits); strings.Contains(string(out), "cache_control") {
+		t.Errorf("openai: %s", out)
+	}
+}
+
 // Bedrock refuses toolConfig.tools = [cachePoint], tools = [] and a missing
 // toolConfig beside tool blocks, so a drop never leaves a cache marker
 // alone or before every tool: the array is kept whole instead.

@@ -45,6 +45,9 @@ type toolsArray struct {
 	names []string
 	// marker: the item is a cache marker, not a tool (a Bedrock cachePoint)
 	marker []bool
+	// breakpoint is an Anthropic tool's cache_control value, which moves
+	// to a kept tool when its tool is dropped.
+	breakpoint []json.RawMessage
 }
 
 // dropTools returns the edits that remove the matching tools, the bytes of
@@ -126,8 +129,35 @@ func (a toolsArray) stillValid(keep []bool) bool {
 
 // without is the array as sent with the items keep marks false cut out:
 // the kept items, the text before the first and after the last, and the
-// separator that followed each kept item are its own bytes.
+// separator that followed each kept item are its own bytes. A dropped
+// tool's Anthropic cache_control moves to the nearest kept tool before it
+// (else after it), so the tools and system prompt stay cached up to the
+// same point; a kept tool that has one keeps its own.
 func (a toolsArray) without(keep []bool) ([]byte, bool) {
+	items := append([]json.RawMessage(nil), a.items...)
+	moved := make([]bool, len(items))
+	for i := range a.items {
+		if keep[i] || a.breakpoint[i] == nil {
+			continue
+		}
+		j := -1
+		for k := i - 1; k >= 0 && j < 0; k-- {
+			if keep[k] && !a.marker[k] {
+				j = k
+			}
+		}
+		for k := i + 1; k < len(items) && j < 0; k++ {
+			if keep[k] && !a.marker[k] {
+				j = k
+			}
+		}
+		if j < 0 || a.breakpoint[j] != nil || moved[j] {
+			continue
+		}
+		if with, ok := withField(items[j], "cache_control", a.breakpoint[i]); ok {
+			items[j], moved[j] = with, true
+		}
+	}
 	starts := make([]int, len(a.items))
 	pos := 0
 	for i, item := range a.items {
@@ -151,11 +181,33 @@ func (a toolsArray) without(keep []bool) ([]byte, bool) {
 			// the separator that followed the previous kept item
 			b.Write(a.raw[end(prev):starts[prev+1]])
 		}
-		b.Write(a.items[i])
+		b.Write(items[i])
 		prev = i
 	}
 	b.Write(a.raw[end(last):])
 	return b.Bytes(), true
+}
+
+// withField is the JSON object obj with key: value added as its last
+// member; the object's own bytes are kept.
+func withField(obj json.RawMessage, key string, value json.RawMessage) (json.RawMessage, bool) {
+	t := bytes.TrimRight(obj, " \t\r\n")
+	if len(t) < 2 || t[len(t)-1] != '}' {
+		return nil, false
+	}
+	body := bytes.TrimRight(t[:len(t)-1], " \t\r\n")
+	var b bytes.Buffer
+	b.Write(body)
+	if body[len(body)-1] != '{' {
+		b.WriteByte(',')
+	}
+	k, _ := json.Marshal(key)
+	b.Write(k)
+	b.WriteByte(':')
+	b.Write(value)
+	b.Write(t[len(body):])
+	b.Write(obj[len(t):])
+	return b.Bytes(), json.Valid(b.Bytes())
 }
 
 // matchesAny reports a name a drop_tools entry names: the whole name, or
@@ -180,12 +232,19 @@ func toolArrays(format string, body []byte) []toolsArray {
 		if json.Unmarshal(raw, &items) != nil || len(items) == 0 {
 			return toolsArray{}, false
 		}
-		a := toolsArray{path: path, raw: raw, items: items, names: make([]string, len(items)), marker: make([]bool, len(items))}
+		a := toolsArray{path: path, raw: raw, items: items, names: make([]string, len(items)),
+			marker: make([]bool, len(items)), breakpoint: make([]json.RawMessage, len(items))}
 		for i, it := range items {
 			a.names[i] = name(it)
 			var m map[string]json.RawMessage
-			if a.names[i] == "" && json.Unmarshal(it, &m) == nil {
+			if json.Unmarshal(it, &m) != nil {
+				continue
+			}
+			if a.names[i] == "" {
 				_, a.marker[i] = m["cachePoint"]
+			}
+			if format == "anthropic" {
+				a.breakpoint[i] = m["cache_control"]
 			}
 		}
 		return a, true
