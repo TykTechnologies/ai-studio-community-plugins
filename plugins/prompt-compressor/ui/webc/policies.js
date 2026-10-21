@@ -775,10 +775,10 @@ class PromptCompressorPolicies extends HTMLElement {
           h('option', { value: 'closed', selected: cfg.failure_mode === 'closed' }, 'Closed: answer 502'))),
       h('label', { className: 'field' }, 'Maximum body size (bytes)',
         h('input', {
-          type: 'number', min: 1, disabled: readOnly, value: String(cfg.max_body_bytes || 4194304),
+          type: 'number', min: 1, max: 16777216, disabled: readOnly, value: String(cfg.max_body_bytes || 4194304),
           onChange: (e) => { cfg.max_body_bytes = intOr(e.target.value, 4194304); this._paint(); },
         }),
-        h('span', { className: 'muted' }, 'Larger bodies pass through uncompressed.')),
+        h('span', { className: 'muted' }, 'Larger bodies pass through uncompressed. At most 16 MiB (16777216); the default is 4 MiB.')),
       h('label', { className: 'field' }, 'Cache-drop warning (fraction)',
         h('input', {
           type: 'number', min: 0, max: 1, step: 0.05, disabled: readOnly,
