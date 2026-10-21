@@ -529,7 +529,7 @@ class PromptCompressorDashboard extends HTMLElement {
     const body = h('tbody');
     for (const t of tools) {
       body.appendChild(h('tr', never.has(t.name) ? { 'data-testid': 'pc-tool-never-called' } : {},
-        h('td', {}, t.name === 'other' ? 'Other (names not listed)' : h('code', {}, t.name), never.has(t.name) ? h('span', { className: 'tag' }, 'never called') : null),
+        h('td', {}, t.name === 'other' ? 'Other (names not listed, or called but not offered)' : h('code', {}, t.name), never.has(t.name) ? h('span', { className: 'tag' }, 'never called') : null),
         h('td', { className: 'num' }, fmtInt(t.offered)),
         h('td', { className: 'num' }, fmtInt(t.called)),
         h('td', { className: 'num' }, fmtInt(t.def_tokens))));
