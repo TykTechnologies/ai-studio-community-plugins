@@ -64,7 +64,7 @@ func (ps pass) run(text string, depth int) (string, []step) {
 			steps = append(steps, inner...)
 		}
 		if ps.level >= 2 {
-			if r, ok := reduceJSON(out, ps.keep, ps.budget); ok {
+			if r, ok := reduceJSON(out, ps.keep, ps.budget); ok && (ps.budget > 0 || worthReducing(out, r)) {
 				steps = append(steps, step{reducerStrategy(jsonReducerName), len(out) - len(r)})
 				out = r
 			}
@@ -92,7 +92,7 @@ func (ps pass) run(text string, depth int) (string, []step) {
 		}
 	}
 	if ps.level >= 2 {
-		if out, name := reduce(text, ps.keep); name != "" {
+		if out, name := reduce(text, ps.keep); name != "" && worthReducing(text, out) {
 			steps = append(steps, step{reducerStrategy(name), len(text) - len(out)})
 			text = out
 		}
@@ -331,4 +331,20 @@ func dedupeReference(tool, callID string) string {
 // empty text block is refused by some vendors).
 func validText(s string) bool {
 	return s != "" && utf8.ValidString(s)
+}
+
+// minReduceSaving is the least share of a leaf a level-2 reducer must
+// remove to be used. A tool output in the newest turn goes at level 1 and
+// is reduced on the next request, which rewrites it in the vendor's prompt
+// cache (a cache write, on Anthropic at a premium); a small cut does not
+// pay that back. It is a property of the text alone, so a leaf is reduced
+// on every request or on none. Replaying the corpus sessions, 0.3 gave the
+// lowest session cost with the cache (eac.70). A size budget overrides it:
+// a JSON output over its budget is cut whatever the saving.
+var minReduceSaving = 0.3
+
+// worthReducing reports a reduction that removes at least minReduceSaving
+// of the text.
+func worthReducing(before, after string) bool {
+	return float64(len(before)-len(after)) >= minReduceSaving*float64(len(before))
 }

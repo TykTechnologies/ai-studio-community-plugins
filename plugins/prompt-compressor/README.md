@@ -158,16 +158,23 @@ plugin loading. The full schema is in `config.schema.json`.
   listings: terraform plan (Refreshing lines and `(known after apply)`
   attributes go), kubectl (healthy pods in a table; labels, annotations,
   volumes, mounts and Normal events in describe output), git diff (context
-  more than 3 lines from a change), grep and ripgrep (more than 5 matches in
-  one file), directory listings (deeper than 4 levels, more than 30 entries
+  more than 3 lines from a change, and the changes to lock and generated
+  files such as package-lock.json, go.sum or *.min.js), grep and ripgrep
+  (more than 5 matches in one file, and matches under vendor/,
+  node_modules/ and the like), HTML pages (script and style blocks, link
+  and meta tags), directory listings (deeper than 4 levels, more than 30 entries
   in one directory, anything under node_modules, .git, vendor, dist, build,
   target and the like), build logs (all but the last 20 lines, step headers
   and errors), stack traces (runs of framework frames) and repeated lines
   (folded with a count). Every reducer keeps the lines it keeps verbatim,
   and every line a `protect_patterns` regex matches; the log and listing
   reducers also keep every line that mentions an error, failure, panic,
-  exception or fatal. Text no reducer recognises (prose, code) gets level 1
-  only.
+  exception or fatal (grep matches excepted: they are code). Text no
+  reducer recognises (prose, code) gets level 1 only. A reducer's cut is
+  used only if it removes at least 30% of the text: the newest turn's tool
+  output goes at level 1 and is reduced on the next request, which rewrites
+  it in the vendor's prompt cache, and a smaller cut does not pay for that
+  (replaying the corpus sessions, 30% gave the lowest cost with the cache).
 - **Level 2, JSON:** an array of 20 items or more, at any depth of a JSON
   tool output (also JSON inside a string), keeps its first and last 5 items,
   every item whose members say it failed (`error`/`errors`/`exception` set,

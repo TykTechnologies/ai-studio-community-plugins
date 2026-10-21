@@ -66,19 +66,19 @@ var errorLine = regexp.MustCompile(`(?i)error|fail|panic|exception|fatal`)
 var registry = []reducer{
 	pytestReducer, jestReducer, goTestReducer, cargoReducer, mavenReducer, gradleReducer,
 	terraformReducer, kubectlReducer, gitDiffReducer, grepReducer, listingReducer, buildLogReducer,
-	stackTraceReducer, repeatedReducer,
+	stackTraceReducer, htmlReducer, repeatedReducer,
 }
 
 // registryFingerprint names every reducer and version, in order, then the
 // JSON reducer (reducers_json.go) with its cut steps, then the level-3 cuts
 // (level3.go).
 func registryFingerprint() string {
-	parts := make([]string, len(registry), len(registry)+2)
+	parts := make([]string, len(registry), len(registry)+3)
 	for i, r := range registry {
 		parts[i] = r.name + "@" + strconv.Itoa(r.version)
 	}
 	parts = append(parts, fmt.Sprintf("%s@%d%v/d%d", jsonReducerName, jsonReducerVersion, jsonCuts, maxJSONReduceDepth))
-	parts = append(parts, fmt.Sprintf("level3@%d", level3Version))
+	parts = append(parts, fmt.Sprintf("level3@%d", level3Version), fmt.Sprintf("min%.2f", minReduceSaving))
 	return strings.Join(parts, ",")
 }
 

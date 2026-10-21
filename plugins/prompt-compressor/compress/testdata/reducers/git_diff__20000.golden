@@ -1,0 +1,551 @@
+diff --git a/internal/auth/payment.go b/internal/auth/payment.go
+index 36fa86f..bdb95c5 100644
+--- a/internal/auth/payment.go
++++ b/internal/auth/payment.go
+@@ -374,9 +374,12 @@ func (x *Account) Merge(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilAccount
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("auth: merge %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/export/payment.go b/internal/export/payment.go
+index 065a945..7dc27f5 100644
+--- a/internal/export/payment.go
++++ b/internal/export/payment.go
+@@ -235,9 +235,12 @@ func (x *Webhook) Post(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("export: post %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/webhook/tenant.go b/internal/webhook/tenant.go
+index 74f6140..5b47603 100644
+--- a/internal/webhook/tenant.go
++++ b/internal/webhook/tenant.go
+@@ -280,9 +280,12 @@ func (x *Account) Merge(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilAccount
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("webhook: merge %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/queue/entry_test.go b/internal/queue/entry_test.go
+index c177c17..7c72fc0 100644
+--- a/internal/queue/entry_test.go
++++ b/internal/queue/entry_test.go
+@@ -342,9 +342,12 @@ func (x *Invoice) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("queue: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/money/payment_test.go b/internal/money/payment_test.go
+index 9f085f7..6eb75f5 100644
+--- a/internal/money/payment_test.go
++++ b/internal/money/payment_test.go
+@@ -95,9 +95,12 @@ func (x *Entry) Close(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilEntry
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: close %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/ledger/invoice_test.go b/internal/ledger/invoice_test.go
+index 9d0ffbe..88b5309 100644
+--- a/internal/ledger/invoice_test.go
++++ b/internal/ledger/invoice_test.go
+@@ -314,9 +314,12 @@ func (x *Webhook) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -247,9 +247,12 @@ func (x *Entry) Post(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilEntry
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: post %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -274,9 +274,12 @@ func (x *Batch) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilBatch
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/ratelimit/invoice_test.go b/internal/ratelimit/invoice_test.go
+index 336a4c5..ea9ecde 100644
+--- a/internal/ratelimit/invoice_test.go
++++ b/internal/ratelimit/invoice_test.go
+@@ -383,9 +383,12 @@ func (x *Webhook) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -181,9 +181,12 @@ func (x *Tenant) Normalize(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilTenant
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: normalize %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -130,9 +130,12 @@ func (x *Webhook) Merge(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: merge %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/money/entry_test.go b/internal/money/entry_test.go
+index 3a9ae7d..5f6fb0a 100644
+--- a/internal/money/entry_test.go
++++ b/internal/money/entry_test.go
+@@ -312,9 +312,12 @@ func (x *Webhook) Reverse(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: reverse %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+diff --git a/internal/auth/ledger_test.go b/internal/auth/ledger_test.go
+index c207669..3194dca 100644
+--- a/internal/auth/ledger_test.go
++++ b/internal/auth/ledger_test.go
+@@ -174,9 +174,12 @@ func (x *Webhook) Lookup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("auth: lookup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -111,9 +111,12 @@ func (x *Statement) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilStatement
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("auth: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/export/batch.go b/internal/export/batch.go
+index e648a5d..058c8d2 100644
+--- a/internal/export/batch.go
++++ b/internal/export/batch.go
+@@ -266,9 +266,12 @@ func (x *Webhook) Settle(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("export: settle %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+diff --git a/internal/ledger/statement.go b/internal/ledger/statement.go
+index 4987cc0..f102bd3 100644
+--- a/internal/ledger/statement.go
++++ b/internal/ledger/statement.go
+@@ -382,9 +382,12 @@ func (x *Ledger) Normalize(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilLedger
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: normalize %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/billing/account.go b/internal/billing/account.go
+index e072493..3053145 100644
+--- a/internal/billing/account.go
++++ b/internal/billing/account.go
+@@ -302,9 +302,12 @@ func (x *Refund) Post(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilRefund
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("billing: post %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/web/package-lock.json b/web/package-lock.json
+[tyk-compressed: git diff output, 5,313 → 4,171 tokens]
+[tyk-compressed: 84 lines of changes to web/package-lock.json, a lock or generated file]
+diff --git a/internal/auth/payment.go b/internal/auth/payment.go
+index b239191..f8a6629 100644
+--- a/internal/auth/payment.go
++++ b/internal/auth/payment.go
+@@ -246,9 +246,12 @@ func (x *Batch) Normalize(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilBatch
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("auth: normalize %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -295,9 +295,12 @@ func (x *Ledger) Post(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilLedger
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("auth: post %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/export/payment.go b/internal/export/payment.go
+index 1490977..b1223f5 100644
+--- a/internal/export/payment.go
++++ b/internal/export/payment.go
+@@ -373,9 +373,12 @@ func (x *Payment) Reconcile(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilPayment
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("export: reconcile %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -103,9 +103,12 @@ func (x *Statement) Open(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilStatement
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("export: open %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -252,9 +252,12 @@ func (x *Invoice) Post(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("export: post %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/webhook/tenant.go b/internal/webhook/tenant.go
+index 397fc0e..538d8f5 100644
+--- a/internal/webhook/tenant.go
++++ b/internal/webhook/tenant.go
+@@ -118,9 +118,12 @@ func (x *Statement) Open(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilStatement
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("webhook: open %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+@@ -61,9 +61,12 @@ func (x *Tenant) Total(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilTenant
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("webhook: total %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+diff --git a/internal/queue/entry_test.go b/internal/queue/entry_test.go
+index fa1ed74..443aad3 100644
+--- a/internal/queue/entry_test.go
++++ b/internal/queue/entry_test.go
+@@ -366,9 +366,12 @@ func (x *Batch) Rollup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilBatch
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("queue: rollup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+diff --git a/internal/money/payment_test.go b/internal/money/payment_test.go
+index 79ca303..e48ec6d 100644
+--- a/internal/money/payment_test.go
++++ b/internal/money/payment_test.go
+@@ -203,9 +203,12 @@ func (x *Webhook) Normalize(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilWebhook
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: normalize %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/ledger/invoice_test.go b/internal/ledger/invoice_test.go
+index f86d2b8..04dc02c 100644
+--- a/internal/ledger/invoice_test.go
++++ b/internal/ledger/invoice_test.go
+@@ -196,9 +196,12 @@ func (x *Invoice) Open(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: open %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -382,9 +382,12 @@ func (x *Refund) Reverse(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilRefund
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: reverse %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -330,9 +330,12 @@ func (x *Invoice) Normalize(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ledger: normalize %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+diff --git a/internal/ratelimit/invoice_test.go b/internal/ratelimit/invoice_test.go
+index ba06207..aeb2d53 100644
+--- a/internal/ratelimit/invoice_test.go
++++ b/internal/ratelimit/invoice_test.go
+@@ -321,9 +321,12 @@ func (x *Invoice) Reconcile(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: reconcile %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -78,9 +78,12 @@ func (x *Ledger) Export(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilLedger
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: export %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+@@ -13,9 +13,12 @@ func (x *Refund) Settle(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilRefund
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: settle %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}
+@@ -22,9 +22,12 @@ func (x *Tenant) Settle(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilTenant
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("ratelimit: settle %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+diff --git a/internal/money/entry_test.go b/internal/money/entry_test.go
+index 07ed5de..f55c212 100644
+--- a/internal/money/entry_test.go
++++ b/internal/money/entry_test.go
+@@ -333,9 +333,12 @@ func (x *Invoice) Lookup(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilInvoice
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: lookup %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(3))
+ 	}
+@@ -131,9 +131,12 @@ func (x *Tenant) Reverse(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilTenant
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: reverse %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(2))
+ 	}
+@@ -242,9 +242,12 @@ func (x *Account) Reconcile(ctx context.Context) error {
+ 	if x == nil {
+ 		return ErrNilAccount
+ 	}
+-	total := x.Subtotal()
++	total, err := x.Subtotal(ctx)
++	if err != nil {
++		return fmt.Errorf("money: reconcile %s: %w", x.ID, err)
++	}
+ 	for _, line := range x.Lines {
+-		total = total.Add(line.Tax())
++		total = total.Add(line.Tax().Round(4))
+ 	}

@@ -150,21 +150,44 @@ func kubectlDescribe(lines []string) cutPlan {
 }
 
 // git diff: context lines further than diffContext from a change go; file
-// headers, hunk headers and every changed line stay.
+// headers, hunk headers and every changed line stay. The changes of a lock
+// or generated file (package-lock.json, go.sum, *.min.js…) go whole, with
+// a note naming the file: they are long and say nothing a model can use.
 const diffContext = 3
 
 var (
-	diffFile = regexp.MustCompile(`^diff --git `)
-	diffHunk = regexp.MustCompile(`^@@ -\d+(,\d+)? \+\d+(,\d+)? @@`)
+	diffFile      = regexp.MustCompile(`^diff --git `)
+	diffFilePath  = regexp.MustCompile(`^diff --git a/(\S+) b/(\S+)$`)
+	diffHunk      = regexp.MustCompile(`^@@ -\d+(,\d+)? \+\d+(,\d+)? @@`)
+	generatedPath = regexp.MustCompile(`(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|go\.sum|Cargo\.lock|poetry\.lock|Pipfile\.lock|uv\.lock|Gemfile\.lock|composer\.lock|mix\.lock|flake\.lock|packages\.lock\.json)$|\.(min\.js|min\.css|map|pb\.go|snap)$|_generated\.[a-z]+$`)
 )
 
 var gitDiffReducer = reducer{
-	name: "git diff", version: 1, keepErrors: true,
+	name: "git diff", version: 2, keepErrors: true,
 	detect: func(lines []string) bool {
 		return countMatches(lines, diffFile) > 0 && countMatches(lines, diffHunk) > 0
 	},
 	plan: func(lines []string) cutPlan {
 		drop := make([]bool, len(lines))
+		notes := map[int]note{}
+		// A lock or generated file's lines after its diff --git header
+		for i := 0; i < len(lines); i++ {
+			m := diffFilePath.FindStringSubmatch(lines[i])
+			if m == nil || !generatedPath.MatchString(m[2]) {
+				continue
+			}
+			j := i + 1
+			for j < len(lines) && !diffFile.MatchString(lines[j]) {
+				j++
+			}
+			if j-i-1 >= minReducerLines {
+				for k := i + 1; k < j; k++ {
+					drop[k] = true
+				}
+				notes[i+1] = note{n: j - i - 1, text: fmt.Sprintf("[tyk-compressed: %d lines of changes to %s, a lock or generated file]", j-i-1, m[2])}
+			}
+			i = j - 1
+		}
 		inHunk := false
 		var context []int // indexes of the current hunk's context lines
 		var changes []int
@@ -177,7 +200,7 @@ var gitDiffReducer = reducer{
 						break
 					}
 				}
-				drop[c] = !near
+				drop[c] = drop[c] || !near
 			}
 			context, changes = nil, nil
 		}
@@ -197,12 +220,15 @@ var gitDiffReducer = reducer{
 			}
 		}
 		finish()
-		return planFromDrops(drop)
+		return cutPlan{drop: drop, notes: notes, failures: -1}
 	},
 }
 
 // grep / ripgrep: at most grepPerFile matches per file stay; the rest of a
-// file's matches go with a count.
+// file's matches go with a count. A match line is code, so "error" in it is
+// not a failure to keep. Matches under dependency and build
+// directories (vendor/, node_modules/…, as listings) go too, with a count
+// per directory.
 const grepPerFile = 5
 
 var (
@@ -211,8 +237,11 @@ var (
 	grepPath    = regexp.MustCompile(`^[^\s:]+\.[A-Za-z0-9]+$|^[^\s:]+/[^\s:]+$`)
 )
 
+// grepNoise finds the dependency or build directory a match is under.
+var grepNoise = regexp.MustCompile(`(?:^|/)(node_modules|\.git|vendor|dist|build|target|__pycache__|\.venv|\.next|\.cache|third_party)/`)
+
 var grepReducer = reducer{
-	name: "grep", version: 1, keepErrors: true,
+	name: "grep", version: 2,
 	detect: func(lines []string) bool {
 		n, matched := 0, 0
 		for _, l := range lines {
@@ -230,6 +259,7 @@ var grepReducer = reducer{
 		drop := make([]bool, len(lines))
 		perFile := map[string]int{}
 		fileOf := make([]string, len(lines))
+		isMatch := make([]bool, len(lines))
 		heading := ""
 		for i, l := range lines {
 			file := ""
@@ -239,32 +269,55 @@ var grepReducer = reducer{
 			case grepHeading.MatchString(l) && heading != "":
 				file = heading
 			case grepPath.MatchString(l):
+				// A dependency directory's heading goes with its matches
 				heading = l
+				if grepNoise.MatchString(l) {
+					drop[i], fileOf[i] = true, l
+				}
 				continue
 			default:
 				if strings.TrimSpace(l) == "" {
+					if heading != "" && grepNoise.MatchString(heading) {
+						drop[i], fileOf[i] = true, heading
+					}
 					heading = ""
 				}
 				continue
 			}
-			fileOf[i] = file
+			fileOf[i], isMatch[i] = file, true
 			perFile[file]++
-			drop[i] = perFile[file] > grepPerFile
+			drop[i] = perFile[file] > grepPerFile || grepNoise.MatchString(file)
 		}
-		// A run of one file's extra matches says which file and how many.
+		// A run of one file's extra matches says which file and how many;
+		// a run under one dependency directory, which directory.
 		notes := map[int]note{}
+		noiseDir := func(file string) string {
+			if m := grepNoise.FindStringIndex(file); m != nil {
+				return file[:m[1]]
+			}
+			return ""
+		}
 		for i := 0; i < len(lines); {
 			if !drop[i] {
 				i++
 				continue
 			}
-			j, same := i, true
+			j, same, dir, matches := i, true, noiseDir(fileOf[i]), 0
 			for j < len(lines) && drop[j] {
 				same = same && fileOf[j] == fileOf[i]
+				if noiseDir(fileOf[j]) != dir {
+					dir = ""
+				}
+				if isMatch[j] {
+					matches++
+				}
 				j++
 			}
-			if same {
-				notes[i] = note{n: j - i, text: fmt.Sprintf("[tyk-compressed: %d more matches in %s]", j-i, fileOf[i])}
+			switch {
+			case dir != "":
+				notes[i] = note{n: j - i, text: fmt.Sprintf("[tyk-compressed: %s under %s]", plural(matches, "match", "matches"), dir)}
+			case same:
+				notes[i] = note{n: j - i, text: fmt.Sprintf("[tyk-compressed: %s in %s]", plural(matches, "more match", "more matches"), fileOf[i])}
 			}
 			i = j
 		}
@@ -518,4 +571,64 @@ var repeatedReducer = reducer{
 		}
 		return cutPlan{drop: drop, notes: notes, failures: -1}
 	},
+}
+
+// HTML pages (web fetch tools that return the raw page): script and style
+// blocks, and lines that are only <link>, <meta> or <script> tags, go with
+// a count; the text and the markup around it stay.
+var (
+	htmlStart      = regexp.MustCompile(`(?i)^\s*(<!doctype html|<html[\s>])`)
+	htmlBlockOpen  = regexp.MustCompile(`(?i)^\s*<(script|style|noscript|svg)[\s>]`)
+	htmlBlockClose = regexp.MustCompile(`(?i)</(script|style|noscript|svg)>\s*$`)
+	htmlHeadTag    = regexp.MustCompile(`(?i)^\s*<(link|meta|base)\b[^>]*>\s*$`)
+)
+
+var htmlReducer = reducer{
+	name: "html", version: 1,
+	detect: func(lines []string) bool {
+		for _, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				return htmlStart.MatchString(l)
+			}
+		}
+		return false
+	},
+	plan: func(lines []string) cutPlan {
+		drop := make([]bool, len(lines))
+		in := false
+		for i, l := range lines {
+			switch {
+			case in:
+				drop[i] = true
+				in = !htmlBlockClose.MatchString(l)
+			case htmlBlockOpen.MatchString(l):
+				drop[i] = true
+				in = !htmlBlockClose.MatchString(l)
+			case htmlHeadTag.MatchString(l):
+				drop[i] = true
+			}
+		}
+		notes := map[int]note{}
+		for i := 0; i < len(lines); {
+			if !drop[i] {
+				i++
+				continue
+			}
+			j := i
+			for j < len(lines) && drop[j] {
+				j++
+			}
+			notes[i] = note{n: j - i, text: fmt.Sprintf("[tyk-compressed: %d lines of scripts, styles and metadata]", j-i)}
+			i = j
+		}
+		return cutPlan{drop: drop, notes: notes, failures: -1}
+	},
+}
+
+// plural is "1 match" or "n matches".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

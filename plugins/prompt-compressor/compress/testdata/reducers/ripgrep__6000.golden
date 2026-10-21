@@ -1,0 +1,72 @@
+[tyk-compressed: grep output, 1,520 → 1,397 tokens]
+[tyk-compressed: 1 match under vendor/]
+internal/store/entry_test.go:201:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/money/invoice.go:853:	if err := tenant.ctx.Done()); err != nil {
+internal/auth/refund.go:495:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/money/batch.go:108:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/export/ledger.go:646:	total := x.ctx.Done()ctx)
+internal/store/entry.go:203:	if err := payment.ctx.Done()); err != nil {
+[tyk-compressed: 1 match under vendor/]
+internal/money/ledger.go:820:	// ctx.Done() must be called with the tenant scope set
+internal/export/invoice_test.go:272:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/ledger/invoice.go:653:	if err := statement.ctx.Done()); err != nil {
+internal/webhook/webhook_test.go:199:	if err := account.ctx.Done()); err != nil {
+internal/queue/ledger.go:818:	total := x.ctx.Done()ctx)
+internal/webhook/payment_test.go:428:	if err := invoice.ctx.Done()); err != nil {
+internal/ledger/batch.go:667:	total := x.ctx.Done()ctx)
+internal/api/invoice_test.go:444:		assert.Equal(t, want, got.ctx.Done()ctx))
+[tyk-compressed: 1 match under vendor/]
+internal/billing/webhook_test.go:249:	// ctx.Done() must be called with the tenant scope set
+internal/webhook/webhook_test.go:495:	// ctx.Done() must be called with the tenant scope set
+internal/webhook/webhook_test.go:695:	if err := payment.ctx.Done()); err != nil {
+internal/export/payment.go:759:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/store/webhook.go:762:	total := x.ctx.Done()ctx)
+pkg/currency/invoice_test.go:813:	if err := refund.ctx.Done()); err != nil {
+internal/queue/batch_test.go:505:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/money/refund_test.go:290:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+pkg/client/ledger.go:95:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/webhook/ledger.go:753:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/currency/entry.go:401:	if err := payment.ctx.Done()); err != nil {
+internal/ledger/refund_test.go:85:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/api/refund.go:26:	if err := entry.ctx.Done()); err != nil {
+internal/webhook/refund.go:486:	total := x.ctx.Done()ctx)
+internal/api/ledger.go:268:	// ctx.Done() must be called with the tenant scope set
+internal/queue/batch.go:684:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/auth/tenant.go:404:		assert.Equal(t, want, got.ctx.Done()ctx))
+[tyk-compressed: 1 match under vendor/]
+internal/queue/statement.go:547:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/auth/statement.go:361:	// ctx.Done() must be called with the tenant scope set
+internal/ratelimit/invoice.go:861:	total := x.ctx.Done()ctx)
+pkg/client/batch_test.go:73:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/api/account.go:576:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/ledger/entry.go:676:	// ctx.Done() must be called with the tenant scope set
+internal/ratelimit/batch_test.go:403:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/money/payment.go:629:	if err := refund.ctx.Done()); err != nil {
+[tyk-compressed: 1 match under vendor/]
+pkg/client/account.go:48:	total := x.ctx.Done()ctx)
+pkg/client/statement.go:735:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/api/payment.go:768:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/ratelimit/payment.go:199:	if err := account.ctx.Done()); err != nil {
+internal/ratelimit/entry_test.go:302:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/auth/entry_test.go:194:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/store/invoice_test.go:388:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/ratelimit/account.go:769:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/queue/payment.go:652:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/currency/tenant.go:242:	// ctx.Done() must be called with the tenant scope set
+internal/webhook/account.go:471:	// ctx.Done() must be called with the tenant scope set
+internal/store/invoice_test.go:187:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/billing/webhook.go:642:	if err := tenant.ctx.Done()); err != nil {
+pkg/currency/payment_test.go:738:	// ctx.Done() must be called with the tenant scope set
+internal/queue/statement_test.go:737:	// ctx.Done() must be called with the tenant scope set
+internal/money/entry.go:349:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/currency/batch.go:795:		assert.Equal(t, want, got.ctx.Done()ctx))
+internal/auth/account.go:724:	if err := payment.ctx.Done()); err != nil {
+internal/billing/payment.go:713:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/api/statement_test.go:750:	// ctx.Done() must be called with the tenant scope set
+internal/money/ledger_test.go:29:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/money/entry.go:97:func (s *Service) ctx.Done()Total(ctx context.Context, id string) (Money, error) {
+internal/ledger/account_test.go:663:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/client/batch.go:343:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/currency/payment.go:84:	// ctx.Done() must be called with the tenant scope set
+internal/billing/entry.go:132:		assert.Equal(t, want, got.ctx.Done()ctx))
+pkg/client/entry_test.go:135:	// ctx.Done() must be called with the tenant scope set

@@ -40,6 +40,10 @@ var reducerCases = []struct {
 	{corpus.DirListing, "", 6000, "listing"},
 	{corpus.DirListing, "find", 6000, "listing"},
 	{corpus.DockerBuild, "", 12000, "build log"},
+	{corpus.GitDiff, "", 20000, "git diff"},
+	{corpus.Ripgrep, "", 6000, "grep"},
+	{corpus.Ripgrep, "heading", 6000, "grep"},
+	{corpus.HTML, "", 12000, "html"},
 }
 
 func caseOutput(kind corpus.Kind, variant string, size int) corpus.Output {
@@ -51,6 +55,9 @@ func caseOutput(kind corpus.Kind, variant string, size int) corpus.Output {
 // rewrites them after a deliberate change (which also bumps
 // config.StrategyVersion).
 func TestReducerGolden(t *testing.T) {
+	// The goldens show each reducer's cut, however small
+	defer func(v float64) { minReduceSaving = v }(minReduceSaving)
+	minReduceSaving = 0
 	for _, tc := range reducerCases {
 		name := fmt.Sprintf("%s_%s_%d", tc.kind, tc.variant, tc.size)
 		t.Run(name, func(t *testing.T) {
@@ -168,7 +175,7 @@ func TestReducersIgnoreOtherText(t *testing.T) {
 		}
 	}
 	// Other corpus shapes are left alone.
-	for _, kind := range []corpus.Kind{corpus.CSV, corpus.HTML} {
+	for _, kind := range []corpus.Kind{corpus.CSV} {
 		if _, reducer := reduce(caseOutput(kind, "", 6000).Text, nil); reducer != "" {
 			t.Errorf("%s output was reduced by %q", kind, reducer)
 		}
@@ -191,9 +198,9 @@ func TestMarkerFormat(t *testing.T) {
 // that feeds every policy hash: change a reducer, bump both.
 func TestRegistryPinnedToStrategyVersion(t *testing.T) {
 	const pinned = "pytest@1,jest@1,go test@1,cargo test@1,maven@1,gradle@1," +
-		"terraform plan@1,kubectl@1,git diff@1,grep@1,listing@1,build log@1,stack trace@1,repeated lines@1," +
-		"json@1[{5 20} {5 13} {3 9} {2 7} {1 5}]/d16,level3@1"
-	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 5 {
+		"terraform plan@1,kubectl@1,git diff@2,grep@2,listing@1,build log@1,stack trace@1,html@1,repeated lines@1," +
+		"json@1[{5 20} {5 13} {3 9} {2 7} {1 5}]/d16,level3@1,min0.30"
+	if got := registryFingerprint(); got != pinned || config.StrategyVersion != 6 {
 		t.Fatalf("registry %q at strategy version %d: update the pin here and bump config.StrategyVersion", got, config.StrategyVersion)
 	}
 }
