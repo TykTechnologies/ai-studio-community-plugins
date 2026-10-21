@@ -226,6 +226,7 @@ class PromptCompressorDashboard extends HTMLElement {
     page.appendChild(this._paintShareChart(v));
     page.appendChild(this._paintGroups('By App', v.by_app, 'App', 'pc-by-app'));
     page.appendChild(this._paintGroups('By LLM', v.by_llm, 'LLM', 'pc-by-llm'));
+    page.appendChild(this._paintTools(v.tools));
     page.appendChild(this._paintStrategies(v.strategies));
     page.appendChild(this._paintReasons(v.by_reason));
     if (v.overflow_excluded > 0) {
@@ -480,6 +481,64 @@ class PromptCompressorDashboard extends HTMLElement {
     return section;
   }
 
+  // _paintTools shows what each App's tool definitions cost and which
+  // offered tools its models never called. Tool names come from clients,
+  // so they are text nodes like every other name here.
+  _paintTools(apps) {
+    const section = h('section', { 'data-testid': 'pc-tools' }, h('h2', {}, 'Tool definitions'),
+      h('p', { className: 'muted' },
+        'Every request carries the definitions of the tools it offers. Tools that were offered but never called are candidates to drop; '
+        + 'the saving is estimated at the input price and at the cache-read price, since definitions usually sit in the cached prefix. '
+        + 'Changing a tool list makes the prompt cache miss once.'));
+    if (!apps || apps.length === 0) {
+      section.appendChild(h('p', { className: 'muted' }, 'No request in this range offered tools.'));
+      return section;
+    }
+    const table = h('table', { 'data-testid': 'pc-tools-table' },
+      h('thead', {}, h('tr', {}, ['App', 'Requests with tools', 'Definition tokens', 'Share of prompt tokens', 'Tool lists', 'Never called', 'Estimated saving']
+        .map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
+    const body = h('tbody');
+    for (const a of apps) {
+      const never = a.never_called || [];
+      const saving = fmtMoney(a.estimated_saving);
+      const atCache = fmtMoney(a.estimated_saving_at_cache_read);
+      body.appendChild(h('tr', { 'data-testid': 'pc-tools-app' },
+        h('td', {}, a.name || `App #${a.id}`),
+        h('td', { className: 'num' }, fmtInt(a.requests)),
+        h('td', { className: 'num', title: `${fmtInt(a.tool_defs)} definitions in all` }, fmtInt(a.tool_def_tokens)),
+        h('td', { className: 'num' }, a.share_known ? fmtPct(a.share) : '—'),
+        h('td', { className: 'num', title: 'Distinct tool lists offered; each change misses the prompt cache once' }, fmtInt(a.tool_lists)),
+        h('td', { className: 'num' }, never.length ? `${fmtInt(never.length)} (${fmtInt(a.never_called_def_tokens)} tokens)` : '0'),
+        h('td', { className: 'num' }, never.length ? `${saving} at input · ${atCache} at cache read` : '—')));
+      body.appendChild(h('tr', { className: 'detail' }, h('td', { colSpan: 7 }, this._paintToolList(a))));
+    }
+    table.appendChild(body);
+    section.appendChild(table);
+    return section;
+  }
+
+  _paintToolList(a) {
+    const never = new Set(a.never_called || []);
+    const tools = a.tools || [];
+    const details = h('details', { 'data-testid': 'pc-tools-list' },
+      h('summary', {}, never.size
+        ? `${fmtInt(tools.length)} tools · never called: ${[...never].slice(0, 5).join(', ')}${never.size > 5 ? ` and ${fmtInt(never.size - 5)} more` : ''}`
+        : `${fmtInt(tools.length)} tools, all called`));
+    const table = h('table', {},
+      h('thead', {}, h('tr', {}, ['Tool', 'Offered', 'Called', 'Definition tokens'].map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
+    const body = h('tbody');
+    for (const t of tools) {
+      body.appendChild(h('tr', never.has(t.name) ? { 'data-testid': 'pc-tool-never-called' } : {},
+        h('td', {}, t.name === 'other' ? 'Other (names not listed)' : h('code', {}, t.name), never.has(t.name) ? h('span', { className: 'tag' }, 'never called') : null),
+        h('td', { className: 'num' }, fmtInt(t.offered)),
+        h('td', { className: 'num' }, fmtInt(t.called)),
+        h('td', { className: 'num' }, fmtInt(t.def_tokens))));
+    }
+    table.appendChild(body);
+    details.appendChild(table);
+    return details;
+  }
+
   _paintStrategies(strategies) {
     const section = h('section', {}, h('h2', {}, 'By strategy'));
     const entries = Object.entries(strategies || {}).sort((a, b) => b[1].bytes_saved - a[1].bytes_saved);
@@ -574,6 +633,10 @@ const STYLES = `
   th { color: var(--text-muted); font-weight: 500; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   code { font-size: 12px; }
+  tr.detail > td { padding-top: 0; }
+  details summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
+  details table { margin-top: 6px; }
+  .tag { margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--warning-border); background: var(--warning-bg); color: var(--warning-fg); }
 `;
 
 if (!customElements.get('prompt-compressor-dashboard')) {
