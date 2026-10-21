@@ -109,7 +109,7 @@ func TestDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: Parse: %v", name, err)
 		}
-		if c.Mode != ModeAudit || c.FailureMode != FailOpen || !c.AllowClientBypass || c.LossyWithRequestFilters ||
+		if c.Mode != ModeAudit || c.FailureMode != FailOpen || c.AllowClientBypass || c.LossyWithRequestFilters ||
 			c.DefaultPolicy != DefaultPolicyName || c.MaxBodyBytes != DefaultMaxBodyBytes {
 			t.Errorf("%s: top-level defaults = %+v", name, c)
 		}

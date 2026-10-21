@@ -44,8 +44,8 @@
     "allow_client_bypass": {
       "type": "boolean",
       "title": "Allow client bypass",
-      "description": "Honour the request header X-Tyk-Compression: off.",
-      "default": true
+      "description": "Honour the request header X-Tyk-Compression: off, which lets a client skip compression (and drop_tools) for its own requests. Off by default: turn it on for clients that must sometimes send a body exactly as written.",
+      "default": false
     },
     "failure_mode": {
       "type": "string",

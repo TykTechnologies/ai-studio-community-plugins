@@ -235,7 +235,7 @@ func Default() *Config {
 		DefaultPolicy:     DefaultPolicyName,
 		Policies:          map[string]*Policy{},
 		Bindings:          map[string]string{},
-		AllowClientBypass: true,
+		AllowClientBypass: false,
 		FailureMode:       FailOpen,
 		MaxBodyBytes:      DefaultMaxBodyBytes,
 		MaxInFlightBytes:  DefaultMaxInFlightBytes,

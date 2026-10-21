@@ -137,6 +137,12 @@ func TestPostAuthBypass(t *testing.T) {
 	if !resp.Modified {
 		t.Fatal("the bypass header was honoured while allow_client_bypass is false")
 	}
+	// Bypass is off by default (eac.82).
+	p, ctx = hookPlugin(t, `{"mode":"enforce"}`)
+	resp, _ = p.HandlePostAuth(ctx, request(body, hdr))
+	if !resp.Modified {
+		t.Fatal("the bypass header was honoured with allow_client_bypass unset")
+	}
 	// No other value of the header does anything.
 	p, ctx = hookPlugin(t, `{"mode":"enforce","allow_client_bypass":true}`)
 	resp, _ = p.HandlePostAuth(ctx, request(body, map[string]string{"X-Tyk-Compression": "max"}))

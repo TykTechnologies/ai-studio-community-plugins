@@ -45,8 +45,8 @@ and falls back to the vendor's own format without it.
 - `mode: off` does nothing; `audit` compresses, records the result and
   forwards the original body; `enforce` forwards the compressed body.
 - `X-Tyk-Compression: off` skips compression for one request when
-  `allow_client_bypass` is set. No header can choose a policy or raise a
-  level.
+  `allow_client_bypass` is on (it is off by default). No header can choose
+  a policy or raise a level.
 - The hook never fails a request: it returns no error, recovers panics
   (counted as `failed_open`), and passes the request through on anything it
   cannot do. It returns no request headers, so multi-value headers reach the
@@ -76,10 +76,11 @@ hold the compression settings; bindings pick a policy per LLM or App.
 
 - **mode:** `off`, `audit` (the default: compute and record, forward the
   original) or `enforce`.
-- **allow_client_bypass** (default true) honours `X-Tyk-Compression: off`.
-  It is not a security control: bypass can only turn compression off, so the
-  vendor gets exactly the body the client sent, as without the plugin. The
-  header can never pick a policy or raise a level.
+- **allow_client_bypass** (default false) honours `X-Tyk-Compression: off`.
+  Turn it on for clients that must sometimes send a body exactly as
+  written. It is not a security control: bypass can only turn compression
+  off, so the vendor gets exactly the body the client sent, as without the
+  plugin. The header can never pick a policy or raise a level.
 - **max_in_flight_bytes** (default 16 MiB, at most 256 MiB, never below
   `max_body_bytes`) bounds the body bytes the plugin parses and compresses
   at once, all requests together. Compressing a body allocates about 10-20
@@ -241,10 +242,11 @@ plugin loading. The full schema is in `config.schema.json`.
   decides whether a tool survives: a tool named by a tool call in the
   history (which the client writes) or by `tool_choice` is kept,
   `X-Tyk-Compression: off` skips the policy while `allow_client_bypass` is
-  on (the default), and the request passes through whole in `audit` mode,
-  while an App's metadata is unknown, over `max_body_bytes` or
-  `max_in_flight_bytes`, or on any error. To keep a tool away from a model, don't give the App access to it,
-  or block the call with a filter or a guardrail on tool calls.
+  on (it is off by default), and the request passes through whole in
+  `audit` mode, while an App's metadata is unknown, over `max_body_bytes`
+  or `max_in_flight_bytes`, or on any error. To keep a tool away from a
+  model, don't give the App access to it, or block the call with a filter
+  or a guardrail on tool calls.
 - Tool results the vendor produced (Anthropic web search, web fetch, code
   execution and MCP connector results; Google code execution; the Responses
   built-in tools) are never rewritten, nor are thinking blocks, signatures
