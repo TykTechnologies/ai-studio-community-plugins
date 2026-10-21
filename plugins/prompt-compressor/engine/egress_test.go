@@ -20,6 +20,10 @@ func TestBlockedIP(t *testing.T) {
 		"0.0.0.0":                true,
 		"::":                     true,
 		"::ffff:169.254.169.254": true,
+		"fd00:ec2::254%en0":      true,
+		"fe80::1%eth0":           true,
+		"64:ff9b::a9fe:a9fe":     true,  // NAT64 169.254.169.254
+		"64:ff9b::a00:9":         false, // NAT64 10.0.0.9
 		"127.0.0.1":              false,
 		"::1":                    false,
 		"10.0.0.7":               false,

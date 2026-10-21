@@ -33,9 +33,18 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("fd00:ec2::254/128"), // AWS metadata over IPv6
 }
 
-// blockedIP reports an address an engine may never be at.
+// nat64 is the well-known NAT64 prefix, which wraps an IPv4 address.
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// blockedIP reports an address an engine may never be at. A zone is
+// ignored (Prefix.Contains is false for zoned addresses), and an IPv4
+// address inside NAT64 is checked as itself.
 func blockedIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	ip = ip.Unmap().WithZone("")
+	if ip.Is6() && nat64.Contains(ip) {
+		b := ip.As16()
+		ip = netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})
+	}
 	if !ip.IsValid() || ip.IsUnspecified() {
 		return true
 	}
