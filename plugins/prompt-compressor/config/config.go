@@ -480,8 +480,12 @@ func (c *Config) Validate() error {
 		if raw == "" || strings.HasPrefix(raw, "$SECRET/") || raw == refusedCredential {
 			continue
 		}
-		if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		u, err := url.Parse(raw)
+		switch {
+		case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
 			add("engine_%s_url: must be an http or https URL", name)
+		case u.User != nil:
+			add("engine_%s_url: must not carry credentials; put them in engine_%s_token", name, name)
 		}
 	}
 

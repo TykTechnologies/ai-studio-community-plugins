@@ -353,17 +353,24 @@ func TestEngineKeysNeedAName(t *testing.T) {
 // value, which may carry credentials. Unresolved references are left to the
 // side that resolves them.
 func TestEngineURLValidation(t *testing.T) {
-	for _, raw := range []string{"ftp://user:pw-secret@engine.internal/x", "pw-secret", "https://", "//user:pw-secret@host"} {
+	for raw, want := range map[string]string{
+		"ftp://user:pw-secret@engine.internal/x": "engine_main_url: must be an http or https URL",
+		"pw-secret":                              "engine_main_url: must be an http or https URL",
+		"https://":                               "engine_main_url: must be an http or https URL",
+		"//user:pw-secret@host":                  "engine_main_url: must be an http or https URL",
+		"https://user:pw-secret@engine.internal:8080/b": "engine_main_url: must not carry credentials; put them in engine_main_token",
+		"http://pw-secret@127.0.0.1:9000":               "engine_main_url: must not carry credentials",
+	} {
 		_, err := ParseJSON([]byte(`{"engine_main_url": ` + strconv.Quote(raw) + `}`))
 		if err == nil {
 			t.Errorf("%q was accepted", raw)
 			continue
 		}
-		if !strings.Contains(err.Error(), "engine_main_url: must be an http or https URL") || strings.Contains(err.Error(), "pw-secret") {
-			t.Errorf("error %q", err)
+		if !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "pw-secret") {
+			t.Errorf("%q: error %q", raw, err)
 		}
 	}
-	for _, raw := range []string{"https://user:pw@engine.internal:8080/base", "http://127.0.0.1:9000", "$SECRET/engine_url", refusedCredential} {
+	for _, raw := range []string{"https://engine.internal:8080/base", "http://127.0.0.1:9000", "$SECRET/engine_url", refusedCredential} {
 		if _, err := ParseJSON([]byte(`{"engine_main_url": ` + strconv.Quote(raw) + `}`)); err != nil {
 			t.Errorf("%q: %v", raw, err)
 		}

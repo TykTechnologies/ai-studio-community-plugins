@@ -10,8 +10,8 @@
 // the vendor has already cached. The edge KV is per edge, so two edges may
 // disagree on a unit unless the engine is deterministic.
 //
-// The engine URL and token never appear in errors or logs: a URL may carry
-// credentials. Only the host is logged.
+// The engine URL and token never appear in errors or logs. Only the host is
+// logged. Egress is checked at dial time (egress.go).
 package engine
 
 import (
@@ -86,11 +86,13 @@ type Client struct {
 	endpoint   string // the full URL called
 	host       string // for logs
 	token      string
-	timeout    time.Duration
-	id         string // folds kind, name and URL into memo keys
-	http       *http.Client
-	memo       *lrucache.Cache[result]
-	Stats      Stats
+	// insecureToken: the token would go in clear text, so no call is made.
+	insecureToken bool
+	timeout       time.Duration
+	id            string // folds kind, name and URL into memo keys
+	http          *http.Client
+	memo          *lrucache.Cache[result]
+	Stats         Stats
 }
 
 // result is a memoised outcome: Text, or Passthrough when the unit is to be
@@ -118,6 +120,7 @@ func New(ref config.EngineRef, creds config.EngineCredentials) *Client {
 	}
 	if t := strings.TrimSpace(creds.Token); t != "" && t != RefusedCredential && !strings.HasPrefix(t, "$SECRET/") {
 		c.token = t
+		c.insecureToken = c.endpoint != "" && !strings.HasPrefix(c.endpoint, "https://") && !loopbackHost(c.host)
 	}
 	sum := sha256.Sum256([]byte(ref.Kind + "\x00" + ref.Name + "\x00" + c.endpoint))
 	c.id = hex.EncodeToString(sum[:8])
@@ -125,7 +128,7 @@ func New(ref config.EngineRef, creds config.EngineCredentials) *Client {
 		// An engine never redirects: following one could send unit text, and
 		// the token, somewhere the admin did not configure.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport:     http.DefaultTransport.(*http.Transport).Clone(),
+		Transport:     transport(),
 	}
 	c.memo = lrucache.NewWeighted(memoEntries, memoBytes, func(k string, r result) int64 { return int64(len(k) + len(r.Text) + 16) })
 	return c
@@ -138,15 +141,16 @@ func Key(ref config.EngineRef, creds config.EngineCredentials) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// usableURL accepts an absolute http or https URL with a host. A $SECRET/
-// reference the edge did not resolve is not one.
+// usableURL accepts an absolute http or https URL with a host and no
+// userinfo (net/http would send it as basic auth: credentials belong in the
+// token). A $SECRET/ reference the edge did not resolve is not one.
 func usableURL(raw string) (*url.URL, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == RefusedCredential || strings.HasPrefix(raw, "$SECRET/") {
 		return nil, false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return nil, false
 	}
 	return u, true
@@ -296,6 +300,9 @@ func (c *Client) call(ctx context.Context, model string, j compress.EngineJob) (
 	if c.endpoint == "" {
 		return "", ErrNoURL
 	}
+	if c.insecureToken {
+		return "", ErrInsecureToken
+	}
 	var req any
 	if c.kind == config.EngineLLMLingua2 {
 		req = map[string]any{"context": []string{j.Text}, "rate": llmlinguaRate, "force_tokens": nonNil(j.Protect), "use_llmlingua2": true}
@@ -318,6 +325,9 @@ func (c *Client) call(ctx context.Context, model string, j compress.EngineJob) (
 	}
 	resp, err := c.http.Do(hreq)
 	if err != nil {
+		if errors.Is(err, ErrBlockedAddress) {
+			return "", ErrBlockedAddress
+		}
 		var ne net.Error
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
 			return "", ErrTimeout

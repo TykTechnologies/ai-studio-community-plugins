@@ -151,8 +151,7 @@ func (l *logs) String() string {
 const secretToken = "tok-very-secret"
 
 func client(f *fakeEngine, kind string) *Client {
-	u := strings.Replace(f.URL, "http://", "http://user:pw-secret@", 1)
-	return New(config.EngineRef{Name: "main", Kind: kind, TimeoutMs: 150}, config.EngineCredentials{URL: u, Token: secretToken})
+	return New(config.EngineRef{Name: "main", Kind: kind, TimeoutMs: 150}, config.EngineCredentials{URL: f.URL, Token: secretToken})
 }
 
 var job = compress.EngineJob{Role: "tool", Text: strings.Repeat("build output line\n", 20)}

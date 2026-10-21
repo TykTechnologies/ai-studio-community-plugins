@@ -101,9 +101,19 @@ hold the compression settings; bindings pick a policy per LLM or App.
 - **Engine credentials** are top-level keys, `engine_<name>_url` and
   `engine_<name>_token`, so `$SECRET/` references work (the edge resolves
   them; a refused reference reads as no URL or no token). The URL must be
-  http or https; errors and logs name the setting, never its value, and log
+  http or https and must not carry credentials (`user:pass@`; put them in
+  the token); errors and logs name the setting, never its value, and log
   only the engine's host. The token, when set, goes as `Authorization:
-  Bearer`; an unauthenticated localhost sidecar needs none.
+  Bearer`, and only over https or to a loopback host (`localhost`,
+  `127.0.0.1`, `::1`): an engine with a token behind plain http to any
+  other host is never called, so its units fail (see `failure_mode`). An
+  unauthenticated sidecar needs no token.
+- **Egress:** the plugin checks every address it dials for an engine,
+  after name resolution, so DNS rebinding cannot get around it: link-local
+  addresses (169.254.0.0/16 and fe80::/10, cloud metadata among them),
+  fd00:ec2::254 and unspecified addresses are refused. Loopback and private
+  addresses are allowed, for sidecars. Proxy settings are ignored and
+  redirects are not followed.
 - **Engines:** a policy's `engine` (`name`, `kind`, `timeout_ms`) sends the
   units it selected, after levels 1–3, to an external engine:
   - `headroom`: `POST <url>/v1/compress` with `{"messages":[{"role","content"}],
