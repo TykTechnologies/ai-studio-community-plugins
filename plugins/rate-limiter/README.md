@@ -42,7 +42,7 @@ Recommended `post_auth` order: LLM Firewall (when it runs in `post_auth`), respo
 - **Put the rate limiter before the Prompt Compressor.** It does not read the body; its keys are the App, user, LLM and API key. Token rules count the usage the vendor reports, once per request, which is the usage of the compressed body whatever the order, so compression is reflected either way. Before the compressor, a request refused with 429 is never compressed.
 - Cached tokens count where the vendor's total includes them (OpenAI, Google, Bedrock) and not where there is no total (Anthropic: input plus output).
 - **Cache hits are not rate limited** when a cache comes before the rate limiter: a hit answers before the rate limiter runs.
-- **Known issue:** Microgateway edges managed by AI Studio run an LLM's plugins in the order the plugins were installed, not the order set on the LLM.
+- Microgateway edges managed by AI Studio follow the order set on the LLM from AI Studio 2.3. Older edges run an LLM's plugins in the order the plugins were installed.
 
 ## Failure handling
 

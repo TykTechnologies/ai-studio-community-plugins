@@ -300,7 +300,7 @@ Recommended `post_auth` order: LLM Firewall (when it runs in `post_auth`), respo
 
 - **The firewall screens the client's body.** In `pre_auth`, the default, it runs before every `post_auth` plugin, so prompt compression can neither hide a phrase (by dropping lines, cutting long output or masking turns) nor create one. In `post_auth`, put it before the Prompt Compressor.
 - Request filters and guardrails run after the `post_auth` chain and screen the body as it is forwarded. The compressor's lightest level strips terminal escape codes, which can join a phrase that they split in the forwarded body; the firewall does not see that form.
-- **Known issue:** Microgateway edges managed by AI Studio run an LLM's plugins in the order the plugins were installed, not the order set on the LLM.
+- Microgateway edges managed by AI Studio follow the order set on the LLM from AI Studio 2.3. Older edges run an LLM's plugins in the order the plugins were installed.
 
 ## License
 
