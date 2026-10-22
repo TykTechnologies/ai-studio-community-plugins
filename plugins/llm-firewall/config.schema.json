@@ -2,8 +2,15 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "title": "LLM Firewall Plugin Configuration",
-  "description": "Phrase-based prompt filtering for LLM requests with regex and model pattern support. Note: The hook phase (pre_auth or post_auth) is determined when registering the plugin with the microgateway, not in this configuration.",
+  "description": "Phrase-based prompt filtering for LLM requests with regex and model pattern support.",
   "properties": {
+    "hook_phase": {
+      "type": "string",
+      "enum": ["pre_auth", "post_auth"],
+      "default": "pre_auth",
+      "title": "Hook Phase",
+      "description": "When requests are checked. pre_auth (default) checks the body the client sent, before authentication and before every post_auth plugin. post_auth checks after authentication, on the body as the post_auth plugins before this one in the LLM's plugin order left it: put the firewall before the Prompt Compressor."
+    },
     "block_message": {
       "type": "string",
       "default": "Request blocked by content policy",
