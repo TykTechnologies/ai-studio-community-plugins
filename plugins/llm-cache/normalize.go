@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 )
 
 // CacheScope is where a request goes. The same body sent to another LLM, or
@@ -48,7 +50,10 @@ func GenerateCacheKey(scope CacheScope, requestBody []byte, normalizePrompts boo
 		return "", "", fmt.Errorf("request body is not a JSON object")
 	}
 
-	model, _ := request["model"].(string)
+	// The model is read the vendor's way (Bedrock's is in its
+	// /model/{modelId}/ path); it labels the entry and is not part of the
+	// key, which covers the path anyway.
+	model := plugin_sdk.RequestModel(strings.ToLower(scope.Vendor), scope.Path, requestBody)
 	if model == "" {
 		model = modelFromPath(scope.Path)
 	}
@@ -145,38 +150,9 @@ func normalizeText(text string) string {
 	return text
 }
 
-// ExtractTokensFromResponse extracts token usage from an LLM response
-func ExtractTokensFromResponse(responseBody []byte) int {
-	var response map[string]interface{}
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return 0
-	}
-
-	usage, ok := response["usage"].(map[string]interface{})
-	if !ok {
-		return 0
-	}
-
-	// Try different field names used by different providers
-	// Anthropic: input_tokens, output_tokens
-	// OpenAI: prompt_tokens, completion_tokens, total_tokens
-	totalTokens := 0
-
-	if total, ok := usage["total_tokens"].(float64); ok {
-		return int(total)
-	}
-
-	if input, ok := usage["input_tokens"].(float64); ok {
-		totalTokens += int(input)
-	} else if prompt, ok := usage["prompt_tokens"].(float64); ok {
-		totalTokens += int(prompt)
-	}
-
-	if output, ok := usage["output_tokens"].(float64); ok {
-		totalTokens += int(output)
-	} else if completion, ok := usage["completion_tokens"].(float64); ok {
-		totalTokens += int(completion)
-	}
-
-	return totalTokens
+// ExtractTokensFromResponse extracts the total token usage from an LLM
+// response in its vendor's shape (OpenAI and Anthropic snake_case, Google
+// usageMetadata, Bedrock Converse camelCase).
+func ExtractTokensFromResponse(vendor string, responseBody []byte) int {
+	return plugin_sdk.ResponseUsage(strings.ToLower(vendor), responseBody).TotalTokens
 }
