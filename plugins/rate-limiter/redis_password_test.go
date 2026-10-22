@@ -69,10 +69,11 @@ func TestResolveRedisPassword(t *testing.T) {
 		{in: "plain", want: "plain"},
 		{in: "$ENV/RL_TEST_REDIS_PASSWORD", want: "env-pass"},
 		{in: "$ENV/RL_TEST_REDIS_PASSWORD_UNSET", wantErr: true},
-		// A reference AI Studio did not resolve (an older Studio, a missing
-		// secret, or an edge gateway, which receives the reference) is never
-		// sent to Redis as the password.
+		// A reference AI Studio did not resolve (an older Studio or edge, or
+		// a missing secret) is never sent to Redis as the password, nor is
+		// what a 2.3 edge gets for a reference that could not be resolved.
 		{in: "$SECRET/REDIS_PASSWORD", wantErr: true},
+		{in: "refused-credential-reference", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := resolveRedisPassword(c.in)

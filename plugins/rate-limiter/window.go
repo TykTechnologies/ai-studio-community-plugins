@@ -371,12 +371,17 @@ end
 return effective
 `
 
+// refusedCredential is what AI Studio 2.3 sends an edge gateway in place of
+// a $SECRET/ reference it could not resolve (secrets.RefusedCredential).
+const refusedCredential = "refused-credential-reference"
+
 // resolveRedisPassword resolves the redis_password config value:
 //
 //   - $SECRET/NAME is resolved by AI Studio 2.3 and later before the plugin
-//     starts. One still present here means an older AI Studio, a secret that
-//     does not exist, or an edge gateway (edges receive the reference, not
-//     the value), so it is an error rather than a password.
+//     starts, on AI Studio and on edge gateways. One still present here
+//     means an older AI Studio or edge, or a secret that does not exist, so
+//     it is an error rather than a password. An edge whose reference could
+//     not be resolved gets refusedCredential instead, also an error.
 //   - $ENV/NAME is read from the plugin's own environment (on AI Studio 2.3
 //     and later, pass the variable with PLUGIN_ENV_PASSTHROUGH).
 //
@@ -385,6 +390,8 @@ func resolveRedisPassword(v string) (string, error) {
 	switch {
 	case strings.HasPrefix(v, "$SECRET/"):
 		return "", errors.New("redis_password: secret reference was not resolved by AI Studio")
+	case v == refusedCredential:
+		return "", errors.New("redis_password: secret reference could not be resolved for this gateway")
 	case strings.HasPrefix(v, "$ENV/"):
 		name := strings.TrimPrefix(v, "$ENV/")
 		if val := os.Getenv(name); val != "" {
