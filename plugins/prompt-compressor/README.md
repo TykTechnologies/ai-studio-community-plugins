@@ -24,8 +24,9 @@ Microgateway before they reach the vendor, starting with tool outputs.
 
 `post_auth` runs only on the gateway's `/llm/` endpoints. Studio's
 OpenAI-compatible endpoints (`/ai/{slug}/v1`, the unified `/v1` and
-`/router/`) reach it through their internal `/llm/call/` hop for every vendor
-except Bedrock, which they call directly.
+`/router/`) reach it through their internal `/llm/call/` hop. From AI
+Studio 2.3 this includes Bedrock, and so does `/anthropic/{slug}/v1/messages`.
+Before 2.3 those called AWS directly.
 
 ### Coverage
 
@@ -33,8 +34,18 @@ except Bedrock, which they call directly.
 |---------|-------------|
 | `/llm/rest`, `/llm/stream`, `/llm/call` (vendor-native bodies) | Yes |
 | `/ai/`, unified `/v1`, `/router/` to a non-Bedrock LLM | Yes, on the internal `/llm/call/` hop (vendor-native body) |
-| `/ai/` and `/anthropic/` to a Bedrock LLM | **No**: these call AWS directly and run no `post_auth`, until the core `pre_upstream` hook exists |
+| `/ai/`, unified `/v1`, `/router/` and `/anthropic/` to a Bedrock LLM | Yes from AI Studio 2.3, on the internal `/llm/call/` hop (Converse body). Before 2.3 these called AWS directly and ran no `post_auth` |
 | Studio Chat | No: Chat does not go through the gateway |
+
+On every hop, `post_auth` runs before the LLM's request filters, so the
+filters screen the compressed body (hence `lossy_with_request_filters`).
+A core `pre_upstream` hook, which would run compression after the filters,
+is still a separate change.
+
+A Bedrock request names its model in the path (`/model/{modelId}/`), not in
+the body. The plugin reads it from there with `plugin_sdk.RequestModel`, so
+ARN and inference-profile IDs come back unescaped and whole, and the
+savings of Bedrock requests are priced.
 
 Native Bedrock streams (`converse-stream`) are labelled and recorded from
 the AI Studio build that runs response hooks on them (eac.83). Before it,
