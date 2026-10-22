@@ -117,7 +117,7 @@ The cache runs in `post_auth`, in the order of the LLM's plugin list. A hit answ
 - **An entry stored while compression was enforcing holds the model's answer to the compressed prompt.** It is served for the same client body until it expires, including to a client that sent `X-Tyk-Compression: off`, which bypasses compression, not the cache. To get a fresh, uncompressed answer, send `X-Cache: bypass` as well.
 - **Cache hits are not rate limited** when the cache comes before the Rate Limiter.
 - An entry does not keep the response headers other plugins set about the original request (`X-Tyk-Compression*`, `X-RateLimit-*`, `X-LB-*`, `Server-Timing`), because those plugins do not run for a hit. Before 1.3.0 a hit replayed them.
-- **Known issue:** Microgateway edges managed by AI Studio run an LLM's plugins in the order the plugins were installed, not the order set on the LLM.
+- Microgateway edges managed by AI Studio follow the order set on the LLM from AI Studio 2.3. Older edges run an LLM's plugins in the order the plugins were installed.
 
 ## Building
 

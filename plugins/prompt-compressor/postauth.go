@@ -185,8 +185,13 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 		Doc:          doc,
 		Policy:       res.Policy,
 		MaxBodyBytes: cfg.MaxBodyBytes,
-		CapLossy:     capLossy,
-		Engine:       p.engineFor(ctx, cfg, res, failClosed, llm.StoresBodies),
+		// A Bedrock or Google request names its model in the path (Converse
+		// has no body "model"), an escaped ARN included; without it a
+		// record is never priced. Path only: other vendors' model is read
+		// from the start of the body (modelOf), not by decoding all of it.
+		Model:    plugin_sdk.RequestModel(ctx.Vendor, r.GetPath(), nil),
+		CapLossy: capLossy,
+		Engine:   p.engineFor(ctx, cfg, res, failClosed, llm.StoresBodies),
 	})
 	rec.CompressMicros = time.Since(start).Microseconds()
 	rec.Outcome, rec.Report = string(rep.Outcome), rep
