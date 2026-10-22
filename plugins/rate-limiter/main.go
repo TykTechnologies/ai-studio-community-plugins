@@ -27,7 +27,7 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "rate-limiter"
-	PluginVersion = "1.1.1"
+	PluginVersion = "1.2.0"
 
 	// stripedLockCount is the fixed size of the striped lock pool.
 	// Must be a power of 2 for efficient modulo via bitmask.
@@ -45,6 +45,12 @@ type RateLimiterPlugin struct {
 	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
 	rulesCache  *RuleSet
 	rulesTTL    time.Time
+
+	// inflight holds the concurrent slots of requests whose response phase
+	// has not run yet (see inflight.go).
+	inflightMu sync.Mutex
+	inflight   map[string]inflightSlots
+	lastSweep  time.Time
 }
 
 func NewRateLimiterPlugin() *RateLimiterPlugin {
@@ -250,6 +256,8 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 	}
 
 	now := time.Now()
+	p.sweepSlots(ctx, now)
+
 	W := p.config.WindowSizeSeconds
 	currentEpoch := BucketEpoch(now, W)
 	previousEpoch := PreviousBucketEpoch(now, W)
@@ -324,6 +332,9 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 				MergeHeaders(responseHeaders, StorageErrorHeaders())
 				continue
 			}
+			// No response phase follows a block: give back the slots
+			// earlier rules took for this request now.
+			p.releaseSlots(ctx, reqState.ConcRuleKeys)
 			return &pb.PluginResponse{
 				Block:      true,
 				StatusCode: 503,
@@ -351,19 +362,23 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 			}
 			// Enforce: block the request
 			log.Printf("%s: enforcing breach on rule %q (%s): %d/%d", PluginName, rule.Name, rule.Limit.Type, effectiveCount, rule.Limit.Value)
-			// Save request state so response phase can still decrement concurrent counters
-			if len(reqState.ConcRuleKeys) > 0 || len(reqState.TokenRuleKeys) > 0 {
-				WriteRequestState(ctx, p.store, RequestStateKey(pluginCtx.RequestId), reqState, 5*time.Minute)
-			}
+			// No response phase follows a block: give back the slots
+			// earlier rules took for this request now.
+			p.releaseSlots(ctx, reqState.ConcRuleKeys)
 			return BlockResponse(info), nil
 		}
 	}
 
 	// Save request state for response phase
 	if len(reqState.ConcRuleKeys) > 0 || len(reqState.TokenRuleKeys) > 0 {
-		if err := WriteRequestState(ctx, p.store, RequestStateKey(pluginCtx.RequestId), reqState, 5*time.Minute); err != nil {
+		if err := WriteRequestState(ctx, p.store, RequestStateKey(pluginCtx.RequestId), reqState, requestStateTTL); err != nil {
 			log.Printf("%s: failed to save request state: %v", PluginName, err)
 		}
+	}
+	// Remember the slots, so they are given back even if no response phase
+	// runs for this request
+	if len(reqState.ConcRuleKeys) > 0 {
+		p.trackSlots(pluginCtx.RequestId, reqState.ConcRuleKeys, now)
 	}
 
 	// Build response with rate limit headers
@@ -394,17 +409,67 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 		return &pb.ResponseWriteResponse{Modified: false, Body: req.Body, Headers: req.Headers}, nil
 	}
 
-	// Load request state
-	reqState, err := ReadRequestState(ctx, p.store, RequestStateKey(pluginCtx.RequestId))
-	if err != nil {
+	// Extract actual token usage
+	usage := ExtractTokenUsage(pluginCtx.GetVendor(), req.Body)
+	if !p.completeRequest(ctx, pluginCtx.RequestId, usage) {
 		return &pb.ResponseWriteResponse{Modified: false, Body: req.Body, Headers: req.Headers}, nil
+	}
+
+	// Add tracking headers to response
+	responseHeaders := make(map[string]string)
+	for k, v := range req.Headers {
+		responseHeaders[k] = v
+	}
+
+	if usage.TotalTokens > 0 {
+		responseHeaders["X-RateLimit-Tokens-Used"] = fmt.Sprintf("%d", usage.TotalTokens)
+	}
+
+	return &pb.ResponseWriteResponse{
+		Modified: true,
+		Body:     req.Body,
+		Headers:  responseHeaders,
+	}, nil
+}
+
+// OnStreamComplete counts a finished stream's tokens and releases its
+// concurrent slots, as OnBeforeWrite does for a buffered response. The usage
+// is read from the whole stream (OpenAI reports it only with
+// stream_options.include_usage). An upstream error ends the stream too, and
+// its slots are released.
+func (p *RateLimiterPlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.StreamCompleteRequest) (*pb.StreamCompleteResponse, error) {
+	pluginCtx := req.Context
+	if pluginCtx == nil {
+		return &pb.StreamCompleteResponse{Handled: false}, nil
+	}
+	usage := ExtractTokenUsage(pluginCtx.GetVendor(), req.AccumulatedResponse)
+	return &pb.StreamCompleteResponse{Handled: p.completeRequest(ctx, pluginCtx.RequestId, usage)}, nil
+}
+
+// completeRequest is the response phase of a request post_auth saved state
+// for: it adds usage to the request's token rules, releases its concurrent
+// slots and deletes the state. It reports false when there was no state.
+func (p *RateLimiterPlugin) completeRequest(ctx plugin_sdk.Context, requestID string, usage TokenUsage) bool {
+	// The slots this request took, unless the sweep already gave them back
+	slots, tracked := p.takeSlots(requestID)
+
+	// Load request state
+	reqState, err := ReadRequestState(ctx, p.store, RequestStateKey(requestID))
+	if err != nil {
+		// The state outlives no request the sweep released (requestStateTTL
+		// < inflightMaxAge), but a long stream can outlive its state
+		p.releaseSlots(ctx, slots)
+		return tracked
+	}
+	if !tracked && time.Since(time.Unix(reqState.Timestamp, 0)) < inflightMaxAge {
+		// Taken by an earlier run of this plugin (a restart lost the
+		// in-memory record); the sweep cannot have released them, as they
+		// are younger than inflightMaxAge
+		slots = reqState.ConcRuleKeys
 	}
 
 	W := p.config.WindowSizeSeconds
 	bucketTTL := time.Duration(2*W) * time.Second
-
-	// Extract actual token usage
-	usage := ExtractTokenUsage(req.Body)
 
 	// Update token counters atomically
 	if usage.TotalTokens > 0 && len(reqState.TokenRuleKeys) > 0 {
@@ -422,34 +487,11 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 	}
 
 	// Decrement concurrent counters atomically
-	for _, concKey := range reqState.ConcRuleKeys {
-		lock := p.getLock(concKey)
-		lock.Lock()
-		_, err := p.store.DecrementCounter(ctx, concKey, 5*time.Minute)
-		if err != nil {
-			log.Printf("%s: failed to decrement concurrent: %v", PluginName, err)
-		}
-		lock.Unlock()
-	}
+	p.releaseSlots(ctx, slots)
 
 	// Cleanup request state
-	p.store.Delete(ctx, RequestStateKey(pluginCtx.RequestId))
-
-	// Add tracking headers to response
-	responseHeaders := make(map[string]string)
-	for k, v := range req.Headers {
-		responseHeaders[k] = v
-	}
-
-	if usage.TotalTokens > 0 {
-		responseHeaders["X-RateLimit-Tokens-Used"] = fmt.Sprintf("%d", usage.TotalTokens)
-	}
-
-	return &pb.ResponseWriteResponse{
-		Modified: true,
-		Body:     req.Body,
-		Headers:  responseHeaders,
-	}, nil
+	p.store.Delete(ctx, RequestStateKey(requestID))
+	return true
 }
 
 // --- Striped lock pool ---

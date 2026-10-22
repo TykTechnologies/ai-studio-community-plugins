@@ -60,6 +60,22 @@ native API. That includes Studio's OpenAI-compatible endpoints (`/ai/{slug}/v1`
 and the unified `/v1` router), whose drivers call `/llm/call/{slug}/` in the
 native API and stream from it.
 
+### Bedrock
+
+Bedrock Converse answers are cached like any other JSON answer. The model is in
+the `/model/{modelId}/` path, which is part of the key, so two Bedrock models
+never share an entry. Since 1.3.0:
+
+- AWS errors are never cached: a response with `X-Amzn-ErrorType`, or a
+  `{"message": ...}` or `__type` body.
+- Tokens saved are counted from Converse's camelCase usage (`inputTokens`,
+  `outputTokens`), read with the Plugin SDK's `ResponseUsage`, as for every
+  other vendor.
+- `converse-stream` and `invoke-with-response-stream` requests go upstream
+  uncached: the cache cannot replay an AWS event stream.
+
+A streamed response whose status is not 2xx is never cached, for any vendor.
+
 ## Configuration
 
 | Option | Type | Default | Description |
@@ -92,6 +108,16 @@ curl -H "X-Cache: bypass" ...
 # Via query parameter
 curl "https://api.example.com/v1/chat?cache=bypass" ...
 ```
+
+## Plugin Order
+
+The cache runs in `post_auth`, in the order of the LLM's plugin list. A hit answers there. Later `post_auth` plugins and request filters do not run for it, and no plugin's response hooks run. Recommended order: LLM Firewall (when it runs in `post_auth`), this cache, Rate Limiter, Prompt Compressor, LLM Load Balancer.
+
+- **Put the cache before the Prompt Compressor.** Keys then come from the client's body, so changing a compression policy does not empty the cache. Hits never reach the compressor and are not in its savings. With the compressor first, keys come from the compressed body: identical requests under one policy still hit, but each policy change starts the cache again.
+- **An entry stored while compression was enforcing holds the model's answer to the compressed prompt.** It is served for the same client body until it expires, including to a client that sent `X-Tyk-Compression: off`, which bypasses compression, not the cache. To get a fresh, uncompressed answer, send `X-Cache: bypass` as well.
+- **Cache hits are not rate limited** when the cache comes before the Rate Limiter.
+- An entry does not keep the response headers other plugins set about the original request (`X-Tyk-Compression*`, `X-RateLimit-*`, `X-LB-*`, `Server-Timing`), because those plugins do not run for a hit. Before 1.3.0 a hit replayed them.
+- **Known issue:** Microgateway edges managed by AI Studio run an LLM's plugins in the order the plugins were installed, not the order set on the LLM.
 
 ## Building
 

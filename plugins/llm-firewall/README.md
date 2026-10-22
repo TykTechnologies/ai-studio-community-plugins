@@ -196,6 +196,10 @@ The `model_pattern` field uses glob-style patterns:
 | `gpt-4*` | `gpt-4`, `gpt-4-turbo`, `gpt-4o`, `gpt-4o-mini`, etc. |
 | `gpt-4o-*` | `gpt-4o-mini`, `gpt-4o-2024-08-06`, etc. |
 | `gemini-*` | `gemini-pro`, `gemini-1.5-pro`, etc. |
+| `anthropic.claude-*` | Bedrock model IDs such as `anthropic.claude-3-haiku-20240307-v1:0` |
+| `*claude*` | Bedrock model IDs, inference profiles (`us.anthropic.claude-...`) and their ARNs |
+
+The model is read the vendor's way: the body's `model`, the `models/{model}:` path segment for Google AI and Vertex, and for Bedrock (since 1.2.0) the `/model/{modelId}/` path segment, unescaped, so an escaped ARN or inference profile ID matches as written. A request that names no model is matched by its LLM's slug.
 
 ## Hook Phases
 
@@ -213,7 +217,9 @@ The `model_pattern` field uses glob-style patterns:
 - Useful for user-specific rules
 - Best for: User-specific policies, audit logging with user context
 
-To use PostAuth, set `"hook_phase": "post_auth"` in your configuration.
+To use PostAuth, set `"hook_phase": "post_auth"` in your configuration. The plugin checks in that one phase only (since 1.2.0; before, it checked every request in both phases whatever `hook_phase` said). An unknown value falls back to `pre_auth`.
+
+In `post_auth` the firewall sees the body as the `post_auth` plugins before it in the LLM's plugin order left it. Put it before any plugin that rewrites the prompt, such as the Prompt Compressor, so it screens what the client sent. In `pre_auth` it always does.
 
 ## Supported LLM Vendors
 
@@ -221,15 +227,15 @@ The plugin inspects every string under the fields that carry prompt text, whatev
 
 | Field | Used by |
 |-------|---------|
-| `messages` | OpenAI and Ollama chat, Anthropic Messages |
-| `system` | Anthropic |
+| `messages` | OpenAI and Ollama chat, Anthropic Messages, Bedrock Converse |
+| `system` | Anthropic, Bedrock Converse |
 | `systemInstruction`, `system_instruction` | Google AI and Vertex (both spellings the REST API accepts) |
 | `contents` | Google AI and Vertex |
 | `input`, `instructions` | OpenAI Responses API |
 | `prompt` | Legacy completions |
-| `tools`, `functions`, `tool_config`, `toolConfig` | Tool definitions and settings (descriptions the model reads) |
+| `tools`, `functions`, `tool_config`, `toolConfig` | Tool definitions and settings (descriptions the model reads), including Bedrock Converse `toolConfig` |
 
-Inside these fields it reads all nested text: content blocks of any type (`text`, `input_text`, …), tool results, tool call arguments, tool messages, documents, and tool descriptions. Everything inside caller-chosen payloads (tool call `input`/`arguments`, function `args`/`response`, tool `parameters`) is read in full. Elsewhere it skips inline media (`image_url`, `inline_data`/`inlineData`, `file_data`, `input_audio`) and message or block metadata (`role`, `type`, IDs, MIME types, `detail`, `cache_control`). The data of a base64 media source is skipped, except for `text/*` documents, which are decoded (up to 1 MB) and inspected. Each message, or other element of these fields, is matched as one text, with its strings joined by spaces.
+Inside these fields it reads all nested text: content blocks of any type (`text`, `input_text`, …), tool results, tool call arguments, tool messages, documents, and tool descriptions. Everything inside caller-chosen payloads (tool call `input`/`arguments`, function `args`/`response`, tool `parameters`) is read in full. Elsewhere it skips inline media (`image_url`, `inline_data`/`inlineData`, `file_data`, `input_audio`) and message or block metadata (`role`, `type`, IDs, MIME types, `detail`, `cache_control`). The data of a base64 media source is skipped, except for `text/*` documents, which are decoded (up to 1 MB) and inspected. Likewise the bytes of a Bedrock Converse image, video or document are skipped, except for documents in a text format (`txt`, `md`, `csv`, `html`), which are decoded (up to 1 MB) and inspected along with the document's `name` and `context` (since 1.2.0; before, the base64 was matched as it was). Each message, or other element of these fields, is matched as one text, with its strings joined by spaces.
 
 ## Error Handling
 
@@ -285,6 +291,16 @@ The message text is configurable via `block_message`.
 - **Text content only** - Does not analyze images or other media
 - **No semantic analysis** - Pattern matching only, not intent detection
 - **Single match exit** - Stops checking after first match (for performance)
+
+## Plugin Order
+
+An LLM's plugins run in one order, the order of the LLM's plugin list. `pre_auth` plugins run before any `post_auth` plugin, and each `post_auth` plugin gets the body the previous one returned. A `post_auth` block (a cache hit, a 429, a firewall block) answers at once: later plugins, request filters and every response hook are skipped for that request. On `/ai/`, `/v1/`, routers and `/anthropic/` the chain runs on the gateway's internal `/llm/call/` hop, once per failover attempt, on the vendor's native body.
+
+Recommended `post_auth` order: LLM Firewall (when it runs in `post_auth`), response caches, Rate Limiter, Prompt Compressor, LLM Load Balancer.
+
+- **The firewall screens the client's body.** In `pre_auth`, the default, it runs before every `post_auth` plugin, so prompt compression can neither hide a phrase (by dropping lines, cutting long output or masking turns) nor create one. In `post_auth`, put it before the Prompt Compressor.
+- Request filters and guardrails run after the `post_auth` chain and screen the body as it is forwarded. The compressor's lightest level strips terminal escape codes, which can join a phrase that they split in the forwarded body; the firewall does not see that form.
+- **Known issue:** Microgateway edges managed by AI Studio run an LLM's plugins in the order the plugins were installed, not the order set on the LLM.
 
 ## License
 

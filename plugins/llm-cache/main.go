@@ -29,7 +29,7 @@ var configSchemaFile []byte
 
 const (
 	PluginName    = "llm-cache"
-	PluginVersion = "1.2.1"
+	PluginVersion = "1.3.0"
 )
 
 // PendingCacheOp represents a pending cache operation
@@ -483,7 +483,7 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 
 	// Check if response indicates an error (don't cache errors), and only
 	// store JSON: entries are replayed as JSON or converted from it.
-	if p.isErrorResponse(req.Body) || !json.Valid(req.Body) {
+	if p.isErrorResponse(pluginCtx.Vendor, req.Headers, req.Body) || !json.Valid(req.Body) {
 		modifiedHeaders["X-Cache-Status"] = "MISS"
 		return &pb.ResponseWriteResponse{
 			Modified: true,
@@ -493,7 +493,7 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 	}
 
 	// Extract token usage for metrics
-	tokensSaved := ExtractTokensFromResponse(req.Body)
+	tokensSaved := ExtractTokensFromResponse(pluginCtx.Vendor, req.Body)
 
 	// Store in cache, without the headers that describe this particular
 	// response on the wire (a hit sets its own, see hitHeaders)
@@ -522,19 +522,12 @@ func (p *LLMCachePlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseW
 // OnStreamComplete implements plugin_sdk.StreamCompleteHandler
 // This is called after a streaming response has finished, providing the accumulated response.
 func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.StreamCompleteRequest) (*pb.StreamCompleteResponse, error) {
-	if !p.config.Enabled {
-		return &pb.StreamCompleteResponse{Handled: false}, nil
-	}
-
-	// Check if streaming caching is enabled
-	if !p.config.CacheStreamingResponses {
-		return &pb.StreamCompleteResponse{Handled: false}, nil
-	}
-
 	pluginCtx := req.Context
 	requestID := pluginCtx.RequestId
 
-	// Retrieve pending operation (set in HandlePostAuth)
+	// Retrieve pending operation (set in HandlePostAuth). It is released
+	// whatever the configuration says now: HandlePostAuth leaves one for
+	// every stream, cached or not.
 	p.pendingMu.Lock()
 	pendingOp, exists := p.pendingCache[requestID]
 	if exists {
@@ -542,12 +535,22 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 	}
 	p.pendingMu.Unlock()
 
+	// Check if caching, and streaming caching, are enabled
+	if !p.config.Enabled || !p.config.CacheStreamingResponses {
+		return &pb.StreamCompleteResponse{Handled: false}, nil
+	}
+
 	if !exists {
 		// No pending operation - request might not have gone through PostAuth
 		return &pb.StreamCompleteResponse{Handled: false}, nil
 	}
 
 	if !pendingOp.ShouldCache {
+		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
+	}
+
+	// An upstream error is never cached, whatever its body looks like.
+	if req.StatusCode != 0 && (req.StatusCode < 200 || req.StatusCode > 299) {
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
@@ -572,7 +575,7 @@ func (p *LLMCachePlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Stream
 	}
 
 	// Check if the reconstructed response indicates an error
-	if p.isErrorResponse(reconstructedJSON) {
+	if p.isErrorResponse(vendor, nil, reconstructedJSON) {
 		return &pb.StreamCompleteResponse{Handled: true, Cached: false}, nil
 	}
 
@@ -745,8 +748,21 @@ func (p *LLMCachePlugin) getNamespace(ctx plugin_sdk.Context) string {
 	return strings.Join(parts, ":")
 }
 
-// isErrorResponse checks if the response indicates an error
-func (p *LLMCachePlugin) isErrorResponse(body []byte) bool {
+// isErrorResponse checks if the response indicates an error. Response hooks
+// get no status code, so errors are told by their body: an "error" field
+// (OpenAI, Anthropic, Google). Bedrock errors carry no "error" field: AWS
+// marks them with X-Amzn-ErrorType and answers {"message": ...} (sometimes
+// with "__type"), while Bedrock answers nest their message.
+func (p *LLMCachePlugin) isErrorResponse(vendor string, headers map[string]string, body []byte) bool {
+	bedrock := strings.EqualFold(vendor, "bedrock")
+	if bedrock {
+		for k := range headers {
+			if strings.EqualFold(k, "X-Amzn-ErrorType") {
+				return true
+			}
+		}
+	}
+
 	var response map[string]interface{}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return false
@@ -755,6 +771,17 @@ func (p *LLMCachePlugin) isErrorResponse(body []byte) bool {
 	// Check for error field
 	if errField, ok := response["error"]; ok && errField != nil {
 		return true
+	}
+
+	if bedrock {
+		if _, ok := response["__type"]; ok {
+			return true
+		}
+		for _, k := range []string{"message", "Message"} {
+			if _, ok := response[k].(string); ok {
+				return true
+			}
+		}
 	}
 
 	return false

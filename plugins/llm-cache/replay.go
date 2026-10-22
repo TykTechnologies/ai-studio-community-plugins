@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+
+	"github.com/TykTechnologies/midsommar/v2/pkg/plugin_sdk"
 )
 
 // The cache stores one JSON response per request and replays it either as
@@ -70,6 +72,11 @@ func modelFromPath(path string) string {
 
 // requestStreams reports whether a request asks for a streamed response.
 func requestStreams(vendor, path string, body []byte) bool {
+	// Bedrock chooses streaming by operation (converse-stream,
+	// invoke-with-response-stream), not by a body field.
+	if strings.EqualFold(vendor, "bedrock") && plugin_sdk.IsStreamingRequest("bedrock", path, body) {
+		return true
+	}
 	// Gemini chooses streaming by method, not by a body field.
 	if strings.Contains(path, ":streamGenerateContent") {
 		return true
@@ -228,28 +235,45 @@ func hasValue(v interface{}) bool {
 // copy of them is wrong for a replay: the body may be a different length or
 // format, and the gateway sets its own request ID and date.
 var framingHeaders = map[string]bool{
-	"content-length":    true,
-	"content-type":      true,
-	"content-encoding":  true,
-	"transfer-encoding": true,
-	"connection":        true,
-	"keep-alive":        true,
-	"date":              true,
-	"x-request-id":      true,
-	"cache-control":     true,
+	"content-length":      true,
+	"content-type":        true,
+	"content-encoding":    true,
+	"transfer-encoding":   true,
+	"connection":          true,
+	"keep-alive":          true,
+	"date":                true,
+	"x-request-id":        true,
+	"x-tyk-ai-request-id": true,
+	"cache-control":       true,
 }
+
+// requestHeaderPrefixes are response headers other plugins and the gateway
+// set about the request that produced the answer: the Prompt Compressor's
+// X-Tyk-Compression*, the Rate Limiter's X-RateLimit-*, the Load Balancer's
+// X-LB-* and timings. A hit is answered in post_auth, where none of them
+// run, so replaying them would report work done for another request.
+var requestHeaderPrefixes = []string{"x-tyk-compression", "x-ratelimit-", "x-lb-", "server-timing"}
 
 // storableHeaders are the response headers worth keeping with an entry.
 func storableHeaders(headers map[string]string) map[string]string {
 	kept := make(map[string]string, len(headers))
 	for k, v := range headers {
 		lk := strings.ToLower(k)
-		if framingHeaders[lk] || strings.HasPrefix(lk, "x-cache") {
+		if framingHeaders[lk] || strings.HasPrefix(lk, "x-cache") || hasAnyPrefix(lk, requestHeaderPrefixes) {
 			continue
 		}
 		kept[k] = v
 	}
 	return kept
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // hitHeaders are the headers of a replayed body: the stored ones plus

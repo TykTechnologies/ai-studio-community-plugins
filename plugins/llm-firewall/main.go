@@ -24,7 +24,13 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "llm-firewall"
-	PluginVersion = "1.1.1"
+	PluginVersion = "1.2.0"
+)
+
+// hook_phase values: the hook that checks requests.
+const (
+	hookPhasePreAuth  = "pre_auth"
+	hookPhasePostAuth = "post_auth"
 )
 
 // FirewallConfig represents the plugin configuration
@@ -131,12 +137,24 @@ func (p *LLMFirewallPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 		p.config.FailClosed = failClosed == "true"
 	}
 
+	// The gateway calls both hooks the manifest declares; only the configured
+	// phase checks. Anything else falls back to pre_auth, which still screens
+	// every request.
+	p.config.HookPhase = strings.ToLower(strings.TrimSpace(p.config.HookPhase))
+	if p.config.HookPhase == "" {
+		p.config.HookPhase = hookPhasePreAuth
+	}
+	if p.config.HookPhase != hookPhasePreAuth && p.config.HookPhase != hookPhasePostAuth {
+		log.Printf("%s: Unknown hook_phase %q, using %s", PluginName, p.config.HookPhase, hookPhasePreAuth)
+		p.config.HookPhase = hookPhasePreAuth
+	}
+
 	// Compile all rules and patterns
 	if err := p.compileRules(); err != nil {
 		return fmt.Errorf("failed to compile rules: %w", err)
 	}
 
-	log.Printf("%s: Initialized with %d rules", PluginName, len(p.compiledRules))
+	log.Printf("%s: Initialized with %d rules, checking in %s", PluginName, len(p.compiledRules), p.config.HookPhase)
 	return nil
 }
 
@@ -155,13 +173,23 @@ func (p *LLMFirewallPlugin) GetConfigSchema() ([]byte, error) {
 	return configSchemaBytes, nil
 }
 
-// HandlePreAuth processes requests before authentication
+// HandlePreAuth processes requests before authentication, when hook_phase is
+// pre_auth (the default)
 func (p *LLMFirewallPlugin) HandlePreAuth(ctx plugin_sdk.Context, req *pb.PluginRequest) (*pb.PluginResponse, error) {
+	if p.config.HookPhase != hookPhasePreAuth {
+		return &pb.PluginResponse{Modified: false}, nil
+	}
 	return p.checkRequest(ctx, req)
 }
 
-// HandlePostAuth processes requests after authentication
+// HandlePostAuth processes requests after authentication, when hook_phase is
+// post_auth. It sees the body as the post_auth plugins before it in the LLM's
+// chain left it, so it belongs before any that rewrite the prompt (the
+// Prompt Compressor).
 func (p *LLMFirewallPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.EnrichedRequest) (*pb.PluginResponse, error) {
+	if p.config.HookPhase != hookPhasePostAuth {
+		return &pb.PluginResponse{Modified: false}, nil
+	}
 	return p.checkRequest(ctx, req.Request)
 }
 
@@ -178,12 +206,11 @@ func (p *LLMFirewallPlugin) checkRequest(ctx plugin_sdk.Context, req *pb.PluginR
 		vendor = req.Context.Vendor
 	}
 
-	// Extract model name from request body (more accurate than LlmSlug which is the gateway slug)
-	// For Google AI/Vertex, also check the URL path since model is often there
-	modelName := p.extractModelFromBody(req.Body)
-	if modelName == "" {
-		modelName = p.extractModelFromPath(vendor, req.Path)
-	}
+	// Extract the model name the vendor's way (more accurate than LlmSlug
+	// which is the gateway slug): the body's model, or the path's for Google
+	// AI/Vertex (models/{model}:) and Bedrock (/model/{modelId}/, escaped
+	// ARNs and inference profiles included)
+	modelName := plugin_sdk.RequestModel(strings.ToLower(vendor), req.Path, req.Body)
 	// Fallback to LlmSlug if model not found in body or path
 	if modelName == "" && req.Context != nil {
 		modelName = req.Context.LlmSlug
@@ -376,63 +403,6 @@ func (p *LLMFirewallPlugin) globToRegex(glob string) (*regexp.Regexp, error) {
 	return regexp.Compile(result.String())
 }
 
-// extractModelFromBody extracts the model name from the request body
-func (p *LLMFirewallPlugin) extractModelFromBody(body []byte) string {
-	if len(body) == 0 {
-		return ""
-	}
-
-	// Generic struct to extract model field (works for OpenAI, Anthropic, Ollama)
-	var req struct {
-		Model string `json:"model"`
-	}
-
-	if err := json.Unmarshal(body, &req); err != nil {
-		return ""
-	}
-
-	return req.Model
-}
-
-// extractModelFromPath extracts the model name from the URL path (for Google AI/Vertex)
-// Google AI format: /v1/models/{model}:generateContent or /v1beta/models/{model}:generateContent
-// Vertex format: /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
-func (p *LLMFirewallPlugin) extractModelFromPath(vendor string, path string) string {
-	if path == "" {
-		return ""
-	}
-
-	// Only process for Google AI and Vertex vendors
-	vendorLower := strings.ToLower(vendor)
-	if vendorLower != "google_ai" && vendorLower != "vertex" {
-		return ""
-	}
-
-	// Look for /models/{model}: pattern
-	modelsIdx := strings.Index(path, "/models/")
-	if modelsIdx == -1 {
-		return ""
-	}
-
-	// Extract everything after /models/
-	modelPart := path[modelsIdx+8:] // len("/models/") = 8
-
-	// Find the end of the model name (before : or / or end of string)
-	endIdx := len(modelPart)
-	if colonIdx := strings.Index(modelPart, ":"); colonIdx != -1 && colonIdx < endIdx {
-		endIdx = colonIdx
-	}
-	if slashIdx := strings.Index(modelPart, "/"); slashIdx != -1 && slashIdx < endIdx {
-		endIdx = slashIdx
-	}
-
-	if endIdx > 0 {
-		return modelPart[:endIdx]
-	}
-
-	return ""
-}
-
 // contentContainers are the request fields that carry text the model reads,
 // across vendors and API shapes: chat messages (OpenAI, Ollama, Anthropic),
 // system prompts (Anthropic system, Google systemInstruction and the
@@ -512,7 +482,9 @@ func (p *LLMFirewallPlugin) extractTextContent(_ string, body []byte) ([]string,
 
 // collectStrings appends every string leaf under v. Outside a payload it
 // skips structural metadata and inline media; a base64 media source has
-// only its data skipped, and a text/* one is decoded and inspected.
+// only its data skipped, and a text/* one is decoded and inspected. A Bedrock
+// Converse image, video or document has its bytes skipped, except for text
+// documents (txt, md, csv, html), which are decoded and inspected.
 func collectStrings(v any, inPayload bool, out *[]string) {
 	switch val := v.(type) {
 	case string:
@@ -526,6 +498,17 @@ func collectStrings(v any, inPayload bool, out *[]string) {
 	case map[string]any:
 		if !inPayload && isBase64Source(val) {
 			if text, ok := decodeTextSource(val); ok {
+				*out = append(*out, text)
+			}
+			return
+		}
+		if !inPayload && isConverseBytesSource(val) {
+			for _, k := range []string{"name", "context"} {
+				if s, _ := val[k].(string); s != "" {
+					*out = append(*out, s)
+				}
+			}
+			if text, ok := decodeConverseText(val); ok {
 				*out = append(*out, text)
 			}
 			return
@@ -554,6 +537,47 @@ func isBase64Source(m map[string]any) bool {
 	return hasData
 }
 
+// converseSourceKeys are the fields of a Bedrock Converse image, document or
+// video block's body.
+var converseSourceKeys = map[string]bool{"format": true, "source": true, "name": true, "context": true, "citations": true}
+
+// isConverseBytesSource reports whether m is a Bedrock Converse image,
+// document or video block's body, {"format":...,"source":{"bytes":...}}
+// (documents add "name" and optionally "context" and "citations"), and
+// nothing else.
+func isConverseBytesSource(m map[string]any) bool {
+	if _, ok := m["format"].(string); !ok {
+		return false
+	}
+	for k := range m {
+		if !converseSourceKeys[k] {
+			return false // other fields: inspect normally
+		}
+	}
+	source, ok := m["source"].(map[string]any)
+	if !ok || len(source) != 1 {
+		return false
+	}
+	_, hasBytes := source["bytes"].(string)
+	return hasBytes
+}
+
+// converseTextFormats are the Converse document formats the model reads as
+// text.
+var converseTextFormats = map[string]bool{"txt": true, "md": true, "csv": true, "html": true}
+
+// decodeConverseText decodes the bytes of a Converse document in a text
+// format, up to maxDecodedDocument bytes. Media and binary documents (pdf,
+// docx, ...) are not text.
+func decodeConverseText(m map[string]any) (string, bool) {
+	format, _ := m["format"].(string)
+	if !converseTextFormats[strings.ToLower(format)] {
+		return "", false
+	}
+	data, _ := m["source"].(map[string]any)["bytes"].(string)
+	return decodeBase64Text(data), true
+}
+
 // decodeTextSource decodes the data of a base64 source whose media type is
 // text/* (the model reads it as text), up to maxDecodedDocument bytes.
 func decodeTextSource(m map[string]any) (string, bool) {
@@ -562,15 +586,20 @@ func decodeTextSource(m map[string]any) (string, bool) {
 		return "", false
 	}
 	data, _ := m["data"].(string)
+	return decodeBase64Text(data), true
+}
+
+// decodeBase64Text decodes base64 text, up to maxDecodedDocument bytes.
+func decodeBase64Text(data string) string {
 	if len(data) > base64.StdEncoding.EncodedLen(maxDecodedDocument) {
 		data = data[:base64.StdEncoding.EncodedLen(maxDecodedDocument)]
 	}
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		// Undecodable data is inspected as is
-		return data, true
+		return data
 	}
-	return string(decoded), true
+	return string(decoded)
 }
 
 func main() {

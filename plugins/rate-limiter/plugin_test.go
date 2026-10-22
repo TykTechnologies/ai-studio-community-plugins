@@ -638,7 +638,8 @@ func TestOnResponse_ConcurrentDecrement_FloorsAtZero(t *testing.T) {
 
 func TestOnResponse_BlockedRequest_StillDecrementsConcurrent(t *testing.T) {
 	// When a request is blocked after concurrent was already incremented,
-	// the request state should still be saved so OnResponse can decrement.
+	// the slot is given back at once: no response phase follows a post_auth
+	// block, so nothing else would release it.
 	p := newTestPlugin([]Rule{
 		{
 			ID: "r1", Name: "conc", Dimensions: []string{"app_id"},
@@ -672,28 +673,20 @@ func TestOnResponse_BlockedRequest_StillDecrementsConcurrent(t *testing.T) {
 		t.Fatal("second request should be blocked by rpm rule")
 	}
 
-	// Concurrent was incremented to 2 before the block
+	// The slot the blocked request took was given back with the block
 	state = ReadConcurrentState(context.Background(), p.store, concKey)
-	if state.Count != 2 {
-		t.Fatalf("expected concurrent=2 after blocked request, got %d", state.Count)
+	if state.Count != 1 {
+		t.Fatalf("expected concurrent=1 after blocked request, got %d", state.Count)
 	}
 
-	// Request state should exist so response phase can decrement
-	rs, err := ReadRequestState(context.Background(), p.store, RequestStateKey("req-bd-1"))
-	if err != nil {
-		t.Fatal("expected request state to be saved for blocked request")
-	}
-	if len(rs.ConcRuleKeys) != 1 {
-		t.Errorf("expected 1 concurrent key in request state, got %d", len(rs.ConcRuleKeys))
-	}
-
-	// Simulate response (even though blocked, the gateway may still call response hooks)
+	// A response hook call for the blocked request, should a gateway make
+	// one, gives nothing back twice
 	writeReq := testResponseWriteRequest("req-bd-1", []byte(`{}`), false)
 	p.OnBeforeWrite(ctx, writeReq)
 
 	state = ReadConcurrentState(context.Background(), p.store, concKey)
 	if state.Count != 1 {
-		t.Errorf("expected concurrent=1 after decrement, got %d", state.Count)
+		t.Errorf("expected concurrent=1 (the first request's slot), got %d", state.Count)
 	}
 }
 

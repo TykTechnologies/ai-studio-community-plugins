@@ -265,7 +265,7 @@ func TestExtractTokensFromResponse(t *testing.T) {
 		},
 	}
 	body, _ := json.Marshal(openaiResponse)
-	tokens := ExtractTokensFromResponse(body)
+	tokens := ExtractTokensFromResponse("openai", body)
 	if tokens != 150 {
 		t.Errorf("expected 150 tokens (OpenAI total), got %d", tokens)
 	}
@@ -278,7 +278,7 @@ func TestExtractTokensFromResponse(t *testing.T) {
 		},
 	}
 	body, _ = json.Marshal(anthropicResponse)
-	tokens = ExtractTokensFromResponse(body)
+	tokens = ExtractTokensFromResponse("anthropic", body)
 	if tokens != 120 {
 		t.Errorf("expected 120 tokens (Anthropic), got %d", tokens)
 	}
@@ -288,13 +288,13 @@ func TestExtractTokensFromResponse(t *testing.T) {
 		"response": "Hello",
 	}
 	body, _ = json.Marshal(noUsageResponse)
-	tokens = ExtractTokensFromResponse(body)
+	tokens = ExtractTokensFromResponse("openai", body)
 	if tokens != 0 {
 		t.Errorf("expected 0 tokens when no usage field, got %d", tokens)
 	}
 
 	// Invalid JSON
-	tokens = ExtractTokensFromResponse([]byte(`{invalid}`))
+	tokens = ExtractTokensFromResponse("openai", []byte(`{invalid}`))
 	if tokens != 0 {
 		t.Errorf("expected 0 tokens for invalid JSON, got %d", tokens)
 	}
