@@ -29,7 +29,7 @@ var configSchemaFile []byte
 
 const (
 	PluginName    = "llm-cache"
-	PluginVersion = "1.3.0"
+	PluginVersion = "1.3.1"
 )
 
 // PendingCacheOp represents a pending cache operation
@@ -427,12 +427,34 @@ func (p *LLMCachePlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enriched
 }
 
 // OnBeforeWriteHeaders implements plugin_sdk.ResponseHandler
+//
+// X-Cache-Status is set here too, from the request's pending operation:
+// a response with no body phase (a stream, and every /ai or /v1 call
+// bridged to a non-Bedrock vendor, whose inner hop streams) only carries
+// headers set in this phase. Caching itself still happens in OnBeforeWrite
+// and OnStreamComplete.
 func (p *LLMCachePlugin) OnBeforeWriteHeaders(ctx plugin_sdk.Context, req *pb.HeadersRequest) (*pb.HeadersResponse, error) {
-	// We handle everything in OnBeforeWrite
-	return &pb.HeadersResponse{
-		Modified: false,
-		Headers:  req.Headers,
-	}, nil
+	unchanged := &pb.HeadersResponse{Modified: false, Headers: req.Headers}
+	if !p.config.Enabled || req.GetContext() == nil {
+		return unchanged, nil
+	}
+	p.pendingMu.Lock()
+	pendingOp, exists := p.pendingCache[req.GetContext().GetRequestId()]
+	bypassed := exists && pendingOp.Bypassed
+	p.pendingMu.Unlock()
+	if !exists {
+		return unchanged, nil
+	}
+
+	headers := make(map[string]string, len(req.Headers)+1)
+	for k, v := range req.Headers {
+		headers[k] = v
+	}
+	headers["X-Cache-Status"] = "MISS"
+	if bypassed {
+		headers["X-Cache-Status"] = "BYPASS"
+	}
+	return &pb.HeadersResponse{Modified: true, Headers: headers}, nil
 }
 
 // OnBeforeWrite implements plugin_sdk.ResponseHandler
