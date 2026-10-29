@@ -4,7 +4,21 @@ Source of the entry for the marketplace listing: `make plugin-publish` carries
 the previous version's CHANGELOG.md forward, so copy the new entry into the
 marketplace repo when publishing. Newest first.
 
-## [1.2.0] - unreleased
+## [1.2.1] - unreleased
+
+Requires AI Studio 2.3.0.
+
+### Fixed
+- **Saving a rule keeps the plugin's settings.** A rule change wrote the
+  rules into the stored configuration together with the settings the Studio
+  process had started with, so settings saved since in the configuration
+  form (Redis backend, URL and password, `fail_open`, window size) were
+  reverted without a warning, and edges went back to per-instance counters
+  after the next push. A rule change now replaces only `rules` in the stored
+  configuration; if the stored configuration cannot be read, the rules are
+  not synced (the log says so) rather than written over it.
+
+## [1.2.0] - 2026-10-23
 
 Requires AI Studio 2.3.0. Built on the 2.3 Plugin SDK (64 MiB plugin message
 limit).

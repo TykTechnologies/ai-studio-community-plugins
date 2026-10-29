@@ -4,7 +4,7 @@ Source of the entry for the marketplace listing: `make plugin-publish` carries
 the previous version's CHANGELOG.md forward, so copy the new entry into the
 marketplace repo when publishing. Newest first.
 
-## [1.0.2] - unreleased
+## [1.0.2] - 2026-10-23
 
 Requires AI Studio 2.3.0 (unchanged).
 
