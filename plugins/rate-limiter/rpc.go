@@ -398,26 +398,50 @@ func (p *RateLimiterPlugin) invalidateRulesCache() {
 	p.mu.Unlock()
 }
 
+// The Service API calls syncRulesToConfig makes; tests replace them.
+var (
+	getPluginForSync          = ai_studio_sdk.GetPlugin
+	updatePluginConfigForSync = ai_studio_sdk.UpdatePluginConfig
+)
+
 // syncRulesToConfig writes the current rules into the plugin's persisted config
 // via the Studio Service API. This ensures rules are included in the config snapshot
 // that gets pushed to edge gateways. Only works in Studio runtime.
+//
+// Only the "rules" key is replaced: the other settings are read from the
+// stored config, not from the config this process started with, so a
+// settings change saved since (Redis backend, password, fail_open, window)
+// is kept. If the stored config cannot be read, nothing is written.
 func (p *RateLimiterPlugin) syncRulesToConfig(rules []Rule) {
 	if p.pluginID == 0 {
 		return
 	}
 
-	// Build config with current settings + rules
-	cfg := *p.config
-	cfg.Rules = rules
+	ctx := context.Background()
+	got, err := getPluginForSync(ctx, p.pluginID)
+	if err != nil {
+		log.Printf("%s: config sync skipped, cannot read the stored config: %v", PluginName, err)
+		return
+	}
+	stored := map[string]interface{}{}
+	if got != nil && got.Plugin != nil && got.Plugin.ConfigJson != "" {
+		if err := json.Unmarshal([]byte(got.Plugin.ConfigJson), &stored); err != nil {
+			log.Printf("%s: config sync skipped, stored config is not a JSON object: %v", PluginName, err)
+			return
+		}
+	}
+	if rules == nil {
+		rules = []Rule{}
+	}
+	stored["rules"] = rules
 
-	data, err := json.Marshal(cfg)
+	data, err := json.Marshal(stored)
 	if err != nil {
 		log.Printf("%s: failed to marshal config for sync: %v", PluginName, err)
 		return
 	}
 
-	ctx := context.Background()
-	resp, err := ai_studio_sdk.UpdatePluginConfig(ctx, p.pluginID, string(data))
+	resp, err := updatePluginConfigForSync(ctx, p.pluginID, string(data))
 	if err != nil {
 		log.Printf("%s: config sync failed: %v", PluginName, err)
 		return

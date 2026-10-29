@@ -27,7 +27,7 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "rate-limiter"
-	PluginVersion = "1.2.0"
+	PluginVersion = "1.2.1"
 
 	// stripedLockCount is the fixed size of the striped lock pool.
 	// Must be a power of 2 for efficient modulo via bitmask.
