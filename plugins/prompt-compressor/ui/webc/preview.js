@@ -8,6 +8,11 @@
 //
 // Method names start with "_" so none shadows an HTMLElement member.
 
+// Wrapped in a function: Studio runs every webc entry as a classic script in
+// one global scope, so top-level names shared with the other pages here
+// (STYLES, h, fmtInt) would make the second page loaded throw and never
+// register its element.
+(() => {
 const MAX_BYTES = 2 * 1024 * 1024;
 const MARKER = /\[tyk-compressed:[^\]\n]*\]/g;
 const DIFF_LINE_LIMIT = 1500;
@@ -493,3 +498,4 @@ const STYLES = `
 if (!customElements.get('prompt-compressor-preview')) {
   customElements.define('prompt-compressor-preview', PromptCompressorPreview);
 }
+})();

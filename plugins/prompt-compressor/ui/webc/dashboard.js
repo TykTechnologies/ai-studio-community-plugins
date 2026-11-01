@@ -9,6 +9,11 @@
 //
 // Method names start with "_" so none shadows an HTMLElement member.
 
+// Wrapped in a function: Studio runs every webc entry as a classic script in
+// one global scope, so top-level names shared with the other pages here
+// (STYLES, h, fmtInt) would make the second page loaded throw and never
+// register its element.
+(() => {
 const RANGES = [
   { hours: 24, label: 'Last 24 hours' },
   { hours: 168, label: 'Last 7 days' },
@@ -670,3 +675,4 @@ const STYLES = `
 if (!customElements.get('prompt-compressor-dashboard')) {
   customElements.define('prompt-compressor-dashboard', PromptCompressorDashboard);
 }
+})();

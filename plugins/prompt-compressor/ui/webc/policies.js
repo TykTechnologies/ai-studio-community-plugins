@@ -8,6 +8,11 @@
 //
 // Method names start with "_" so none shadows an HTMLElement member.
 
+// Wrapped in a function: Studio runs every webc entry as a classic script in
+// one global scope, so top-level names shared with the other pages here
+// (STYLES, h, fmtInt) would make the second page loaded throw and never
+// register its element.
+(() => {
 const LEVELS = [
   { value: 0, label: '0 - Off' },
   { value: 1, label: '1 - Lossless' },
@@ -850,3 +855,4 @@ const STYLES = `
 if (!customElements.get('prompt-compressor-policies')) {
   customElements.define('prompt-compressor-policies', PromptCompressorPolicies);
 }
+})();
