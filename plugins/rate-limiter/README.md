@@ -83,6 +83,8 @@ When the plugin starts in AI Studio it makes the two agree, so the Rules page al
 - the configuration has none, but the plugin's storage has (for example a configuration saved without its `rules`): the configuration gets them back;
 - neither has any, and a 1.2.x plugin on the Redis backend kept its rules in Redis: they are moved.
 
+The copy a 1.2.x plugin left in Redis is deleted once the plugin's own storage holds the rules, so rules deleted later cannot come back from it.
+
 Before 1.2.2 the rules were read from the counter store, so a backend switch hid them and the next rule saved from the page replaced the others.
 
 ## Editing rules

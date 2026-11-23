@@ -405,6 +405,11 @@ func sameRules(a, b []Rule) bool {
 //   - Neither has any: rules a 1.2.x plugin on the Redis backend kept in
 //     Redis are moved to the rule store and the configuration.
 //
+// In every case the copy 1.2.x left in Redis is deleted once the rule store
+// is the place the rules are read from (dropCounterStoreRules). Left there,
+// it would come back as case three after an administrator deleted every
+// rule, and gateways would enforce deleted rules again.
+//
 // A rule store that cannot be read is left alone, and so is the
 // configuration.
 func (p *RateLimiterPlugin) reconcileRules() {
@@ -417,32 +422,64 @@ func (p *RateLimiterPlugin) reconcileRules() {
 	configRules := p.config.Rules
 	switch {
 	case len(configRules) > 0:
-		if sameRules(rs.Rules, configRules) {
-			return
+		if !sameRules(rs.Rules, configRules) {
+			log.Printf("%s: the rule store had %d rules and the stored configuration has %d; the configuration's are the ones gateways enforce, so the Rules page now shows them",
+				PluginName, len(rs.Rules), len(configRules))
+			rs.Rules = configRules
+			if err := p.storeRuleSet(rs); err != nil {
+				// The Redis copy stays until the rule store has the rules.
+				log.Printf("%s: could not write the configuration's rules to the rule store: %v", PluginName, err)
+				return
+			}
+			p.invalidateRulesCache()
 		}
-		log.Printf("%s: the rule store had %d rules and the stored configuration has %d; the configuration's are the ones gateways enforce, so the Rules page now shows them",
-			PluginName, len(rs.Rules), len(configRules))
-		rs.Rules = configRules
-		if err := p.storeRuleSet(rs); err != nil {
-			log.Printf("%s: could not write the configuration's rules to the rule store: %v", PluginName, err)
-		}
+		p.dropCounterStoreRules()
 
 	case len(rs.Rules) > 0:
 		log.Printf("%s: found %d rules in the rule store but none in the configuration, syncing to config", PluginName, len(rs.Rules))
 		p.syncRulesToConfig(rs.Rules)
+		p.dropCounterStoreRules()
+		p.invalidateRulesCache()
 
-	case p.rulesStore != nil && p.store != nil:
+	case p.countersInRedis():
 		legacy, err := loadRuleSetFrom(p.store)
 		if err != nil || len(legacy.Rules) == 0 {
 			return
 		}
-		log.Printf("%s: moving %d rules from the %s counter store to the rule store", PluginName, len(legacy.Rules), p.config.StorageBackend)
+		log.Printf("%s: moving %d rules from the Redis counter store to the rule store", PluginName, len(legacy.Rules))
 		rs.Rules = legacy.Rules
 		if err := p.saveRuleSetToKV(rs); err != nil {
 			log.Printf("%s: could not move the rules: %v", PluginName, err)
+			return
 		}
+		p.dropCounterStoreRules()
+		p.invalidateRulesCache()
 	}
-	p.invalidateRulesCache()
+}
+
+// countersInRedis reports whether the counters are in Redis, that is, in a
+// store other than the plugin's KV, where the rule store is.
+func (p *RateLimiterPlugin) countersInRedis() bool {
+	return p.rulesStore != nil && p.store != nil && p.config.StorageBackend == "redis"
+}
+
+// dropCounterStoreRules deletes the rule set a 1.2.x plugin kept in Redis.
+// It is called only once the rule store holds the rules. On the kv backend
+// the counter store is the plugin's KV, the rule store itself, and nothing
+// is deleted.
+func (p *RateLimiterPlugin) dropCounterStoreRules() {
+	if !p.countersInRedis() {
+		return
+	}
+	ctx := context.Background()
+	if _, err := p.store.Get(ctx, rulesKVKey); err != nil {
+		return // none there (or unreadable: left alone)
+	}
+	if err := p.store.Delete(ctx, rulesKVKey); err != nil {
+		log.Printf("%s: could not delete the rule set left in Redis by an earlier version: %v", PluginName, err)
+		return
+	}
+	log.Printf("%s: deleted the rule set an earlier version left in Redis; the rules are kept in the plugin's own storage", PluginName)
 }
 
 // loadRulesFromKV is a convenience that returns just the rules slice.

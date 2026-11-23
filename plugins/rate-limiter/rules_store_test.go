@@ -26,6 +26,10 @@ func studioStart(t *testing.T, kv *memKV, counters Store, storedConfig *string) 
 	p.store = counters
 	p.rulesStore = newKVStore(kv)
 	p.config.Rules = cfg.Rules
+	// A counter store that is not the plugin's KV stands in for Redis.
+	if _, isKV := counters.(*kvStore); !isKV {
+		p.config.StorageBackend = "redis"
+	}
 	if len(cfg.Rules) > 0 {
 		p.rulesCache = &RuleSet{Rules: cfg.Rules}
 		p.rulesTTL = time.Now().Add(30 * time.Second)
@@ -241,5 +245,78 @@ func TestRules_UnreadableRuleStoreIsLeftAlone(t *testing.T) {
 	}
 	if got := string(kv.data[rulesKVKey]); !strings.Contains(got, `"keep"`) {
 		t.Errorf("rule store was written over: %s", got)
+	}
+}
+
+func deleteAllRules(t *testing.T, p *RateLimiterPlugin) {
+	t.Helper()
+	for _, r := range listRules(t, p) {
+		payload, _ := json.Marshal(DeleteRuleRequest{ID: r.ID})
+		if _, err := p.HandleRPC("deleteRule", payload); err != nil {
+			t.Fatalf("deleteRule %s: %v", r.Name, err)
+		}
+	}
+}
+
+// The rule set 1.2.x kept in Redis is removed once the rules are in the
+// rule store. Left there, it came back after an administrator deleted every
+// rule: with the rule store and the configuration both empty, the next start
+// read the old Redis copy and wrote it to both, and gateways enforced
+// deleted rules after the next push.
+func TestRules_DeletedRulesDoNotComeBackFromRedis(t *testing.T) {
+	old := []Rule{{ID: "old", Name: "old-one", Dimensions: []string{"global"}, Limit: Limit{Type: "requests", Value: 3}, Action: "enforce", Enabled: true}}
+	oldBlob, _ := json.Marshal(RuleSet{Rules: old, Version: 2})
+
+	for name, configJSON := range map[string]string{
+		"rules in Redis and in the configuration": `{"storage_backend":"redis","rules":[{"id":"old","name":"old-one","dimensions":["global"],"limit":{"type":"requests","value":3},"action":"enforce","enabled":true}]}`,
+		"rules only in Redis":                     `{"storage_backend":"redis"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			stored := stubConfigSync(t, configJSON, nil)
+			kv := newMemKV()
+			redis := newMemStore()
+			redis.Set(context.Background(), rulesKVKey, oldBlob, 0)
+
+			// First start after the upgrade.
+			p := studioStart(t, kv, redis, stored)
+			if got := ruleNames(listRules(t, p)); got != "old-one" {
+				t.Fatalf("after the upgrade the page shows %q, want old-one", got)
+			}
+			if _, err := redis.Get(context.Background(), rulesKVKey); err == nil {
+				t.Error("the rule set must be gone from Redis once the rule store has it")
+			}
+
+			// The administrator deletes every rule.
+			deleteAllRules(t, p)
+			if got := ruleNames(storedRules(t, stored)); got != "" {
+				t.Fatalf("stored configuration rules after deleting all = %q", got)
+			}
+
+			// Restart.
+			again := studioStart(t, kv, redis, stored)
+			if got := ruleNames(listRules(t, again)); got != "" {
+				t.Errorf("after a restart the page shows %q: deleted rules came back", got)
+			}
+			if got := ruleNames(storedRules(t, stored)); got != "" {
+				t.Errorf("after a restart the configuration has %q: gateways would enforce deleted rules", got)
+			}
+		})
+	}
+}
+
+// On the kv backend the counter store is the plugin's KV: nothing is
+// deleted there, the rules stay.
+func TestRules_KVBackendKeepsItsRules(t *testing.T) {
+	kv := newMemKV()
+	stored := stubConfigSync(t, `{"storage_backend":"kv"}`, nil)
+	p := studioStart(t, kv, newKVStore(kv), stored)
+	createRule(t, p, "one")
+
+	again := studioStart(t, kv, newKVStore(kv), stored)
+	if got := ruleNames(listRules(t, again)); got != "one" {
+		t.Errorf("Rules page shows %q, want one", got)
+	}
+	if _, ok := kv.data[rulesKVKey]; !ok {
+		t.Error("the rule set was deleted from the plugin's KV")
 	}
 }
