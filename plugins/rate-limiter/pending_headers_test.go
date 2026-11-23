@@ -301,6 +301,28 @@ func TestHeldHeaders_Bounded(t *testing.T) {
 		t.Error("over the bound nothing more is held")
 	}
 
+	// While it stays full, requests do not each pay for a walk of the whole
+	// table: the sweep ran just now, so the next ones only skip holding.
+	if !p.pendingFullSweep.Equal(now) {
+		t.Fatalf("the full table was swept at %v, want %v", p.pendingFullSweep, now)
+	}
+	p.pendingMu.Lock()
+	for id, held := range p.pending {
+		held.stored = now.Add(-pendingHeadersMaxAge - time.Hour) // a sweep would now empty the table
+		p.pending[id] = held
+	}
+	p.pendingMu.Unlock()
+	p.holdHeaders("within-the-interval", map[string]string{"X-RateLimit-Limit": "1"}, now.Add(sweepInterval-time.Second))
+	if pendingCount(p) != pendingHeadersMax {
+		t.Errorf("held = %d: a full table must be swept at most once per sweepInterval", pendingCount(p))
+	}
+	p.pendingMu.Lock()
+	for id, held := range p.pending {
+		held.stored = now
+		p.pending[id] = held
+	}
+	p.pendingMu.Unlock()
+
 	// Once the old entries have aged out there is room again.
 	later := now.Add(pendingHeadersMaxAge + time.Second)
 	p.holdHeaders("after", map[string]string{"X-RateLimit-Limit": "1"}, later)

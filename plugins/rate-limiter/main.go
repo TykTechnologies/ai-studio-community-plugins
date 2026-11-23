@@ -56,6 +56,8 @@ type RateLimiterPlugin struct {
 	// responses' header hook adds them (see pending_headers.go).
 	pendingMu sync.Mutex
 	pending   map[string]pendingHeaders
+	// pendingFullSweep is when a full table was last swept (holdHeaders).
+	pendingFullSweep time.Time
 }
 
 func NewRateLimiterPlugin() *RateLimiterPlugin {

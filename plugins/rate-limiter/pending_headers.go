@@ -43,6 +43,13 @@ func (p *RateLimiterPlugin) holdHeaders(requestID string, headers map[string]str
 		p.pending = make(map[string]pendingHeaders)
 	}
 	if len(p.pending) >= pendingHeadersMax {
+		// A full table is swept at most once per sweepInterval: a sweep
+		// walks every entry under the lock post_auth takes, and a client
+		// that keeps the table full must not make every request pay for one.
+		if now.Sub(p.pendingFullSweep) < sweepInterval {
+			return
+		}
+		p.pendingFullSweep = now
 		p.sweepHeadersLocked(now)
 		if len(p.pending) >= pendingHeadersMax {
 			return
