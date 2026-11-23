@@ -37,9 +37,12 @@ const (
 // RateLimiterPlugin implements sliding-window rate limiting with composable dimensions.
 type RateLimiterPlugin struct {
 	plugin_sdk.BasePlugin
-	pluginID    uint32
-	config      *Config
-	store       Store
+	pluginID uint32
+	config   *Config
+	store    Store
+	// rulesStore holds the rule set: always the plugin's KV, never the
+	// counter store (see ruleStore). Nil in tests that use one store for both.
+	rulesStore  Store
 	mu          sync.RWMutex
 	rulesSaveMu sync.Mutex                   // serialises saveRuleSetToKV's version check and write
 	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
@@ -90,6 +93,9 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 	} else {
 		p.store = newKVStore(ctx.Services.KV())
 	}
+	// The rules do not live in the counter store: a backend switch must not
+	// hide them.
+	p.rulesStore = newKVStore(ctx.Services.KV())
 
 	// Seed rules from config (these come from the config snapshot on gateways,
 	// or from the persisted config on Studio). This ensures gateway instances
@@ -107,13 +113,11 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 			p.rulesTTL = time.Now().Add(30 * time.Second)
 		}
 		p.mu.Unlock()
-	} else if ctx.Runtime == plugin_sdk.RuntimeStudio {
-		// On Studio, rules may exist in KV from before config sync was added.
-		// Sync them to plugin config so they propagate to gateways.
-		if rules, err := p.loadRulesFromKV(); err == nil && len(rules) > 0 {
-			log.Printf("%s: found %d rules in KV but not in config, syncing to config", PluginName, len(rules))
-			p.syncRulesToConfig(rules)
-		}
+	}
+	if ctx.Runtime == plugin_sdk.RuntimeStudio {
+		// Make the rule store and the stored configuration agree, so the
+		// Rules page shows what gateways enforce (reconcileRules).
+		p.reconcileRules()
 	}
 
 	log.Printf("%s: initialized (runtime=%s, backend=%s, window=%ds, fail_open=%v)",

@@ -24,6 +24,18 @@ Requires AI Studio 2.3.0.
   it is what was left before the response, whose tokens are not known when
   the headers are sent.
 
+- **Rules survive a change of storage backend.** The rules were kept in the
+  counter store, so after switching `storage_backend` from `kv` to `redis`
+  (or back) the Rules page showed none and editing a rule failed with "rule
+  not found", while gateways kept enforcing the old rules; the next rule
+  created on the page then replaced them all, and gateways lost the others
+  after the next push. The rules are now kept in the plugin's own storage in
+  AI Studio whatever the backend is. When the plugin starts it makes that
+  storage and the plugin configuration agree: the configuration's rules, the
+  ones gateways enforce, are what the page shows, a configuration saved
+  without its rules gets them back, and rules that a 1.2.x plugin kept in
+  Redis are moved. A rule write always writes the whole rule set.
+
 The headers of a request wait in memory for its response. A request that
 never gets one (the client went away, another plugin answered it) has them
 dropped after ten minutes, and at most 100,000 requests are held at a time.
