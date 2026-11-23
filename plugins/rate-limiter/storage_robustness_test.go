@@ -35,8 +35,8 @@ func TestPostAuth_UnreadableStoreFollowsFailOpen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if failOpen && (resp.Block || resp.Headers["X-RateLimit-Error"] != "storage_unavailable") {
-			t.Errorf("fail_open=true: block=%v headers=%v, want allowed with X-RateLimit-Error", resp.Block, resp.Headers)
+		if failOpen && (resp.Block || clientHeaders(t, p, "req-outage")["X-RateLimit-Error"] != "storage_unavailable") {
+			t.Errorf("fail_open=true: block=%v, want allowed with X-RateLimit-Error on the response", resp.Block)
 		}
 		if !failOpen && (!resp.Block || resp.StatusCode != 503) {
 			t.Errorf("fail_open=false: block=%v status=%d, want 503", resp.Block, resp.StatusCode)
@@ -192,8 +192,8 @@ func TestPostAuth_CorruptCounterFollowsFailOpen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if failOpen && (resp.Block || resp.Headers["X-RateLimit-Error"] != "storage_unavailable") {
-			t.Errorf("fail_open=true: block=%v headers=%v, want allowed with X-RateLimit-Error", resp.Block, resp.Headers)
+		if failOpen && (resp.Block || clientHeaders(t, p, "req-corrupt")["X-RateLimit-Error"] != "storage_unavailable") {
+			t.Errorf("fail_open=true: block=%v, want allowed with X-RateLimit-Error on the response", resp.Block)
 		}
 		if !failOpen && (!resp.Block || resp.StatusCode != 503) {
 			t.Errorf("fail_open=false: block=%v status=%d, want 503", resp.Block, resp.StatusCode)
