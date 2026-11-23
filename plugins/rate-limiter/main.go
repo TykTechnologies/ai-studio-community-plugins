@@ -82,7 +82,10 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 
 	p.config = ParseConfig(config)
 
-	// Initialize storage backend
+	// Initialize storage backend. countersSeparate is decided afresh: a
+	// plugin served over grpc:// is initialized again in the same process,
+	// and after a switch from redis to kv the counters are in the plugin's KV.
+	p.countersSeparate = false
 	if p.config.StorageBackend == "redis" && p.config.RedisURL != "" {
 		store, err := newRedisStore(p.config.RedisURL, p.config.RedisPassword)
 		if err != nil {
