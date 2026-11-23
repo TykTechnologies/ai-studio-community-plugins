@@ -77,6 +77,20 @@ func testResponseWriteRequest(requestID string, body []byte, isStream bool) *pb.
 	}
 }
 
+// clientHeaders are the headers the plugin puts on requestID's response: what
+// its header hook returns for a response that had none.
+func clientHeaders(t *testing.T, p *RateLimiterPlugin, requestID string) map[string]string {
+	t.Helper()
+	resp, err := p.OnBeforeWriteHeaders(testCtx(), &pb.HeadersRequest{
+		Headers: map[string]string{},
+		Context: &pb.PluginContext{RequestId: requestID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.Headers
+}
+
 func openAIResponse(promptTokens, completionTokens int) []byte {
 	resp := map[string]interface{}{
 		"id":      "chatcmpl-test",
@@ -303,9 +317,13 @@ func TestPostAuth_ShadowMode_LogsButDoesNotBlock(t *testing.T) {
 	if resp.Block {
 		t.Error("shadow mode should not block")
 	}
-	// Should have shadow breach header
-	if resp.Headers == nil || resp.Headers["X-RateLimit-Shadow-Breach"] != "shadow-rule" {
-		t.Error("expected X-RateLimit-Shadow-Breach header")
+	// The client's response has the shadow breach header; the request to
+	// the vendor does not.
+	if len(resp.Headers) != 0 {
+		t.Errorf("post_auth must not set request headers, got %v", resp.Headers)
+	}
+	if got := clientHeaders(t, p, "req-s-1")["X-RateLimit-Shadow-Breach"]; got != "shadow-rule" {
+		t.Errorf("X-RateLimit-Shadow-Breach on the response = %q, want shadow-rule", got)
 	}
 }
 
@@ -390,17 +408,18 @@ func TestPostAuth_RateLimitHeaders_Returned(t *testing.T) {
 		t.Fatal("should not block")
 	}
 
-	if resp.Headers == nil {
-		t.Fatal("expected rate limit headers")
+	if resp.Modified || len(resp.Headers) != 0 {
+		t.Fatalf("post_auth must not change the request to the vendor, got modified=%v headers=%v", resp.Modified, resp.Headers)
 	}
-	if resp.Headers["X-RateLimit-Limit"] != "100" {
-		t.Errorf("expected limit=100, got %s", resp.Headers["X-RateLimit-Limit"])
+	headers := clientHeaders(t, p, "req-h-0")
+	if headers["X-RateLimit-Limit"] != "100" {
+		t.Errorf("expected limit=100, got %s", headers["X-RateLimit-Limit"])
 	}
-	// Remaining reflects the state at evaluation time (before this request's increment)
-	if resp.Headers["X-RateLimit-Remaining"] != "100" {
-		t.Errorf("expected remaining=100, got %s", resp.Headers["X-RateLimit-Remaining"])
+	// Remaining counts this request
+	if headers["X-RateLimit-Remaining"] != "99" {
+		t.Errorf("expected remaining=99, got %s", headers["X-RateLimit-Remaining"])
 	}
-	if resp.Headers["X-RateLimit-Reset"] == "" {
+	if headers["X-RateLimit-Reset"] == "" {
 		t.Error("expected X-RateLimit-Reset header")
 	}
 }
@@ -452,8 +471,8 @@ func TestPostAuth_FailOpen_AllowsOnStorageError(t *testing.T) {
 	if resp.Block {
 		t.Error("fail-open should allow request on storage error")
 	}
-	if resp.Headers == nil || resp.Headers["X-RateLimit-Error"] != "storage_unavailable" {
-		t.Error("expected X-RateLimit-Error header")
+	if got := clientHeaders(t, p, "req-fo-0")["X-RateLimit-Error"]; got != "storage_unavailable" {
+		t.Errorf("X-RateLimit-Error on the response = %q, want storage_unavailable", got)
 	}
 }
 
@@ -957,7 +976,7 @@ func TestRulesCache_HitAndExpiry(t *testing.T) {
 	}
 }
 
-// --- OnBeforeWriteHeaders no-op test ---
+// --- OnBeforeWriteHeaders: nothing held for the request ---
 
 func TestOnBeforeWriteHeaders_NoOp(t *testing.T) {
 	p := newTestPlugin(nil)

@@ -27,7 +27,7 @@ var configSchemaBytes []byte
 
 const (
 	PluginName    = "rate-limiter"
-	PluginVersion = "1.2.1"
+	PluginVersion = "1.2.2"
 
 	// stripedLockCount is the fixed size of the striped lock pool.
 	// Must be a power of 2 for efficient modulo via bitmask.
@@ -51,6 +51,11 @@ type RateLimiterPlugin struct {
 	inflightMu sync.Mutex
 	inflight   map[string]inflightSlots
 	lastSweep  time.Time
+
+	// pending holds the rate limit headers of allowed requests until their
+	// responses' header hook adds them (see pending_headers.go).
+	pendingMu sync.Mutex
+	pending   map[string]pendingHeaders
 }
 
 func NewRateLimiterPlugin() *RateLimiterPlugin {
@@ -296,6 +301,9 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 
 		var effectiveCount int
 		var storageErr error
+		// counted is what this request added to the counter, which the
+		// count read back does not include yet.
+		counted := 0
 
 		currentKey := WindowKey(rule.ID, dimensionKey, currentEpoch)
 		previousKey := WindowKey(rule.ID, dimensionKey, previousEpoch)
@@ -304,6 +312,7 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 		case "requests":
 			// Atomic: evaluate sliding window + increment current bucket
 			effectiveCount, storageErr = p.store.EvalSlidingWindow(ctx, currentKey, previousKey, W, now.Unix(), 1, bucketTTL)
+			counted = 1
 
 		case "tokens":
 			// Evaluate only — tokens counted on response phase
@@ -320,6 +329,7 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 			effectiveCount, allowed, storageErr = p.store.IncrementIfBelow(ctx, concKey, rule.Limit.Value, 5*time.Minute)
 			if storageErr == nil && allowed {
 				reqState.ConcRuleKeys = append(reqState.ConcRuleKeys, concKey)
+				counted = 1
 			}
 		}
 
@@ -348,6 +358,7 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 			LimitType: rule.Limit.Type,
 			Limit:     rule.Limit.Value,
 			Current:   effectiveCount,
+			Counted:   counted,
 			Action:    rule.Action,
 			ResetAt:   windowEnd,
 		}
@@ -381,21 +392,26 @@ func (p *RateLimiterPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.Enric
 		p.trackSlots(pluginCtx.RequestId, reqState.ConcRuleKeys, now)
 	}
 
-	// Build response with rate limit headers
+	// The rate limit headers are for the client. Headers returned from
+	// post_auth are set on the request that goes to the vendor, so they are
+	// held for the response's header hook instead (pending_headers.go).
 	if h := MostRestrictiveHeaders(rateLimitInfos); h != nil {
 		MergeHeaders(responseHeaders, h)
 	}
-
-	if len(responseHeaders) > 0 {
-		return &pb.PluginResponse{Modified: true, Headers: responseHeaders}, nil
-	}
+	p.holdHeaders(pluginCtx.RequestId, responseHeaders, now)
 	return &pb.PluginResponse{Modified: false}, nil
 }
 
 // --- Response: Record tokens and decrement concurrency ---
 
+// OnBeforeWriteHeaders adds the rate limit headers post_auth worked out for
+// the request to its response, buffered or streamed.
 func (p *RateLimiterPlugin) OnBeforeWriteHeaders(ctx plugin_sdk.Context, req *pb.HeadersRequest) (*pb.HeadersResponse, error) {
-	return &pb.HeadersResponse{Modified: false, Headers: req.Headers}, nil
+	if req.Context == nil {
+		return &pb.HeadersResponse{Modified: false, Headers: req.Headers}, nil
+	}
+	headers, modified := withHeldHeaders(req.Headers, p.heldHeaders(req.Context.RequestId))
+	return &pb.HeadersResponse{Modified: modified, Headers: headers}, nil
 }
 
 func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.ResponseWriteRequest) (*pb.ResponseWriteResponse, error) {
@@ -409,16 +425,24 @@ func (p *RateLimiterPlugin) OnBeforeWrite(ctx plugin_sdk.Context, req *pb.Respon
 		return &pb.ResponseWriteResponse{Modified: false, Body: req.Body, Headers: req.Headers}, nil
 	}
 
+	// The response is being written: its rate limit headers are no longer
+	// held after this. They are set here as well as in the header hook, so
+	// a header a hook in between dropped is put back.
+	responseHeaders, hadHeaders := withHeldHeaders(req.Headers, p.heldHeaders(pluginCtx.RequestId))
+	p.dropHeaders(pluginCtx.RequestId)
+
 	// Extract actual token usage
 	usage := ExtractTokenUsage(pluginCtx.GetVendor(), req.Body)
 	if !p.completeRequest(ctx, pluginCtx.RequestId, usage) {
-		return &pb.ResponseWriteResponse{Modified: false, Body: req.Body, Headers: req.Headers}, nil
+		return &pb.ResponseWriteResponse{Modified: hadHeaders, Body: req.Body, Headers: responseHeaders}, nil
 	}
 
 	// Add tracking headers to response
-	responseHeaders := make(map[string]string)
-	for k, v := range req.Headers {
-		responseHeaders[k] = v
+	if !hadHeaders {
+		responseHeaders = make(map[string]string, len(req.Headers)+1)
+		for k, v := range req.Headers {
+			responseHeaders[k] = v
+		}
 	}
 
 	if usage.TotalTokens > 0 {
@@ -442,6 +466,8 @@ func (p *RateLimiterPlugin) OnStreamComplete(ctx plugin_sdk.Context, req *pb.Str
 	if pluginCtx == nil {
 		return &pb.StreamCompleteResponse{Handled: false}, nil
 	}
+	// The stream's headers went out with its first chunk.
+	p.dropHeaders(pluginCtx.RequestId)
 	usage := ExtractTokenUsage(pluginCtx.GetVendor(), req.AccumulatedResponse)
 	return &pb.StreamCompleteResponse{Handled: p.completeRequest(ctx, pluginCtx.RequestId, usage)}, nil
 }

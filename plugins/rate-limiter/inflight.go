@@ -80,6 +80,7 @@ func (p *RateLimiterPlugin) sweepSlots(ctx context.Context, now time.Time) {
 		return
 	}
 	p.lastSweep = now
+	p.sweepHeaders(now)
 	stale := make(map[string][]string)
 	for id, slots := range p.inflight {
 		if now.Sub(slots.started) > inflightMaxAge {

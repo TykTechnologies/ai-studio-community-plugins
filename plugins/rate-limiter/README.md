@@ -23,6 +23,24 @@ Rules are managed on the plugin's **Rate Limit Rules** page, under **Rate Limiti
 
 A reference that cannot be resolved (an older Studio or edge, a missing secret, or the `refused-credential-reference` an edge gets in its place) is never sent to Redis as the password. Redis set-up fails, and the plugin falls back to `kv` and logs why. Limits are then counted per instance instead of shared, so on edges older than 2.3 give `redis_password` as `$ENV/NAME` (with the variable passed through) or as the value.
 
+## Response headers
+
+Every response to a request that a rule matched carries the state of the most restrictive rule (the one with the least remaining):
+
+| Header | Value |
+|---|---|
+| `X-RateLimit-Limit` | The rule's limit |
+| `X-RateLimit-Remaining` | What is left once this request is counted: with a limit of N the first allowed response says N-1, the last says 0. For a token rule, what was left before this response (its tokens are not known when the headers are sent) |
+| `X-RateLimit-Reset` | Unix time by which the request's window has passed |
+| `X-RateLimit-Shadow-Breach` | The name of a rule with action `log` that the request went over |
+| `X-RateLimit-Error` | `storage_unavailable`, when the counters could not be read and `fail_open` let the request through |
+
+A blocked request gets `429` with `X-RateLimit-Limit`, `X-RateLimit-Remaining: 0`, `X-RateLimit-Reset` and `Retry-After`.
+
+Since 1.2.2 these headers are on allowed responses too, buffered and streamed, on `/llm/`, `/ai/` and `/v1`. Before, they were sent to the vendor with the request instead, and clients saw them only on a `429`. Nothing is added to the request the vendor receives. The vendor's own rate limit headers, such as OpenAI's `X-Ratelimit-Limit-Requests`, have other names and are passed on unchanged; a vendor header named exactly `X-RateLimit-Limit`, `-Remaining` or `-Reset` is replaced by the gateway's.
+
+The headers of a request wait in the plugin's memory for its response. If none comes (the client went away, or another plugin answered the request), they are dropped after ten minutes; at most 100,000 requests are held at a time, and over that a request is still counted and limited but gets no headers.
+
 ## Token rules
 
 A token rule checks the window's count before the request and adds the response's actual token usage after it, so the request that crosses the limit completes and the next one is blocked. Usage is read in each vendor's shape with the Plugin SDK's `ResponseUsage`: OpenAI `prompt_tokens`/`completion_tokens`, Anthropic `input_tokens`/`output_tokens`, Google `usageMetadata` and Bedrock Converse `inputTokens`/`outputTokens` (counted since 1.2.0). The total is the vendor's `total_tokens` when it reports one, else input plus output; Anthropic and Bedrock prompt-cache reads and writes are not added. A buffered response carries `X-RateLimit-Tokens-Used`.

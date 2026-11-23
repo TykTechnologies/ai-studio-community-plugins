@@ -13,14 +13,21 @@ type RateLimitInfo struct {
 	RuleName  string
 	LimitType string // "requests", "tokens", "concurrent"
 	Limit     int
-	Current   int
-	Action    string // "enforce" or "log"
-	ResetAt   time.Time
+	// Current is the count before this request.
+	Current int
+	// Counted is what this request added to it: 1 for a request or a
+	// concurrent slot, 0 for a token rule, whose tokens are known only when
+	// the response is.
+	Counted int
+	Action  string // "enforce" or "log"
+	ResetAt time.Time
 }
 
-// Remaining returns limit - current, floored at 0.
+// Remaining returns what is left of the limit once this request is counted,
+// floored at 0: with a limit of N the first allowed request has N-1 left and
+// the last has 0.
 func (r RateLimitInfo) Remaining() int {
-	rem := r.Limit - r.Current
+	rem := r.Limit - r.Current - r.Counted
 	if rem < 0 {
 		return 0
 	}
