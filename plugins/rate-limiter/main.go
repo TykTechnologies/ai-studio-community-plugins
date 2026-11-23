@@ -42,12 +42,15 @@ type RateLimiterPlugin struct {
 	store    Store
 	// rulesStore holds the rule set: always the plugin's KV, never the
 	// counter store (see ruleStore). Nil in tests that use one store for both.
-	rulesStore  Store
-	mu          sync.RWMutex
-	rulesSaveMu sync.Mutex                   // serialises saveRuleSetToKV's version check and write
-	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
-	rulesCache  *RuleSet
-	rulesTTL    time.Time
+	rulesStore Store
+	// countersSeparate is true when store is Redis and not the plugin's KV
+	// (set where Initialize opens it; see countersInRedis).
+	countersSeparate bool
+	mu               sync.RWMutex
+	rulesSaveMu      sync.Mutex                   // serialises saveRuleSetToKV's version check and write
+	stripeLocks      [stripedLockCount]sync.Mutex // bounded lock pool
+	rulesCache       *RuleSet
+	rulesTTL         time.Time
 
 	// inflight holds the concurrent slots of requests whose response phase
 	// has not run yet (see inflight.go).
@@ -88,6 +91,7 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 			p.config.StorageBackend = "kv"
 		} else {
 			p.store = store
+			p.countersSeparate = true
 			log.Printf("%s: using Redis backend", PluginName)
 		}
 	} else {

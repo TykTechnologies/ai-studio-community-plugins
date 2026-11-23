@@ -458,9 +458,13 @@ func (p *RateLimiterPlugin) reconcileRules() {
 }
 
 // countersInRedis reports whether the counters are in Redis, that is, in a
-// store other than the plugin's KV, where the rule store is.
+// store other than the plugin's KV, where the rule store is. It goes by the
+// store Initialize actually opened, not by the storage_backend setting: with
+// "redis" configured and no redis_url, or a Redis that could not be reached,
+// the counters are in the plugin's KV, and deleting "the Redis copy" there
+// would delete the rule store's own rules.
 func (p *RateLimiterPlugin) countersInRedis() bool {
-	return p.rulesStore != nil && p.store != nil && p.config.StorageBackend == "redis"
+	return p.rulesStore != nil && p.store != nil && p.countersSeparate
 }
 
 // dropCounterStoreRules deletes the rule set a 1.2.x plugin kept in Redis.

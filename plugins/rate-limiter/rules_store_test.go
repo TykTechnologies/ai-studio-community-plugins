@@ -26,10 +26,14 @@ func studioStart(t *testing.T, kv *memKV, counters Store, storedConfig *string) 
 	p.store = counters
 	p.rulesStore = newKVStore(kv)
 	p.config.Rules = cfg.Rules
-	// A counter store that is not the plugin's KV stands in for Redis.
-	if _, isKV := counters.(*kvStore); !isKV {
+	// A counter store that is not the plugin's KV stands in for Redis, as
+	// Initialize records when it opens one. The setting alone says nothing:
+	// "redis" without a redis_url counts in the plugin's KV.
+	if strings.Contains(*storedConfig, `"storage_backend":"redis"`) {
 		p.config.StorageBackend = "redis"
 	}
+	_, isKV := counters.(*kvStore)
+	p.countersSeparate = !isKV
 	if len(cfg.Rules) > 0 {
 		p.rulesCache = &RuleSet{Rules: cfg.Rules}
 		p.rulesTTL = time.Now().Add(30 * time.Second)
@@ -318,5 +322,38 @@ func TestRules_KVBackendKeepsItsRules(t *testing.T) {
 	}
 	if _, ok := kv.data[rulesKVKey]; !ok {
 		t.Error("the rule set was deleted from the plugin's KV")
+	}
+}
+
+// storage_backend "redis" with no redis_url (or a Redis that could not be
+// reached at start) counts in the plugin's KV. The rule store's own rules
+// must not be taken for a copy left in Redis and deleted: the page then
+// showed none, and the next rule created dropped the others from the
+// configuration.
+func TestRules_RedisSettingWithCountersInKVKeepsItsRules(t *testing.T) {
+	kv := newMemKV()
+	stored := stubConfigSync(t, `{"storage_backend":"redis"}`, nil)
+
+	p := studioStart(t, kv, newKVStore(kv), stored)
+	if p.config.StorageBackend != "redis" || p.countersSeparate {
+		t.Fatalf("fixture: want the redis setting with counters in the plugin's KV")
+	}
+	createRule(t, p, "a")
+	createRule(t, p, "b")
+
+	for start := 1; start <= 2; start++ {
+		again := studioStart(t, kv, newKVStore(kv), stored)
+		if got := ruleNames(listRules(t, again)); got != "a,b" {
+			t.Fatalf("start %d: Rules page shows %q, want a,b", start, got)
+		}
+		if _, ok := kv.data[rulesKVKey]; !ok {
+			t.Fatalf("start %d: the rule set was deleted from the plugin's KV", start)
+		}
+	}
+
+	last := studioStart(t, kv, newKVStore(kv), stored)
+	createRule(t, last, "c")
+	if got := ruleNames(storedRules(t, stored)); got != "a,b,c" {
+		t.Errorf("stored configuration rules = %q, want a,b,c", got)
 	}
 }
