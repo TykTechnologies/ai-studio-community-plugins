@@ -284,10 +284,29 @@ func (p *RateLimiterPlugin) rpcGetRuleStats(payload []byte) (interface{}, error)
 
 // --- KV persistence with optimistic locking ---
 
+// ruleStore is where the rule set is kept: the plugin's KV in AI Studio,
+// whatever backend counts the requests. The rules used to be read from and
+// written to the counter store, so switching storage_backend from kv to redis
+// (or back) made the Rules page show none, and the next rule saved from the
+// page replaced the stored configuration's rules with that one rule: edges
+// lost the others without a word.
+func (p *RateLimiterPlugin) ruleStore() Store {
+	if p.rulesStore != nil {
+		return p.rulesStore
+	}
+	return p.store
+}
+
 // loadRuleSetFromKV reads the full RuleSet including its version.
 func (p *RateLimiterPlugin) loadRuleSetFromKV() (*RuleSet, error) {
+	return loadRuleSetFrom(p.ruleStore())
+}
+
+// loadRuleSetFrom reads a RuleSet from store; a store without one has an
+// empty set at version 0.
+func loadRuleSetFrom(store Store) (*RuleSet, error) {
 	ctx := context.Background()
-	data, err := p.store.Get(ctx, rulesKVKey)
+	data, err := store.Get(ctx, rulesKVKey)
 	if errors.Is(err, ErrKeyNotFound) {
 		return &RuleSet{Version: 0}, nil
 	}
@@ -309,7 +328,23 @@ func (p *RateLimiterPlugin) loadRuleSetFromKV() (*RuleSet, error) {
 // been modified since the caller's read. This prevents lost updates when
 // two administrators edit rules concurrently.
 func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
+	if err := p.storeRuleSet(rs); err != nil {
+		return err
+	}
+
+	// Sync rules to plugin config so they propagate to edge gateways
+	// via the config snapshot. This is a best-effort operation — KV is
+	// already saved, so we log but don't fail on config sync errors.
+	p.syncRulesToConfig(rs.Rules)
+
+	return nil
+}
+
+// storeRuleSet writes the RuleSet to the rule store with the version check,
+// without touching the plugin's stored configuration.
+func (p *RateLimiterPlugin) storeRuleSet(rs *RuleSet) error {
 	ctx := context.Background()
+	store := p.ruleStore()
 
 	// The KV has no compare-and-swap, so the version check and the write are
 	// made atomic within this plugin process: of two saves based on the same
@@ -318,7 +353,7 @@ func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
 	defer p.rulesSaveMu.Unlock()
 
 	// Re-read current version to detect concurrent modifications
-	currentData, err := p.store.Get(ctx, rulesKVKey)
+	currentData, err := store.Get(ctx, rulesKVKey)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return fmt.Errorf("failed to read current rules: %v", err)
 	}
@@ -341,16 +376,114 @@ func (p *RateLimiterPlugin) saveRuleSetToKV(rs *RuleSet) error {
 	if err != nil {
 		return err
 	}
-	if err := p.store.Set(ctx, rulesKVKey, data, 0); err != nil {
-		return err
+	return store.Set(ctx, rulesKVKey, data, 0)
+}
+
+// sameRules reports whether two rule lists are the same rules in the same
+// order.
+func sameRules(a, b []Rule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ja) == string(jb)
+}
+
+// reconcileRules runs when the plugin starts in AI Studio. It makes the
+// rule store and the stored configuration agree, so the Rules page shows
+// exactly the rules gateways enforce:
+//
+//   - The stored configuration has rules: they are what gateways enforce, so
+//     they are what the page must show and what the next edit must start
+//     from. A rule store that has other rules, or none (after an upgrade from
+//     a version that kept them in Redis, or in a store that was switched
+//     away from), takes the configuration's.
+//   - The stored configuration has none and the rule store has some (a
+//     configuration saved without its "rules" key, or rules from before they
+//     were synced): the configuration gets the rule store's.
+//   - Neither has any: rules a 1.2.x plugin on the Redis backend kept in
+//     Redis are moved to the rule store and the configuration.
+//
+// In every case the copy 1.2.x left in Redis is deleted once the rule store
+// is the place the rules are read from (dropCounterStoreRules). Left there,
+// it would come back as case three after an administrator deleted every
+// rule, and gateways would enforce deleted rules again.
+//
+// A rule store that cannot be read is left alone, and so is the
+// configuration.
+func (p *RateLimiterPlugin) reconcileRules() {
+	rs, err := p.loadRuleSetFromKV()
+	if err != nil {
+		log.Printf("%s: rules not reconciled with the configuration, the rule store cannot be read: %v", PluginName, err)
+		return
 	}
 
-	// Sync rules to plugin config so they propagate to edge gateways
-	// via the config snapshot. This is a best-effort operation — KV is
-	// already saved, so we log but don't fail on config sync errors.
-	p.syncRulesToConfig(rs.Rules)
+	configRules := p.config.Rules
+	switch {
+	case len(configRules) > 0:
+		if !sameRules(rs.Rules, configRules) {
+			log.Printf("%s: the rule store had %d rules and the stored configuration has %d; the configuration's are the ones gateways enforce, so the Rules page now shows them",
+				PluginName, len(rs.Rules), len(configRules))
+			rs.Rules = configRules
+			if err := p.storeRuleSet(rs); err != nil {
+				// The Redis copy stays until the rule store has the rules.
+				log.Printf("%s: could not write the configuration's rules to the rule store: %v", PluginName, err)
+				return
+			}
+			p.invalidateRulesCache()
+		}
+		p.dropCounterStoreRules()
 
-	return nil
+	case len(rs.Rules) > 0:
+		log.Printf("%s: found %d rules in the rule store but none in the configuration, syncing to config", PluginName, len(rs.Rules))
+		p.syncRulesToConfig(rs.Rules)
+		p.dropCounterStoreRules()
+		p.invalidateRulesCache()
+
+	case p.countersInRedis():
+		legacy, err := loadRuleSetFrom(p.store)
+		if err != nil || len(legacy.Rules) == 0 {
+			return
+		}
+		log.Printf("%s: moving %d rules from the Redis counter store to the rule store", PluginName, len(legacy.Rules))
+		rs.Rules = legacy.Rules
+		if err := p.saveRuleSetToKV(rs); err != nil {
+			log.Printf("%s: could not move the rules: %v", PluginName, err)
+			return
+		}
+		p.dropCounterStoreRules()
+		p.invalidateRulesCache()
+	}
+}
+
+// countersInRedis reports whether the counters are in Redis, that is, in a
+// store other than the plugin's KV, where the rule store is. It goes by the
+// store Initialize actually opened, not by the storage_backend setting: with
+// "redis" configured and no redis_url, or a Redis that could not be reached,
+// the counters are in the plugin's KV, and deleting "the Redis copy" there
+// would delete the rule store's own rules.
+func (p *RateLimiterPlugin) countersInRedis() bool {
+	return p.rulesStore != nil && p.store != nil && p.countersSeparate
+}
+
+// dropCounterStoreRules deletes the rule set a 1.2.x plugin kept in Redis.
+// It is called only once the rule store holds the rules. On the kv backend
+// the counter store is the plugin's KV, the rule store itself, and nothing
+// is deleted.
+func (p *RateLimiterPlugin) dropCounterStoreRules() {
+	if !p.countersInRedis() {
+		return
+	}
+	ctx := context.Background()
+	if _, err := p.store.Get(ctx, rulesKVKey); err != nil {
+		return // none there (or unreadable: left alone)
+	}
+	if err := p.store.Delete(ctx, rulesKVKey); err != nil {
+		log.Printf("%s: could not delete the rule set left in Redis by an earlier version: %v", PluginName, err)
+		return
+	}
+	log.Printf("%s: deleted the rule set an earlier version left in Redis; the rules are kept in the plugin's own storage", PluginName)
 }
 
 // loadRulesFromKV is a convenience that returns just the rules slice.

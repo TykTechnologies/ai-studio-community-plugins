@@ -73,6 +73,20 @@ With `fail_open: true` the request is allowed and the response carries `X-RateLi
 
 The Redis backend decodes counters in Lua scripts, and a corrupt value fails the script, so both backends behave the same way.
 
+## Where rules are kept
+
+Rules are edited on the Rules page in AI Studio and kept in the plugin's own storage there, whatever `storage_backend` counts the requests: switching between `kv` and `redis` does not change which rules exist. Every rule change also writes the whole rule set into the plugin's configuration (only its `rules` key; the other settings are left as stored), and that copy is what a configuration push sends to the gateways.
+
+When the plugin starts in AI Studio it makes the two agree, so the Rules page always shows what gateways enforce:
+
+- the configuration has rules: the page shows those, and the next edit starts from them;
+- the configuration has none, but the plugin's storage has (for example a configuration saved without its `rules`): the configuration gets them back;
+- neither has any, and a 1.2.x plugin on the Redis backend kept its rules in Redis: they are moved.
+
+The copy a 1.2.x plugin left in Redis is deleted once the plugin's own storage holds the rules, so rules deleted later cannot come back from it.
+
+Before 1.2.2 the rules were read from the counter store, so a backend switch hid them and the next rule saved from the page replaced the others.
+
 ## Editing rules
 
 Every rule change is checked against the rule set's version. If two administrators save changes based on the same version, the first save wins and the second gets a version-conflict error, so it can reload and retry. Saves are serialised within the plugin process, because the KV store has no compare-and-swap.

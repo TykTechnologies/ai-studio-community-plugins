@@ -37,14 +37,20 @@ const (
 // RateLimiterPlugin implements sliding-window rate limiting with composable dimensions.
 type RateLimiterPlugin struct {
 	plugin_sdk.BasePlugin
-	pluginID    uint32
-	config      *Config
-	store       Store
-	mu          sync.RWMutex
-	rulesSaveMu sync.Mutex                   // serialises saveRuleSetToKV's version check and write
-	stripeLocks [stripedLockCount]sync.Mutex // bounded lock pool
-	rulesCache  *RuleSet
-	rulesTTL    time.Time
+	pluginID uint32
+	config   *Config
+	store    Store
+	// rulesStore holds the rule set: always the plugin's KV, never the
+	// counter store (see ruleStore). Nil in tests that use one store for both.
+	rulesStore Store
+	// countersSeparate is true when store is Redis and not the plugin's KV
+	// (set where Initialize opens it; see countersInRedis).
+	countersSeparate bool
+	mu               sync.RWMutex
+	rulesSaveMu      sync.Mutex                   // serialises saveRuleSetToKV's version check and write
+	stripeLocks      [stripedLockCount]sync.Mutex // bounded lock pool
+	rulesCache       *RuleSet
+	rulesTTL         time.Time
 
 	// inflight holds the concurrent slots of requests whose response phase
 	// has not run yet (see inflight.go).
@@ -76,7 +82,10 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 
 	p.config = ParseConfig(config)
 
-	// Initialize storage backend
+	// Initialize storage backend. countersSeparate is decided afresh: a
+	// plugin served over grpc:// is initialized again in the same process,
+	// and after a switch from redis to kv the counters are in the plugin's KV.
+	p.countersSeparate = false
 	if p.config.StorageBackend == "redis" && p.config.RedisURL != "" {
 		store, err := newRedisStore(p.config.RedisURL, p.config.RedisPassword)
 		if err != nil {
@@ -85,11 +94,15 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 			p.config.StorageBackend = "kv"
 		} else {
 			p.store = store
+			p.countersSeparate = true
 			log.Printf("%s: using Redis backend", PluginName)
 		}
 	} else {
 		p.store = newKVStore(ctx.Services.KV())
 	}
+	// The rules do not live in the counter store: a backend switch must not
+	// hide them.
+	p.rulesStore = newKVStore(ctx.Services.KV())
 
 	// Seed rules from config (these come from the config snapshot on gateways,
 	// or from the persisted config on Studio). This ensures gateway instances
@@ -107,13 +120,11 @@ func (p *RateLimiterPlugin) Initialize(ctx plugin_sdk.Context, config map[string
 			p.rulesTTL = time.Now().Add(30 * time.Second)
 		}
 		p.mu.Unlock()
-	} else if ctx.Runtime == plugin_sdk.RuntimeStudio {
-		// On Studio, rules may exist in KV from before config sync was added.
-		// Sync them to plugin config so they propagate to gateways.
-		if rules, err := p.loadRulesFromKV(); err == nil && len(rules) > 0 {
-			log.Printf("%s: found %d rules in KV but not in config, syncing to config", PluginName, len(rules))
-			p.syncRulesToConfig(rules)
-		}
+	}
+	if ctx.Runtime == plugin_sdk.RuntimeStudio {
+		// Make the rule store and the stored configuration agree, so the
+		// Rules page shows what gateways enforce (reconcileRules).
+		p.reconcileRules()
 	}
 
 	log.Printf("%s: initialized (runtime=%s, backend=%s, window=%ds, fail_open=%v)",
