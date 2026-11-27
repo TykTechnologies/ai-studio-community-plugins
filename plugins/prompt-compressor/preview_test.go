@@ -329,4 +329,10 @@ func TestPreviewUsesTheSavedPolicies(t *testing.T) {
 	if got := names(); !reflect.DeepEqual(got, []string{"default"}) {
 		t.Errorf("fallback: %v", got)
 	}
+	var opts struct {
+		Saved *bool `json:"saved_policies"`
+	}
+	if err := callRPC(t, p, "getPreviewOptions", nil, &opts); err != nil || opts.Saved == nil || *opts.Saved {
+		t.Errorf("fallback must say the policies are the loaded ones: %v %v", err, opts.Saved)
+	}
 }

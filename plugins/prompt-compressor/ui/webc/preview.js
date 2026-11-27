@@ -336,6 +336,10 @@ class PromptCompressorPreview extends HTMLElement {
   _paintPolicy() {
     const policies = this._options.policies || [];
     const section = h('section', {}, h('h2', {}, 'Policy'));
+    if (this._options.saved_policies === false) {
+      section.appendChild(h('p', { className: 'muted', 'data-testid': 'pc-preview-policies-loaded' },
+        'These are the policies the plugin loaded when it started: the saved configuration could not be read. Policies saved since may be missing.'));
+    }
     section.appendChild(h('div', { className: 'row' },
       h('label', { className: 'field' }, 'Saved policy',
         h('select', {
