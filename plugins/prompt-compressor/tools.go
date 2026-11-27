@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
 	"github.com/TykTechnologies/midsommar/v2/guardrails/segments"
 )
@@ -18,7 +19,9 @@ import (
 // request.
 
 // offeredTool is one tool definition in a request: its name and its
-// definition's size in tokens (UTF-8 bytes / 4 of its JSON).
+// definition's size in tokens, counted like the compressor's reports
+// (compress.Compressor.CountTexts: the model's estimator, calibrated on the
+// definitions), so the dashboard and the preview give one text one count.
 type offeredTool struct {
 	Name   string
 	Tokens int64
@@ -56,8 +59,12 @@ func parseOfferedTools(format string, body []byte) toolsInfo {
 	if err != nil {
 		return toolsInfo{}
 	}
-	return offeredTools(format, doc)
+	return offeredTools(format, "", body, doc)
 }
+
+// toolCounter counts tool definitions. Its memo is its own: tool lists
+// repeat request after request, so a definition is tokenized once.
+var toolCounter = compress.New(compress.Options{MemoBytes: 4 << 20})
 
 // parseBody parses a request body once, for the tool definitions and then
 // the compressor (compress.Input.Doc). The format given here only matters
@@ -69,7 +76,7 @@ func parseBody(body []byte) (*segments.Doc, error) {
 // offeredTools reads the tool definitions of a parsed body in format. Only
 // the tools member is decoded, never the conversation: decoding a whole
 // 250 KB body for it cost about 1 ms on every request.
-func offeredTools(format string, doc *segments.Doc) toolsInfo {
+func offeredTools(format, model string, body []byte, doc *segments.Doc) toolsInfo {
 	var defs []json.RawMessage
 	var names []string
 	add := func(raw json.RawMessage, name string) {
@@ -165,9 +172,14 @@ func offeredTools(format string, doc *segments.Doc) toolsInfo {
 		return toolsInfo{}
 	}
 	info := toolsInfo{Tools: make([]offeredTool, len(defs))}
+	texts := make([]string, len(defs))
+	for i, raw := range defs {
+		texts[i] = string(raw)
+	}
+	counts, _ := toolCounter.CountTexts(format, model, body, texts)
 	h := sha256.New()
 	for i, raw := range defs {
-		n := int64((len(raw) + 3) / 4)
+		n := int64(counts[i])
 		info.Tools[i] = offeredTool{Name: names[i], Tokens: n}
 		info.Tokens += n
 		var c bytes.Buffer

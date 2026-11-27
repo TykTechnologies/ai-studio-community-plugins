@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
@@ -317,7 +319,7 @@ func (p *PromptCompressorPlugin) previewPolicy(req previewRequest) (string, *con
 		pol, _ := cfg.Policy("preview")
 		return "(edited here)", pol, nil
 	}
-	cfg := p.state().config
+	cfg := p.previewConfig()
 	name := req.PolicyName
 	if name == "" {
 		name = cfg.DefaultPolicy
@@ -329,10 +331,39 @@ func (p *PromptCompressorPlugin) previewPolicy(req previewRequest) (string, *con
 	return name, pol, nil
 }
 
+// previewConfig is the configuration the preview offers and runs: the one
+// stored in Studio, which the Policies page saves (o4a.14). Studio does not
+// hand a saved configuration to its own copy of the plugin, so the loaded
+// one (state) would list only the policies there were at start-up. It
+// falls back to the loaded configuration when the stored one cannot be
+// read or is invalid.
+func (p *PromptCompressorPlugin) previewConfig() *config.Config {
+	loaded := p.state().config
+	api, id := p.studioAPI(), p.pluginID.Load()
+	if api == nil || id == 0 {
+		return loaded
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), editorRPCTTL)
+	defer cancel()
+	stored, err := loadStoredConfig(ctx, api, id)
+	if err != nil || len(stored) == 0 {
+		return loaded
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return loaded
+	}
+	cfg, err := config.ParseJSON(raw)
+	if err != nil {
+		return loaded
+	}
+	return cfg
+}
+
 // rpcPreviewOptions answers the preview page: the samples and the saved
 // policies (name, level, hash).
 func (p *PromptCompressorPlugin) rpcPreviewOptions() ([]byte, error) {
-	cfg := p.state().config
+	cfg := p.previewConfig()
 	type policyOption struct {
 		Name   string         `json:"name"`
 		Level  int            `json:"level"`
@@ -346,6 +377,7 @@ func (p *PromptCompressorPlugin) rpcPreviewOptions() ([]byte, error) {
 			names = append(names, n)
 		}
 	}
+	sort.Strings(names[1:])
 	for _, n := range names {
 		if pol, ok := cfg.Policy(n); ok {
 			policies = append(policies, policyOption{Name: n, Level: pol.Level, Hash: pol.ShortHash(), Policy: pol})

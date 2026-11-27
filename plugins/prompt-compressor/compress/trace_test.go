@@ -126,3 +126,48 @@ func TestDetectors(t *testing.T) {
 		t.Errorf("prose: %v", got)
 	}
 }
+
+// o4a.15: the preview's per-unit size is the report's estimator, not the
+// selection's bytes/4, so one text has one token count on every page.
+// Tokens stays the size selection compares with min_unit_tokens.
+func TestTraceEstimatedTokens(t *testing.T) {
+	noisy := strings.Repeat("\u001b[32mok\u001b[0m line   \n\n\n", 200)
+	body, _ := json.Marshal(map[string]any{"model": "gpt-4o", "messages": []any{
+		map[string]any{"role": "user", "content": "short question"},
+		map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "c1", "type": "function", "function": map[string]any{"name": "shell", "arguments": "{}"}}}},
+		map[string]any{"role": "tool", "tool_call_id": "c1", "content": noisy},
+	}})
+	p := config.DefaultPolicy()
+	p.Level = 2
+	_, rep := New(Options{}).Compress(Input{Format: "openai", Body: body, Policy: p, Trace: true})
+	if rep.Estimator != EstimatorO200k {
+		t.Fatalf("estimator %q", rep.Estimator)
+	}
+	var changed, user *UnitTrace
+	for i := range rep.Units {
+		switch u := &rep.Units[i]; {
+		case u.Changed:
+			changed = u
+		case u.Role == "user":
+			user = u
+		}
+	}
+	if changed == nil || user == nil {
+		t.Fatalf("units %+v", rep.Units)
+	}
+	if changed.EstimatedTokens != changed.TokensBefore || changed.EstimatedTokens == changed.Tokens {
+		t.Errorf("changed unit: estimated %d, tokens_before %d, selection size %d", changed.EstimatedTokens, changed.TokensBefore, changed.Tokens)
+	}
+	if user.Tokens != (len("short question")+3)/4 || user.EstimatedTokens <= 0 {
+		t.Errorf("unselected unit: %+v", *user)
+	}
+
+	// Nothing selected: still every unit's estimate, calibrated on the units.
+	p.MinUnitTokens = 1 << 20
+	_, none := New(Options{}).Compress(Input{Format: "openai", Body: body, Policy: p, Trace: true})
+	for _, u := range none.Units {
+		if u.Selected || u.EstimatedTokens <= 0 {
+			t.Errorf("nothing selected: %+v", u)
+		}
+	}
+}

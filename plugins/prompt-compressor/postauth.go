@@ -123,7 +123,7 @@ func (p *PromptCompressorPlugin) HandlePostAuth(ctx plugin_sdk.Context, req *pb.
 	if held {
 		if d, err := parseBody(r.GetBody()); err == nil {
 			doc = d
-			tools = offeredTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), d)
+			tools = offeredTools(requestformat.For(ctx.Vendor, r.GetMethod(), r.GetPath(), ""), plugin_sdk.RequestModel(ctx.Vendor, r.GetPath(), nil), r.GetBody(), d)
 		}
 	}
 

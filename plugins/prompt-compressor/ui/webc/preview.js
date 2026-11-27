@@ -27,6 +27,13 @@ const SKIP_REASONS = {
   below_min_tokens: 'smaller than min_unit_tokens',
   cached: 'before the last cache breakpoint (cache_mode skip_cached)',
 };
+// estimatorLabel names the estimator a report's token counts come from, the
+// same one the savings dashboard's figures use.
+const estimatorLabel = (name) => {
+  if (name === 'o200k_base' || name === 'cl100k_base') return `tiktoken ${name}`;
+  if (name === 'chars') return 'a characters-per-token ratio';
+  return name || 'estimate';
+};
 const TOOL_REASONS = {
   dropped: 'On the drop list',
   not_listed: 'Not on the drop list',
@@ -356,7 +363,7 @@ class PromptCompressorPreview extends HTMLElement {
       ['Outcome', rep.outcome + (rep.reason ? ` (${rep.reason})` : '')],
       ['Format', r.format],
       ['Policy', `${r.policy_name}, level ${r.level}, ${String(r.policy_hash || '').slice(0, 12)}`],
-      ['Tokens (estimate)', `${fmtInt(rep.tokens_before)} → ${fmtInt(rep.tokens_after)} in changed text, ${fmtInt(saved)} saved (${rep.estimator || ''})`],
+      ['Tokens (estimate)', `${fmtInt(rep.tokens_before)} → ${fmtInt(rep.tokens_after)} in changed text, ${fmtInt(saved)} saved (${estimatorLabel(rep.estimator)}; the vendor's own count can differ)`],
       ['Body bytes', `${fmtInt(rep.bytes_before)} → ${fmtInt(rep.bytes_after)}`],
       ['Units', `${fmtInt(rep.units_seen)} seen, ${fmtInt(rep.units_selected)} selected, ${fmtInt(rep.units_compressed)} changed`],
       ['Post-check', r.post_check],
@@ -403,12 +410,15 @@ class PromptCompressorPreview extends HTMLElement {
       return section;
     }
     const table = h('table', { 'data-testid': 'pc-preview-units' },
-      h('thead', {}, h('tr', {}, ['#', 'Role / kind', 'Tool', 'Turn', 'Tokens', 'Decision', 'Strategies', 'Saved'].map((c, i) => h('th', { className: [4, 7].includes(i) ? 'num' : '' }, c)))));
+      h('thead', {}, h('tr', {}, ['#', 'Role / kind', 'Tool', 'Turn', 'Tokens (estimate)', 'Decision', 'Strategies', 'Saved'].map((c, i) => h('th', { className: [4, 7].includes(i) ? 'num' : '' }, c)))));
     const body = h('tbody');
     for (const u of units) {
       const decision = [];
       if (!u.selected) {
         decision.push(h('div', {}, h('strong', {}, 'Skipped: '), SKIP_REASONS[u.reason] || u.reason || ''));
+        // Policy sizes (min_unit_tokens and the budgets) are measured as
+        // UTF-8 bytes / 4, so the decision depends only on the text.
+        if (u.reason === 'below_min_tokens') decision.push(h('div', { className: 'muted' }, `Size ${fmtInt(u.tokens)} (policy sizes are UTF-8 bytes / 4)`));
       } else {
         decision.push(h('div', {}, h('strong', {}, `Level ${u.level}`), u.changed ? ', changed' : ', nothing to remove'));
         for (const c of u.capped || []) decision.push(h('div', { className: 'muted' }, 'Capped: ', CAP_REASONS[c] || c));
@@ -423,7 +433,7 @@ class PromptCompressorPreview extends HTMLElement {
         h('td', {}, `${u.role} / ${u.kind}`),
         h('td', {}, u.tool_name || ''),
         h('td', {}, String(u.turn)),
-        h('td', { className: 'num' }, fmtInt(u.tokens)),
+        h('td', { className: 'num' }, fmtInt(u.estimated_tokens ?? u.tokens)),
         h('td', {}, decision),
         h('td', {}, (u.strategies || []).map((s) => h('code', { className: 'chip' }, s))),
         h('td', { className: 'num' }, u.changed ? fmtInt((u.tokens_before || 0) - (u.tokens_after || 0)) : '')));

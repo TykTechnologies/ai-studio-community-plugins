@@ -17,8 +17,12 @@ type UnitTrace struct {
 	Kind     string `json:"kind"`
 	ToolName string `json:"tool_name,omitempty"`
 	Turn     int    `json:"turn"`
-	// Tokens is the size selection compares with min_unit_tokens.
+	// Tokens is the size selection compares with min_unit_tokens: UTF-8
+	// bytes over four, so selection depends only on the text (R1).
 	Tokens int `json:"tokens"`
+	// EstimatedTokens is the unit's size with the estimator the report's
+	// figures use (Report.Estimator), the number the preview shows.
+	EstimatedTokens int `json:"estimated_tokens"`
 
 	Selected bool `json:"selected"`
 	// Reason says why an unselected unit was left alone (Trace*).
