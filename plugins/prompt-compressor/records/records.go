@@ -90,8 +90,9 @@ type Request struct {
 	Streaming        bool
 
 	// Tool definitions the request offered (eac.39): names and sizes only,
-	// never schemas or descriptions. ToolDefTokens is their size in tokens
-	// (UTF-8 bytes / 4); ToolListHash identifies the list version.
+	// never schemas or descriptions. ToolDefTokens is their size in tokens,
+	// estimated like the compressor's counts (the model's tokenizer or
+	// ratio, calibrated); ToolListHash identifies the list version.
 	ToolDefs      int
 	ToolDefTokens int64
 	ToolListHash  string

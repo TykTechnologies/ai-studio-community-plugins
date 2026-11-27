@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/records"
 	pb "github.com/TykTechnologies/midsommar/v2/proto"
 )
@@ -152,5 +153,28 @@ func TestParseCalledToolsStreaming(t *testing.T) {
 		if got := parseStreamCalledTools([]byte(tc.stream)); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// o4a.15: tool-definition sizes use the compressor's estimator (the one
+// the saved-token figures and the preview use), not bytes / 4.
+func TestOfferedToolsUseTheCompressorEstimator(t *testing.T) {
+	def := `{"name":"read_file","description":"Read a file from the workspace and return its contents as UTF-8 text.","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}`
+	info := parseOfferedTools("anthropic", []byte(`{"model":"claude-sonnet-5","tools":[`+def+`]}`))
+	if len(info.Tools) != 1 {
+		t.Fatalf("tools %+v", info.Tools)
+	}
+	// Anthropic: a characters-per-token ratio of 3.5, as in the reports.
+	want := int64(float64(len([]rune(def)))/3.5 + 0.5)
+	if info.Tools[0].Tokens != want || want == int64((len(def)+3)/4) {
+		t.Errorf("tokens %d, want %d (bytes/4 is %d)", info.Tools[0].Tokens, want, (len(def)+3)/4)
+	}
+
+	openai := `{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}`
+	body := `{"model":"gpt-4o","messages":[],"tools":[` + openai + `]}`
+	got := parseOfferedTools("openai", []byte(body))
+	counts, name := toolCounter.CountTexts("openai", "", []byte(body), []string{openai})
+	if name != compress.EstimatorO200k || len(got.Tools) != 1 || got.Tools[0].Tokens != int64(counts[0]) {
+		t.Errorf("openai: %+v, want %d by %s", got.Tools, counts[0], name)
 	}
 }

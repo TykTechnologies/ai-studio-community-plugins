@@ -247,7 +247,7 @@ class PromptCompressorDashboard extends HTMLElement {
     if (v.overflow_excluded > 0) {
       page.appendChild(h('p', { className: 'muted' }, `${fmtInt(v.overflow_excluded)} requests in overflow rows cannot be attributed to an App or LLM and are left out of this filter.`));
     }
-    page.appendChild(h('p', { className: 'muted' }, 'Token counts are estimates (tiktoken for OpenAI models, a per-vendor ratio otherwise). Updated every minute.'));
+    page.appendChild(h('p', { className: 'muted' }, 'Saved and tool-definition tokens are estimates (tiktoken for OpenAI models, a per-vendor characters-per-token ratio otherwise), the same estimator as the Preview. Prompt and cache-read tokens are the vendor\'s own counts. Updated every minute.'));
   }
 
   _paintControls() {
@@ -511,7 +511,7 @@ class PromptCompressorDashboard extends HTMLElement {
       return section;
     }
     const table = h('table', { 'data-testid': 'pc-tools-table' },
-      h('thead', {}, h('tr', {}, ['App', 'Requests with tools', 'Definition tokens sent', 'Share of prompt tokens', 'Tool lists', 'Never called', 'Estimated saving', 'Dropped by policy']
+      h('thead', {}, h('tr', {}, ['App', 'Requests with tools', 'Definition tokens sent (estimate)', 'Share of prompt tokens', 'Tool lists', 'Never called', 'Estimated saving', 'Dropped by policy']
         .map((c, i) => h('th', { className: i ? 'num' : '' }, c)))));
     const body = h('tbody');
     for (const a of apps) {

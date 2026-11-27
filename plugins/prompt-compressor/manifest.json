@@ -1,6 +1,6 @@
 {
   "id": "com.tyk.prompt-compressor",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "name": "Prompt Compressor",
   "description": "Shrinks LLM request bodies on the Microgateway before they reach the vendor, starting with tool outputs. Output is deterministic per policy so the provider's prompt cache keeps hitting, savings are measured next to the cache-read share, and every failure passes the request through unchanged.",
   "capabilities": {
@@ -23,7 +23,7 @@
           {
             "type": "route",
             "path": "/admin/prompt-compressor/dashboard",
-            "title": "Dashboard",
+            "title": "Savings",
             "mount": {
               "kind": "webc",
               "tag": "prompt-compressor-dashboard",

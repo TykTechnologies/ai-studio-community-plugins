@@ -200,6 +200,23 @@ func (c *Compressor) countTokens(est *Estimator, text string) int {
 	return n
 }
 
+// CountTexts counts texts the way the compressor's reports count tokens:
+// with the estimator for format and the request's model (EstimatorFor),
+// calibrated on the texts themselves, and memoised; model is read from body
+// when empty, as Compress does. Tool-definition sizes
+// use it, so the dashboard and the preview give one text one count. It
+// returns the estimator's name.
+func (c *Compressor) CountTexts(format, model string, body []byte, texts []string) ([]int, string) {
+	est := EstimatorFor(format, modelOf(Input{Model: model, Body: body}))
+	name := est.Name()
+	est = est.calibrated(func(t string) int { return c.countTokens(est, t) }, texts)
+	out := make([]int, len(texts))
+	for i, t := range texts {
+		out[i] = c.countTokens(est, t)
+	}
+	return out, name
+}
+
 // Compress returns the compressed body and a report. On any outcome but
 // OutcomeCompressed the body returned is in.Body itself.
 func (c *Compressor) Compress(in Input) ([]byte, Report) {
@@ -248,6 +265,25 @@ func (c *Compressor) Compress(in Input) ([]byte, Report) {
 		}
 	}
 	est = est.calibrated(func(t string) int { return c.countTokens(est, t) }, sample)
+	if in.Trace {
+		// The preview shows every unit's size with the estimator the
+		// report's figures use (selection's bytes/4 stays in Tokens). With
+		// nothing selected there is no calibration sample: calibrate on
+		// the units, so a large body is never run through the tokenizer.
+		tr := est
+		if len(sample) == 0 {
+			texts := make([]string, len(units))
+			for i, u := range units {
+				texts[i] = u.Text
+			}
+			tr = est.calibrated(func(t string) int { return c.countTokens(est, t) }, texts)
+		}
+		for i := range rep.Units {
+			if j := rep.Units[i].Index; j >= 0 && j < len(units) {
+				rep.Units[i].EstimatedTokens = c.countTokens(tr, units[j].Text)
+			}
+		}
+	}
 
 	edits, fixed := c.edit(p, rep.PolicyHash, sel, est, &rep)
 	if in.Engine != nil && p.Engine != nil {

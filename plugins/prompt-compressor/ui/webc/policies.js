@@ -181,7 +181,7 @@ class PromptCompressorPolicies extends HTMLElement {
       this._setErrors(['Validation failed: ' + error.message]);
       return;
     }
-    if (!window.confirm(CACHE_WARNING)) return;
+    if (!(await this._confirm('Save the configuration?', CACHE_WARNING, 'Save'))) return;
 
     this._busy = true;
     this._paint();
@@ -202,6 +202,45 @@ class PromptCompressorPolicies extends HTMLElement {
       this._busy = false;
       this._setErrors(['Save failed: ' + error.message]);
     }
+  }
+
+  // _confirm asks in a modal dialog on the page. The browser's confirm()
+  // blocks the page, looks unlike the rest of Studio, and stops scripted
+  // browsers (Playwright, browser tools) until something answers it.
+  // Resolves true for the confirm button; Cancel, Escape and a repaint that
+  // removes the dialog resolve false.
+  _confirm(title, message, confirmLabel) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let watch = null;
+      const done = (ok) => {
+        if (settled) return;
+        settled = true;
+        if (watch) watch.disconnect();
+        if (dialog.open && typeof dialog.close === 'function') dialog.close();
+        dialog.remove();
+        resolve(ok);
+      };
+      const ok = h('button', { className: 'primary', type: 'button', 'data-testid': 'pc-confirm-ok', onClick: () => done(true) }, confirmLabel);
+      const dialog = h('dialog', { className: 'confirm', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pc-confirm-title', 'aria-describedby': 'pc-confirm-message', 'data-testid': 'pc-confirm' },
+        h('h2', { id: 'pc-confirm-title' }, title),
+        h('p', { id: 'pc-confirm-message' }, message),
+        h('div', { className: 'actions' },
+          ok,
+          h('button', { type: 'button', 'data-testid': 'pc-confirm-cancel', onClick: () => done(false) }, 'Cancel')));
+      // Escape closes a modal dialog with a cancel event.
+      dialog.addEventListener('cancel', (e) => { e.preventDefault(); done(false); });
+      dialog.addEventListener('close', () => done(false));
+      this.shadowRoot.appendChild(dialog);
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+      ok.focus();
+      // A repaint clears the shadow root; a removed dialog is a no.
+      watch = new MutationObserver(() => {
+        if (!dialog.isConnected) done(false);
+      });
+      watch.observe(this.shadowRoot, { childList: true });
+    });
   }
 
   // ---- policy form ----
@@ -849,6 +888,9 @@ const STYLES = `
   .suggest { margin-top: 8px; }
   .suggest-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
   .suggest-app { font-size: 12px; color: #374151; margin-right: 4px; }
+  dialog.confirm { border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; max-width: 480px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+  dialog.confirm::backdrop { background: rgba(17, 24, 39, 0.4); }
+  dialog.confirm p { font-size: 14px; color: #374151; margin: 0 0 16px; }
   button.chip { padding: 1px 8px; font-size: 12px; border-radius: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 `;
 

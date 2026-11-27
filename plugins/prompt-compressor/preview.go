@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/TykTechnologies/midsommar/community/plugins/prompt-compressor/compress"
@@ -317,7 +319,7 @@ func (p *PromptCompressorPlugin) previewPolicy(req previewRequest) (string, *con
 		pol, _ := cfg.Policy("preview")
 		return "(edited here)", pol, nil
 	}
-	cfg := p.state().config
+	cfg, _ := p.previewConfig()
 	name := req.PolicyName
 	if name == "" {
 		name = cfg.DefaultPolicy
@@ -329,10 +331,43 @@ func (p *PromptCompressorPlugin) previewPolicy(req previewRequest) (string, *con
 	return name, pol, nil
 }
 
+// previewConfig is the configuration the preview offers and runs: the one
+// stored in Studio, which the Policies page saves (o4a.14). Studio does not
+// hand a saved configuration to its own copy of the plugin, so the loaded
+// one (state) would list only the policies there were at start-up. It falls
+// back to the loaded configuration, logging why, when the stored one cannot
+// be read or is invalid; saved reports which one it returned.
+func (p *PromptCompressorPlugin) previewConfig() (cfg *config.Config, saved bool) {
+	loaded := p.state().config
+	api, id := p.studioAPI(), p.pluginID.Load()
+	if api == nil || id == 0 {
+		return loaded, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), editorRPCTTL)
+	defer cancel()
+	stored, err := loadStoredConfig(ctx, api, id)
+	if err != nil {
+		p.logger().Warn("Preview uses the loaded configuration: the saved one could not be read", "error", err.Error())
+		return loaded, false
+	}
+	if len(stored) == 0 {
+		return loaded, false
+	}
+	raw, err := json.Marshal(stored)
+	if err == nil {
+		cfg, err = config.ParseJSON(raw)
+	}
+	if err != nil {
+		p.logger().Warn("Preview uses the loaded configuration: the saved one is invalid", "error", err.Error())
+		return loaded, false
+	}
+	return cfg, true
+}
+
 // rpcPreviewOptions answers the preview page: the samples and the saved
 // policies (name, level, hash).
 func (p *PromptCompressorPlugin) rpcPreviewOptions() ([]byte, error) {
-	cfg := p.state().config
+	cfg, saved := p.previewConfig()
 	type policyOption struct {
 		Name   string         `json:"name"`
 		Level  int            `json:"level"`
@@ -346,6 +381,7 @@ func (p *PromptCompressorPlugin) rpcPreviewOptions() ([]byte, error) {
 			names = append(names, n)
 		}
 	}
+	sort.Strings(names[1:])
 	for _, n := range names {
 		if pol, ok := cfg.Policy(n); ok {
 			policies = append(policies, policyOption{Name: n, Level: pol.Level, Hash: pol.ShortHash(), Policy: pol})
@@ -357,5 +393,8 @@ func (p *PromptCompressorPlugin) rpcPreviewOptions() ([]byte, error) {
 		"default_policy": cfg.DefaultPolicy,
 		"formats":        []string{"openai", "anthropic", requestformat.OpenAIResponses},
 		"max_bytes":      maxPreviewBytes,
+		// saved_policies is false when the saved configuration could not be
+		// read and the policies are the ones loaded at start-up.
+		"saved_policies": saved,
 	})
 }

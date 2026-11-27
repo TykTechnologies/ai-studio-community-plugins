@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,6 +20,8 @@ func previewPlugin(t *testing.T) (*PromptCompressorPlugin, *memKV) {
 	t.Helper()
 	kv := &memKV{data: map[string][]byte{}}
 	p := NewPromptCompressorPlugin()
+	// No stored config: the preview uses the loaded one (previewConfig).
+	p.testStudio = &fakeStudio{}
 	ctx := plugin_sdk.Context{Runtime: plugin_sdk.RuntimeStudio, Services: &telemetryBroker{kv: kv}}
 	if err := p.Initialize(ctx, hostConfig(t, previewConfig)); err != nil {
 		t.Fatal(err)
@@ -270,3 +273,66 @@ FAILED tests/test_ledger.py::test_ledger_balances_after_refund - AssertionError
 FAILED tests/test_reports.py::test_monthly_report_totals - assert 4401 == 4410
 ======================== 2 failed, 212 passed in 9.81s =========================
 `
+
+// o4a.14: the preview lists and runs the policies saved in Studio, not only
+// those the plugin loaded at start-up (Studio does not hand a saved
+// configuration to its own copy of the plugin).
+func TestPreviewUsesTheSavedPolicies(t *testing.T) {
+	studio := &fakeStudio{stored: `{"mode":"audit","default_policy":"default","policies":{"default":{"level":1}}}`}
+	p := editorPlugin(t, studio)
+
+	names := func() []string {
+		var opts struct {
+			Policies []struct {
+				Name string `json:"name"`
+			} `json:"policies"`
+		}
+		if err := callRPC(t, p, "getPreviewOptions", nil, &opts); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, o := range opts.Policies {
+			out = append(out, o.Name)
+		}
+		return out
+	}
+	if got := names(); !reflect.DeepEqual(got, []string{"default"}) {
+		t.Fatalf("before the save: %v", got)
+	}
+
+	var saved struct {
+		Saved  bool     `json:"saved"`
+		Errors []string `json:"errors"`
+	}
+	cfg := map[string]interface{}{"mode": "audit", "default_policy": "default", "policies": map[string]interface{}{
+		"default": map[string]interface{}{"level": 1},
+		"zeta":    map[string]interface{}{"level": 2},
+		"agents":  map[string]interface{}{"level": 2, "min_unit_tokens": 400},
+	}}
+	if err := callRPC(t, p, "saveConfig", map[string]interface{}{"config": cfg}, &saved); err != nil || !saved.Saved {
+		t.Fatalf("save: %v %+v", err, saved)
+	}
+	if got := names(); !reflect.DeepEqual(got, []string{"default", "agents", "zeta"}) {
+		t.Errorf("after the save: %v", got)
+	}
+
+	// Previewing with a newly saved policy runs it.
+	res := runPreview(t, p, map[string]interface{}{"mode": "tool_output", "format": "openai", "tool_name": "bash", "text": previewPytest, "policy_name": "agents"})
+	if res.PolicyName != "agents" || res.Level != 2 {
+		t.Errorf("preview with the saved policy: %s level %d", res.PolicyName, res.Level)
+	}
+
+	// An unreadable stored config falls back to the loaded one.
+	studio.mu.Lock()
+	studio.stored = "not json"
+	studio.mu.Unlock()
+	if got := names(); !reflect.DeepEqual(got, []string{"default"}) {
+		t.Errorf("fallback: %v", got)
+	}
+	var opts struct {
+		Saved *bool `json:"saved_policies"`
+	}
+	if err := callRPC(t, p, "getPreviewOptions", nil, &opts); err != nil || opts.Saved == nil || *opts.Saved {
+		t.Errorf("fallback must say the policies are the loaded ones: %v %v", err, opts.Saved)
+	}
+}
